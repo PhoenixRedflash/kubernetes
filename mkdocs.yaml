@@ -1,0 +1,8 @@
+site_name: kubernetes
+site_description:  kubernetes 
+
+nav:
+  - Introduction: index.md
+
+plugins:
+  - techdocs-core
