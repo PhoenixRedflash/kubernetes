@@ -1,5 +1,5 @@
 site_name: kubernetes
-site_description:  kubernetes 
+site_description:  Production-Grade Container Scheduling and Management.
 
 nav:
   - Introduction: index.md
