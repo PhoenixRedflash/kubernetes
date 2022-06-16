@@ -23,9 +23,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -83,7 +85,7 @@ func getNodeSummary() (*stats.Summary, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current kubelet config")
 	}
-	req, err := http.NewRequest("GET", fmt.Sprintf("http://%s:%d/stats/summary", kubeletConfig.Address, kubeletConfig.ReadOnlyPort), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("http://%s/stats/summary", net.JoinHostPort(kubeletConfig.Address, strconv.Itoa(int(kubeletConfig.ReadOnlyPort)))), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build http request: %v", err)
 	}
@@ -250,6 +252,19 @@ func getLocalNode(f *framework.Framework) *v1.Node {
 	framework.ExpectNoError(err)
 	framework.ExpectEqual(len(nodeList.Items), 1, "Unexpected number of node objects for node e2e. Expects only one node.")
 	return &nodeList.Items[0]
+}
+
+// getLocalTestNode fetches the node object describing the local worker node set up by the e2e_node infra, alongside with its ready state.
+// getLocalTestNode is a variant of `getLocalNode` which reports but does not set any requirement about the node readiness state, letting
+// the caller decide. The check is intentionally done like `getLocalNode` does.
+// Note `getLocalNode` aborts (as in ginkgo.Expect) the test implicitly if the worker node is not ready.
+func getLocalTestNode(f *framework.Framework) (*v1.Node, bool) {
+	node, err := f.ClientSet.CoreV1().Nodes().Get(context.TODO(), framework.TestContext.NodeName, metav1.GetOptions{})
+	framework.ExpectNoError(err)
+	ready := e2enode.IsNodeReady(node)
+	schedulable := e2enode.IsNodeSchedulable(node)
+	framework.Logf("node %q ready=%v schedulable=%v", node.Name, ready, schedulable)
+	return node, ready && schedulable
 }
 
 // logKubeletLatencyMetrics logs KubeletLatencyMetrics computed from the Prometheus
