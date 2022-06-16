@@ -1,0 +1,18 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: kubernetes
+  description: 
+    Kubernetes
+  links:
+    - title: Website
+      url: https://kubernetes.io/
+    - title: Documentation
+      url: https://kubernetes.io/docs/home/
+  annotations:
+    github.com/project-slug:  "PhoenixRedflash/kubernetes" 
+    backstage.io/techdocs-ref: dir:.
+spec:
+  type: service
+  owner: "Group:Phoenix"
+  lifecycle: experimental
