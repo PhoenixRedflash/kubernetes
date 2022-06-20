@@ -1,5 +1,5 @@
 version: "1"
 rules:
   - base: master
-    upstream: kubernetes/kubernetes:master   
+    upstream: kubernetes:master   
     mergeMethod: merge
