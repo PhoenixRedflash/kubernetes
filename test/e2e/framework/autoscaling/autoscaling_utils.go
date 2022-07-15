@@ -39,7 +39,7 @@ import (
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 	testutils "k8s.io/kubernetes/test/utils"
 
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 
 	scaleclient "k8s.io/client-go/scale"
 	imageutils "k8s.io/kubernetes/test/utils/image"
@@ -684,7 +684,7 @@ func DeleteContainerResourceHPA(rc *ResourceConsumer, autoscalerName string) {
 	rc.clientSet.AutoscalingV2().HorizontalPodAutoscalers(rc.nsName).Delete(context.TODO(), autoscalerName, metav1.DeleteOptions{})
 }
 
-func CreateCPUHorizontalPodAutoscalerWithBehavior(rc *ResourceConsumer, cpu int32, minReplicas int32, maxRepl int32, behavior *autoscalingv2.HorizontalPodAutoscalerBehavior) *autoscalingv2.HorizontalPodAutoscaler {
+func CreateCPUHorizontalPodAutoscalerWithBehavior(rc *ResourceConsumer, cpu, minReplicas, maxRepl, downscaleStabilizationSeconds int32) *autoscalingv2.HorizontalPodAutoscaler {
 	hpa := &autoscalingv2.HorizontalPodAutoscaler{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      rc.name,
@@ -710,7 +710,11 @@ func CreateCPUHorizontalPodAutoscalerWithBehavior(rc *ResourceConsumer, cpu int3
 					},
 				},
 			},
-			Behavior: behavior,
+			Behavior: &autoscalingv2.HorizontalPodAutoscalerBehavior{
+				ScaleDown: &autoscalingv2.HPAScalingRules{
+					StabilizationWindowSeconds: &downscaleStabilizationSeconds,
+				},
+			},
 		},
 	}
 	hpa, errHPA := rc.clientSet.AutoscalingV2().HorizontalPodAutoscalers(rc.nsName).Create(context.TODO(), hpa, metav1.CreateOptions{})
@@ -720,22 +724,6 @@ func CreateCPUHorizontalPodAutoscalerWithBehavior(rc *ResourceConsumer, cpu int3
 
 func DeleteHPAWithBehavior(rc *ResourceConsumer, autoscalerName string) {
 	rc.clientSet.AutoscalingV2().HorizontalPodAutoscalers(rc.nsName).Delete(context.TODO(), autoscalerName, metav1.DeleteOptions{})
-}
-
-func HPABehaviorWithDownscaleStabilizationSeconds(downscaleStabilizationSeconds int32) *autoscalingv2.HorizontalPodAutoscalerBehavior {
-	return &autoscalingv2.HorizontalPodAutoscalerBehavior{
-		ScaleDown: &autoscalingv2.HPAScalingRules{
-			StabilizationWindowSeconds: &downscaleStabilizationSeconds,
-		},
-	}
-}
-
-func HPABehaviorWithUpscaleStabilizationSeconds(upscaleStabilizationSeconds int32) *autoscalingv2.HorizontalPodAutoscalerBehavior {
-	return &autoscalingv2.HorizontalPodAutoscalerBehavior{
-		ScaleUp: &autoscalingv2.HPAScalingRules{
-			StabilizationWindowSeconds: &upscaleStabilizationSeconds,
-		},
-	}
 }
 
 //SidecarStatusType type for sidecar status

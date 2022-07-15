@@ -1217,7 +1217,6 @@ func TestFindPodVolumesWithCSIMigration(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.CSIMigration, true)()
 		defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.CSIMigrationGCE, true)()
 
 		// Setup
@@ -1530,7 +1529,7 @@ func TestBindAPIUpdate(t *testing.T) {
 		testEnv.assumeVolumes(t, "node1", pod, scenario.bindings, scenario.provisionedPVCs)
 
 		// Execute
-		err := testEnv.internalBinder.bindAPIUpdate(pod, scenario.bindings, scenario.provisionedPVCs)
+		err := testEnv.internalBinder.bindAPIUpdate(ctx, pod, scenario.bindings, scenario.provisionedPVCs)
 
 		// Validate
 		if !scenario.shouldFail && err != nil {
@@ -1843,7 +1842,6 @@ func TestCheckBindingsWithCSIMigration(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.CSIMigration, scenario.migrationEnabled)()
 		defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.CSIMigrationGCE, scenario.migrationEnabled)()
 
 		// Setup
@@ -2087,7 +2085,7 @@ func TestBindPodVolumes(t *testing.T) {
 			StaticBindings:    bindings,
 			DynamicProvisions: claimsToProvision,
 		}
-		err := testEnv.binder.BindPodVolumes(pod, podVolumes)
+		err := testEnv.binder.BindPodVolumes(ctx, pod, podVolumes)
 
 		// Validate
 		if !scenario.shouldFail && err != nil {

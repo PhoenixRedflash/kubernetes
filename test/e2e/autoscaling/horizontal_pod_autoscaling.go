@@ -17,15 +17,14 @@ limitations under the License.
 package autoscaling
 
 import (
-	"time"
-
 	"k8s.io/pod-security-admission/api"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2eautoscaling "k8s.io/kubernetes/test/e2e/framework/autoscaling"
 
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 )
 
 // These tests don't seem to be running properly in parallel: issue: #20338.

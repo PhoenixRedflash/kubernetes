@@ -190,6 +190,13 @@ const (
 	// Allows clients to request a duration for certificates issued via the Kubernetes CSR API.
 	CSRDuration featuregate.Feature = "CSRDuration"
 
+	// owner: @adrianreber
+	// kep: http://kep.k8s.io/2008
+	// alpha: v1.25
+	//
+	// Enables container Checkpoint support in the kubelet
+	ContainerCheckpoint featuregate.Feature = "ContainerCheckpoint"
+
 	// owner: @jiahuif
 	// alpha: v1.21
 	// beta:  v1.22
@@ -545,6 +552,7 @@ const (
 	// kep: http://kep.k8s.io/2079
 	// alpha: v1.21
 	// beta:  v1.22
+	// ga: v1.25
 	//
 	// Enables the endPort field in NetworkPolicy to enable a Port Range behavior in Network Policies.
 	NetworkPolicyEndPort featuregate.Feature = "NetworkPolicyEndPort"
@@ -733,6 +741,7 @@ const (
 	// kep: https://kep.k8s.io/2607
 	// alpha: v1.22
 	// beta: v1.23
+	// GA: v1.25
 	// StatefulSetMinReadySeconds allows minReadySeconds to be respected by StatefulSet controller
 	StatefulSetMinReadySeconds featuregate.Feature = "StatefulSetMinReadySeconds"
 
@@ -819,7 +828,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 
 	CSIInlineVolume: {Default: true, PreRelease: featuregate.Beta},
 
-	CSIMigration: {Default: true, PreRelease: featuregate.Beta},
+	CSIMigration: {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.27
 
 	CSIMigrationAWS: {Default: true, PreRelease: featuregate.Beta},
 
@@ -831,11 +840,11 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 
 	CSIMigrationOpenStack: {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.26
 
-	CSIMigrationPortworx: {Default: false, PreRelease: featuregate.Alpha}, // Off by default (requires Portworx CSI driver)
+	CSIMigrationPortworx: {Default: false, PreRelease: featuregate.Beta}, // Off by default (requires Portworx CSI driver)
 
 	CSIMigrationRBD: {Default: false, PreRelease: featuregate.Alpha}, // Off by default (requires RBD CSI driver)
 
-	CSIMigrationvSphere: {Default: false, PreRelease: featuregate.Beta}, // Off by default (requires vSphere CSI driver)
+	CSIMigrationvSphere: {Default: true, PreRelease: featuregate.Beta},
 
 	CSINodeExpandSecret: {Default: false, PreRelease: featuregate.Alpha},
 
@@ -844,6 +853,8 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 	CSIVolumeHealth: {Default: false, PreRelease: featuregate.Alpha},
 
 	CSRDuration: {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.26
+
+	ContainerCheckpoint: {Default: false, PreRelease: featuregate.Alpha},
 
 	ControllerManagerLeaderMigration: {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.26
 
@@ -917,7 +928,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 
 	JobReadyPods: {Default: true, PreRelease: featuregate.Beta},
 
-	JobTrackingWithFinalizers: {Default: false, PreRelease: featuregate.Beta}, // Disabled due to #109485
+	JobTrackingWithFinalizers: {Default: true, PreRelease: featuregate.Beta},
 
 	KubeletCredentialProviders: {Default: true, PreRelease: featuregate.Beta},
 
@@ -945,7 +956,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 
 	MixedProtocolLBService: {Default: true, PreRelease: featuregate.Beta},
 
-	NetworkPolicyEndPort: {Default: true, PreRelease: featuregate.Beta},
+	NetworkPolicyEndPort: {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.27
 
 	NetworkPolicyStatus: {Default: false, PreRelease: featuregate.Alpha},
 
@@ -981,9 +992,9 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 
 	RotateKubeletServerCertificate: {Default: true, PreRelease: featuregate.Beta},
 
-	SeccompDefault: {Default: false, PreRelease: featuregate.Alpha},
+	SeccompDefault: {Default: true, PreRelease: featuregate.Beta},
 
-	ServiceIPStaticSubrange: {Default: false, PreRelease: featuregate.Beta},
+	ServiceIPStaticSubrange: {Default: true, PreRelease: featuregate.Beta},
 
 	ServiceInternalTrafficPolicy: {Default: true, PreRelease: featuregate.Beta},
 
@@ -995,7 +1006,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 
 	StatefulSetAutoDeletePVC: {Default: false, PreRelease: featuregate.Alpha},
 
-	StatefulSetMinReadySeconds: {Default: true, PreRelease: featuregate.Beta},
+	StatefulSetMinReadySeconds: {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.27
 
 	SuspendJob: {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.26
 
