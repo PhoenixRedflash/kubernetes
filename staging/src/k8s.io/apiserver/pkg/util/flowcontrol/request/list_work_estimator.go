@@ -113,7 +113,7 @@ func (e *listWorkEstimator) estimate(r *http.Request, flowSchemaName, priorityLe
 	// will be processed by the list request.
 	// we will come up with a different formula for the transformation function and/or
 	// fine tune this number in future iteratons.
-	seats := uint(math.Ceil(float64(estimatedObjectsToBeProcessed) / e.config.ObjectsPerSeat))
+	seats := uint64(math.Ceil(float64(estimatedObjectsToBeProcessed) / e.config.ObjectsPerSeat))
 
 	// make sure we never return a seat of zero
 	if seats < e.config.MinimumSeats {
@@ -134,7 +134,8 @@ func key(requestInfo *apirequest.RequestInfo) string {
 }
 
 // NOTICE: Keep in sync with shouldDelegateList function in
-//  staging/src/k8s.io/apiserver/pkg/storage/cacher/cacher.go
+//
+//	staging/src/k8s.io/apiserver/pkg/storage/cacher/cacher.go
 func shouldListFromStorage(query url.Values, opts *metav1.ListOptions) bool {
 	resourceVersion := opts.ResourceVersion
 	pagingEnabled := utilfeature.DefaultFeatureGate.Enabled(features.APIListChunking)

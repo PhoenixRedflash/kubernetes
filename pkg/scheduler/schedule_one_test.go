@@ -1759,7 +1759,7 @@ func TestSchedulerSchedulePod(t *testing.T) {
 						Operator: metav1.LabelSelectorOpExists,
 					},
 				},
-			}, nil, nil, nil).Obj(),
+			}, nil, nil, nil, nil).Obj(),
 			pods: []*v1.Pod{
 				st.MakePod().Name("pod1").UID("pod1").Label("foo", "").Node("node1").Phase(v1.PodRunning).Obj(),
 			},
@@ -1786,7 +1786,7 @@ func TestSchedulerSchedulePod(t *testing.T) {
 						Operator: metav1.LabelSelectorOpExists,
 					},
 				},
-			}, nil, nil, nil).Obj(),
+			}, nil, nil, nil, nil).Obj(),
 			pods: []*v1.Pod{
 				st.MakePod().Name("pod1a").UID("pod1a").Label("foo", "").Node("node1").Phase(v1.PodRunning).Obj(),
 				st.MakePod().Name("pod1b").UID("pod1b").Label("foo", "").Node("node1").Phase(v1.PodRunning).Obj(),
@@ -2204,10 +2204,10 @@ func TestFindFitPredicateCallCounts(t *testing.T) {
 }
 
 // The point of this test is to show that you:
-// - get the same priority for a zero-request pod as for a pod with the defaults requests,
-//   both when the zero-request pod is already on the node and when the zero-request pod
-//   is the one being scheduled.
-// - don't get the same score no matter what we schedule.
+//   - get the same priority for a zero-request pod as for a pod with the defaults requests,
+//     both when the zero-request pod is already on the node and when the zero-request pod
+//     is the one being scheduled.
+//   - don't get the same score no matter what we schedule.
 func TestZeroRequest(t *testing.T) {
 	// A pod with no resources. We expect spreading to count it as having the default resources.
 	noResources := v1.PodSpec{
