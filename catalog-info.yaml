@@ -2,8 +2,7 @@ apiVersion: backstage.io/v1alpha1
 kind: Component
 metadata:
   name: kubernetes
-  description: 
-    Kubernetes
+  description: Kubernetes
   links:
     - title: Website
       url: https://kubernetes.io/
