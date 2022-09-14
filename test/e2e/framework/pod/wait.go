@@ -276,14 +276,15 @@ func WaitForPodCondition(c clientset.Interface, ns, podName, conditionDesc strin
 	if err == nil {
 		return nil
 	}
-	if IsTimeout(err) && lastPod != nil {
-		return TimeoutError(fmt.Sprintf("timed out while waiting for pod %s to be %s", podIdentifier(ns, podName), conditionDesc),
-			lastPod,
-		)
-	}
-	if lastPodError != nil {
-		// If the last API call was an error.
-		err = lastPodError
+	if IsTimeout(err) {
+		if lastPod != nil {
+			return TimeoutError(fmt.Sprintf("timed out while waiting for pod %s to be %s", podIdentifier(ns, podName), conditionDesc),
+				lastPod,
+			)
+		} else if lastPodError != nil {
+			// If the last API call was an error, propagate that instead of the timeout error.
+			err = lastPodError
+		}
 	}
 	return maybeTimeoutError(err, "waiting for pod %s to be %s", podIdentifier(ns, podName), conditionDesc)
 }
@@ -588,7 +589,7 @@ func WaitForPodsWithLabel(c clientset.Interface, ns string, label labels.Selecto
 // Return the list of matching pods.
 func WaitForPodsWithLabelRunningReady(c clientset.Interface, ns string, label labels.Selector, num int, timeout time.Duration) (pods *v1.PodList, err error) {
 	opts := metav1.ListOptions{LabelSelector: label.String()}
-	return WaitForAllPodsCondition(c, ns, opts, 1, "running and ready", podListTimeout, testutils.PodRunningReady)
+	return WaitForAllPodsCondition(c, ns, opts, 1, "running and ready", timeout, testutils.PodRunningReady)
 }
 
 // WaitForNRestartablePods tries to list restarting pods using ps until it finds expect of them,
@@ -713,7 +714,7 @@ func shouldRetry(err error) (retry bool, retryAfter time.Duration) {
 	}
 
 	// these errors indicate a transient error that should be retried.
-	if apierrors.IsInternalError(err) || apierrors.IsTimeout(err) || apierrors.IsTooManyRequests(err) {
+	if apierrors.IsTimeout(err) || apierrors.IsTooManyRequests(err) {
 		return true, 0
 	}
 

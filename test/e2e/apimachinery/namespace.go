@@ -287,7 +287,15 @@ var _ = SIGDescribe("Namespaces [Serial]", func() {
 		framework.ExpectEqual(namespace.ObjectMeta.Labels["testLabel"], "testValue", "namespace not patched")
 	})
 
-	ginkgo.It("should apply changes to a namespace status", func() {
+	/*
+		Release: v1.25
+		Testname: Namespace, apply changes to a namespace status
+		Description: Getting the current namespace status MUST succeed. The reported status
+		phase MUST be active. Given the patching of the namespace status, the fields MUST
+		equal the new values. Given the updating of the namespace status, the fields MUST
+		equal the new values.
+	*/
+	framework.ConformanceIt("should apply changes to a namespace status", func() {
 		ns := f.Namespace.Name
 		dc := f.DynamicClient
 		nsResource := v1.SchemeGroupVersion.WithResource("namespaces")
@@ -346,6 +354,32 @@ var _ = SIGDescribe("Namespaces [Serial]", func() {
 		framework.ExpectEqual(string(statusUpdated.Status.Conditions[len(statusUpdated.Status.Conditions)-1].Type), "StatusUpdate", fmt.Sprintf("updated object should have the approved condition, got %#v", statusUpdated.Status.Conditions))
 		framework.ExpectEqual(statusUpdated.Status.Conditions[len(statusUpdated.Status.Conditions)-1].Message, "Updated by an e2e test", "The Message returned was %v", statusUpdated.Status.Conditions[0].Message)
 		framework.Logf("Status.Condition: %#v", statusUpdated.Status.Conditions[len(statusUpdated.Status.Conditions)-1])
+	})
+
+	/*
+		Release: v1.26
+		Testname: Namespace, apply update to a namespace
+		Description: When updating the namespace it MUST
+		succeed and the field MUST equal the new value.
+	*/
+	framework.ConformanceIt("should apply an update to a Namespace", func() {
+		var err error
+		var updatedNamespace *v1.Namespace
+		ns := f.Namespace.Name
+		cs := f.ClientSet
+
+		ginkgo.By(fmt.Sprintf("Updating Namespace %q", ns))
+		err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			updatedNamespace, err = cs.CoreV1().Namespaces().Get(context.TODO(), ns, metav1.GetOptions{})
+			framework.ExpectNoError(err, "Unable to get Namespace %q", ns)
+
+			updatedNamespace.Labels[ns] = "updated"
+			updatedNamespace, err = cs.CoreV1().Namespaces().Update(context.TODO(), updatedNamespace, metav1.UpdateOptions{})
+			return err
+		})
+		framework.ExpectNoError(err, "failed to update Namespace: %q", ns)
+		framework.ExpectEqual(updatedNamespace.ObjectMeta.Labels[ns], "updated", "Failed to update namespace %q. Current Labels: %#v", ns, updatedNamespace.Labels)
+		framework.Logf("Namespace %q now has labels, %#v", ns, updatedNamespace.Labels)
 	})
 })
 

@@ -31,8 +31,8 @@ limitations under the License.
  * Note that the server containers are for testing purposes only and should not
  * be used in production.
  *
- * 2) With server outside of Kubernetes (Cinder, ...)
- * Appropriate server (e.g. OpenStack Cinder) must exist somewhere outside
+ * 2) With server outside of Kubernetes
+ * Appropriate server must exist somewhere outside
  * the tested Kubernetes cluster. The test itself creates a new volume,
  * and checks, that Kubernetes can use it as a volume.
  */
@@ -606,6 +606,7 @@ func testVolumeClient(f *framework.Framework, config TestConfig, fsGroup *int64,
 	ec := &v1.EphemeralContainer{
 		EphemeralContainerCommon: v1.EphemeralContainerCommon(clientPod.Spec.Containers[0]),
 	}
+	ec.Resources = v1.ResourceRequirements{}
 	ec.Name = "volume-ephemeral-container"
 	err = f.PodClient().AddEphemeralContainerSync(clientPod, ec, timeouts.PodStart)
 	// The API server will return NotFound for the subresource when the feature is disabled

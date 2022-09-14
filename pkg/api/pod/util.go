@@ -517,14 +517,6 @@ func dropDisabledFields(
 		}
 	}
 
-	if !utilfeature.DefaultFeatureGate.Enabled(features.LocalStorageCapacityIsolation) && !emptyDirSizeLimitInUse(oldPodSpec) {
-		for i := range podSpec.Volumes {
-			if podSpec.Volumes[i].EmptyDir != nil {
-				podSpec.Volumes[i].EmptyDir.SizeLimit = nil
-			}
-		}
-	}
-
 	if !utilfeature.DefaultFeatureGate.Enabled(features.ProbeTerminationGracePeriod) && !probeGracePeriodInUse(oldPodSpec) {
 		// Set pod-level terminationGracePeriodSeconds to nil if the feature is disabled and it is not used
 		VisitContainers(podSpec, AllContainers, func(c *api.Container, containerType ContainerType) bool {
@@ -539,9 +531,16 @@ func dropDisabledFields(
 		})
 	}
 
-	dropDisabledProcMountField(podSpec, oldPodSpec)
+	// If the feature is disabled and not in use, drop the hostUsers field.
+	if !utilfeature.DefaultFeatureGate.Enabled(features.UserNamespacesStatelessPodsSupport) && !hostUsersInUse(oldPodSpec) {
+		// Drop the field in podSpec only if SecurityContext is not nil.
+		// If it is nil, there is no need to set hostUsers=nil (it will be nil too).
+		if podSpec.SecurityContext != nil {
+			podSpec.SecurityContext.HostUsers = nil
+		}
+	}
 
-	dropDisabledCSIVolumeSourceAlphaFields(podSpec, oldPodSpec)
+	dropDisabledProcMountField(podSpec, oldPodSpec)
 
 	dropDisabledTopologySpreadConstraintsFields(podSpec, oldPodSpec)
 	dropDisabledNodeInclusionPolicyFields(podSpec, oldPodSpec)
@@ -589,16 +588,6 @@ func dropDisabledProcMountField(podSpec, oldPodSpec *api.PodSpec) {
 			}
 			return true
 		})
-	}
-}
-
-// dropDisabledCSIVolumeSourceAlphaFields removes disabled alpha fields from []CSIVolumeSource.
-// This should be called from PrepareForCreate/PrepareForUpdate for all pod specs resources containing a CSIVolumeSource
-func dropDisabledCSIVolumeSourceAlphaFields(podSpec, oldPodSpec *api.PodSpec) {
-	if !utilfeature.DefaultFeatureGate.Enabled(features.CSIInlineVolume) && !csiInUse(oldPodSpec) {
-		for i := range podSpec.Volumes {
-			podSpec.Volumes[i].CSI = nil
-		}
 	}
 }
 
@@ -672,6 +661,15 @@ func nodeTaintsPolicyInUse(podSpec *api.PodSpec) bool {
 	return false
 }
 
+// hostUsersInUse returns true if the pod spec has spec.hostUsers field set.
+func hostUsersInUse(podSpec *api.PodSpec) bool {
+	if podSpec != nil && podSpec.SecurityContext != nil && podSpec.SecurityContext.HostUsers != nil {
+		return true
+	}
+
+	return false
+}
+
 // procMountInUse returns true if the pod spec is non-nil and has a SecurityContext's ProcMount field set to a non-default value
 func procMountInUse(podSpec *api.PodSpec) bool {
 	if podSpec == nil {
@@ -703,21 +701,6 @@ func appArmorInUse(podAnnotations map[string]string) bool {
 	return false
 }
 
-// emptyDirSizeLimitInUse returns true if any pod's EmptyDir volumes use SizeLimit.
-func emptyDirSizeLimitInUse(podSpec *api.PodSpec) bool {
-	if podSpec == nil {
-		return false
-	}
-	for i := range podSpec.Volumes {
-		if podSpec.Volumes[i].EmptyDir != nil {
-			if podSpec.Volumes[i].EmptyDir.SizeLimit != nil {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // probeGracePeriodInUse returns true if the pod spec is non-nil and has a probe that makes use
 // of the probe-level terminationGracePeriodSeconds feature
 func probeGracePeriodInUse(podSpec *api.PodSpec) bool {
@@ -737,19 +720,6 @@ func probeGracePeriodInUse(podSpec *api.PodSpec) bool {
 	})
 
 	return inUse
-}
-
-// csiInUse returns true if any pod's spec include inline CSI volumes.
-func csiInUse(podSpec *api.PodSpec) bool {
-	if podSpec == nil {
-		return false
-	}
-	for i := range podSpec.Volumes {
-		if podSpec.Volumes[i].CSI != nil {
-			return true
-		}
-	}
-	return false
 }
 
 // SeccompAnnotationForField takes a pod seccomp profile field and returns the
@@ -775,36 +745,6 @@ func SeccompAnnotationForField(field *api.SeccompProfile) string {
 	// provided field type is SeccompProfileTypeLocalhost or if an unrecognized
 	// type is specified
 	return ""
-}
-
-// SeccompFieldForAnnotation takes a pod annotation and returns the converted
-// seccomp profile field.
-func SeccompFieldForAnnotation(annotation string) *api.SeccompProfile {
-	// If only seccomp annotations are specified, copy the values into the
-	// corresponding fields. This ensures that existing applications continue
-	// to enforce seccomp, and prevents the kubelet from needing to resolve
-	// annotations & fields.
-	if annotation == v1.SeccompProfileNameUnconfined {
-		return &api.SeccompProfile{Type: api.SeccompProfileTypeUnconfined}
-	}
-
-	if annotation == api.SeccompProfileRuntimeDefault || annotation == api.DeprecatedSeccompProfileDockerDefault {
-		return &api.SeccompProfile{Type: api.SeccompProfileTypeRuntimeDefault}
-	}
-
-	if strings.HasPrefix(annotation, v1.SeccompLocalhostProfileNamePrefix) {
-		localhostProfile := strings.TrimPrefix(annotation, v1.SeccompLocalhostProfileNamePrefix)
-		if localhostProfile != "" {
-			return &api.SeccompProfile{
-				Type:             api.SeccompProfileTypeLocalhost,
-				LocalhostProfile: &localhostProfile,
-			}
-		}
-	}
-
-	// we can only reach this code path if the localhostProfile name has a zero
-	// length or if the annotation has an unrecognized value
-	return nil
 }
 
 // setsWindowsHostProcess returns true if WindowsOptions.HostProcess is set (true or false)

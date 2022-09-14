@@ -25,6 +25,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/spf13/pflag"
+	oteltrace "go.opentelemetry.io/otel/trace"
 	"k8s.io/apiserver/pkg/admission"
 	apiserveroptions "k8s.io/apiserver/pkg/server/options"
 	"k8s.io/apiserver/pkg/storage/etcd3"
@@ -153,10 +154,11 @@ func TestAddFlags(t *testing.T) {
 			StorageConfig: storagebackend.Config{
 				Type: "etcd3",
 				Transport: storagebackend.TransportConfig{
-					ServerList:    nil,
-					KeyFile:       "/var/run/kubernetes/etcd.key",
-					TrustedCAFile: "/var/run/kubernetes/etcdca.crt",
-					CertFile:      "/var/run/kubernetes/etcdce.crt",
+					ServerList:     nil,
+					KeyFile:        "/var/run/kubernetes/etcd.key",
+					TrustedCAFile:  "/var/run/kubernetes/etcdca.crt",
+					CertFile:       "/var/run/kubernetes/etcdce.crt",
+					TracerProvider: oteltrace.NewNoopTracerProvider(),
 				},
 				Paging:                true,
 				Prefix:                "/registry",
@@ -316,8 +318,9 @@ func TestAddFlags(t *testing.T) {
 		Traces: &apiserveroptions.TracingOptions{
 			ConfigFile: "/var/run/kubernetes/tracing_config.yaml",
 		},
-		IdentityLeaseDurationSeconds:      3600,
-		IdentityLeaseRenewIntervalSeconds: 10,
+		IdentityLeaseDurationSeconds:        3600,
+		IdentityLeaseRenewIntervalSeconds:   10,
+		AggregatorRejectForwardingRedirects: true,
 	}
 
 	if !reflect.DeepEqual(expected, s) {
