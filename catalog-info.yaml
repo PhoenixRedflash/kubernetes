@@ -10,7 +10,7 @@ metadata:
       url: https://kubernetes.io/docs/home/
       icon: docs
   annotations:
-    github.com/project-slug:  "PhoenixRedflash/kubernetes" 
+    github.com/project-slug: PhoenixRedflash/kubernetes
     backstage.io/techdocs-ref: dir:.
 spec:
   type: service
