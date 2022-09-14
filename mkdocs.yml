@@ -1,5 +1,5 @@
-site_name: ${{values.component_id}}
-site_description: ${{values.description}}
+site_name: 'kubernetes'
+site_description: 'kubernetes'
 
 nav:
   - Introduction: index.md
