@@ -1,7 +1,3 @@
-# ${{ values.component_id }}
-
-${{ values.description }}
-
 Kubernetes (K8s)
 GoPkg Widget CII Best Practices
 
