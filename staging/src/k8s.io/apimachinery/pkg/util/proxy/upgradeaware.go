@@ -195,7 +195,7 @@ func proxyRedirectsforRootPath(path string, w http.ResponseWriter, req *http.Req
 
 	// From pkg/genericapiserver/endpoints/handlers/proxy.go#ServeHTTP:
 	// Redirect requests with an empty path to a location that ends with a '/'
-	// This is essentially a hack for http://issue.k8s.io/4958.
+	// This is essentially a hack for https://issue.k8s.io/4958.
 	// Note: Keep this code after tryUpgrade to not break that flow.
 	if len(path) == 0 && (method == http.MethodGet || method == http.MethodHead) {
 		var queryPart string
@@ -263,7 +263,7 @@ func (h *UpgradeAwareHandler) ServeHTTP(w http.ResponseWriter, req *http.Request
 		oldModifyResponse := proxy.ModifyResponse
 		proxy.ModifyResponse = func(response *http.Response) error {
 			code := response.StatusCode
-			if code >= 300 && code <= 399 {
+			if code >= 300 && code <= 399 && len(response.Header.Get("Location")) > 0 {
 				// close the original response
 				response.Body.Close()
 				msg := "the backend attempted to redirect this request, which is not permitted"

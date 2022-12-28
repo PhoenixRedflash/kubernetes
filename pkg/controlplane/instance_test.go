@@ -89,6 +89,9 @@ func setUp(t *testing.T) (*etcd3testing.EtcdTestServer, Config, *assert.Assertio
 	etcdOptions := options.NewEtcdOptions(storageConfig)
 	// unit tests don't need watch cache and it leaks lots of goroutines with etcd testing functions during unit tests
 	etcdOptions.EnableWatchCache = false
+	if err := etcdOptions.Complete(config.GenericConfig.StorageObjectCountTracker, config.GenericConfig.DrainedNotify(), config.GenericConfig.AddPostStartHook); err != nil {
+		t.Fatal(err)
+	}
 	err := etcdOptions.ApplyWithStorageFactoryTo(storageFactory, config.GenericConfig)
 	if err != nil {
 		t.Fatal(err)
@@ -341,6 +344,20 @@ func TestNoAlphaVersionsEnabledByDefault(t *testing.T) {
 			t.Errorf("Alpha API version %s enabled by default", gv.String())
 		}
 	}
+
+	for gvr, enabled := range config.ResourceConfigs {
+		if !strings.Contains(gvr.Version, "alpha") || !enabled {
+			continue
+		}
+
+		// we have enabled an alpha api by resource {g,v,r}, we also expect the
+		// alpha api by version {g,v} to be disabled. This is so a programmer
+		// remembers to add the new alpha version to alphaAPIGroupVersionsDisabledByDefault.
+		gr := gvr.GroupVersion()
+		if enabled, found := config.GroupVersionConfigs[gr]; !found || enabled {
+			t.Errorf("Alpha API version %q should be disabled by default", gr.String())
+		}
+	}
 }
 
 func TestNoBetaVersionsEnabledByDefault(t *testing.T) {
@@ -348,6 +365,54 @@ func TestNoBetaVersionsEnabledByDefault(t *testing.T) {
 	for gv, enable := range config.GroupVersionConfigs {
 		if enable && strings.Contains(gv.Version, "beta") {
 			t.Errorf("Beta API version %s enabled by default", gv.String())
+		}
+	}
+
+	for gvr, enabled := range config.ResourceConfigs {
+		if !strings.Contains(gvr.Version, "beta") || !enabled {
+			continue
+		}
+
+		// we have enabled a beta api by resource {g,v,r}, we also expect the
+		// beta api by version {g,v} to be disabled. This is so a programmer
+		// remembers to add the new beta version to betaAPIGroupVersionsDisabledByDefault.
+		gr := gvr.GroupVersion()
+		if enabled, found := config.GroupVersionConfigs[gr]; !found || enabled {
+			t.Errorf("Beta API version %q should be disabled by default", gr.String())
+		}
+	}
+}
+
+func TestDefaultVars(t *testing.T) {
+	// stableAPIGroupVersionsEnabledByDefault should not contain beta or alpha
+	for i := range stableAPIGroupVersionsEnabledByDefault {
+		gv := stableAPIGroupVersionsEnabledByDefault[i]
+		if strings.Contains(gv.Version, "beta") || strings.Contains(gv.Version, "alpha") {
+			t.Errorf("stableAPIGroupVersionsEnabledByDefault should contain stable version, but found: %q", gv.String())
+		}
+	}
+
+	// legacyBetaEnabledByDefaultResources should contain only beta version
+	for i := range legacyBetaEnabledByDefaultResources {
+		gv := legacyBetaEnabledByDefaultResources[i]
+		if !strings.Contains(gv.Version, "beta") {
+			t.Errorf("legacyBetaEnabledByDefaultResources should contain beta version, but found: %q", gv.String())
+		}
+	}
+
+	// betaAPIGroupVersionsDisabledByDefault should contain only beta version
+	for i := range betaAPIGroupVersionsDisabledByDefault {
+		gv := betaAPIGroupVersionsDisabledByDefault[i]
+		if !strings.Contains(gv.Version, "beta") {
+			t.Errorf("betaAPIGroupVersionsDisabledByDefault should contain beta version, but found: %q", gv.String())
+		}
+	}
+
+	// alphaAPIGroupVersionsDisabledByDefault should contain only alpha version
+	for i := range alphaAPIGroupVersionsDisabledByDefault {
+		gv := alphaAPIGroupVersionsDisabledByDefault[i]
+		if !strings.Contains(gv.Version, "alpha") {
+			t.Errorf("alphaAPIGroupVersionsDisabledByDefault should contain alpha version, but found: %q", gv.String())
 		}
 	}
 }

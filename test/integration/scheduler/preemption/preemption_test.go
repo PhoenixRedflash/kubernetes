@@ -155,7 +155,7 @@ func TestPreemption(t *testing.T) {
 	}
 	cfg := configtesting.V1ToInternalWithDefaults(t, configv1.KubeSchedulerConfiguration{
 		Profiles: []configv1.KubeSchedulerProfile{{
-			SchedulerName: pointer.StringPtr(v1.DefaultSchedulerName),
+			SchedulerName: pointer.String(v1.DefaultSchedulerName),
 			Plugins: &configv1.Plugins{
 				Filter: configv1.PluginSet{
 					Enabled: []configv1.Plugin{
@@ -468,11 +468,11 @@ func TestPreemption(t *testing.T) {
 					if err != nil {
 						t.Errorf("Error %v when getting the updated status for pod %v/%v ", err, p.Namespace, p.Name)
 					}
-					_, cond := podutil.GetPodCondition(&pod.Status, v1.AlphaNoCompatGuaranteeDisruptionTarget)
+					_, cond := podutil.GetPodCondition(&pod.Status, v1.DisruptionTarget)
 					if test.enablePodDisruptionConditions == true && cond == nil {
-						t.Errorf("Pod %q does not have the expected condition: %q", klog.KObj(pod), v1.AlphaNoCompatGuaranteeDisruptionTarget)
+						t.Errorf("Pod %q does not have the expected condition: %q", klog.KObj(pod), v1.DisruptionTarget)
 					} else if test.enablePodDisruptionConditions == false && cond != nil {
-						t.Errorf("Pod %q has an unexpected condition: %q", klog.KObj(pod), v1.AlphaNoCompatGuaranteeDisruptionTarget)
+						t.Errorf("Pod %q has an unexpected condition: %q", klog.KObj(pod), v1.DisruptionTarget)
 					}
 				} else {
 					if p.DeletionTimestamp != nil {
@@ -1124,7 +1124,7 @@ func TestNominatedNodeCleanUp(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := configtesting.V1ToInternalWithDefaults(t, configv1.KubeSchedulerConfiguration{
 				Profiles: []configv1.KubeSchedulerProfile{{
-					SchedulerName: pointer.StringPtr(v1.DefaultSchedulerName),
+					SchedulerName: pointer.String(v1.DefaultSchedulerName),
 					Plugins:       tt.customPlugins,
 				}},
 			})

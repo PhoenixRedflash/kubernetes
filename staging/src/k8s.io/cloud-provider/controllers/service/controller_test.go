@@ -73,7 +73,7 @@ func newETPLocalService(name string, serviceType v1.ServiceType) *v1.Service {
 		},
 		Spec: v1.ServiceSpec{
 			Type:                  serviceType,
-			ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal,
+			ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyLocal,
 		},
 	}
 }
@@ -1334,7 +1334,7 @@ func TestNeedsUpdate(t *testing.T) {
 			updateFn: func() {
 				oldSvc = defaultExternalService()
 				newSvc = defaultExternalService()
-				newSvc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyTypeLocal
+				newSvc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyLocal
 			},
 			expectedNeedsUpdate: true,
 		},
@@ -1388,6 +1388,75 @@ func TestNeedsUpdate(t *testing.T) {
 				}
 				newSvc = oldSvc.DeepCopy()
 				newSvc.Spec.Ports[0].TargetPort = intstr.Parse("dns")
+			},
+			expectedNeedsUpdate: true,
+		},
+		{
+			testName: "If appProtocol is the same",
+			updateFn: func() {
+				oldSvc = &v1.Service{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "tcp-service",
+						Namespace: "default",
+					},
+					Spec: v1.ServiceSpec{
+						Ports: []v1.ServicePort{{
+							Port:       80,
+							Protocol:   v1.ProtocolTCP,
+							TargetPort: intstr.Parse("22"),
+						}},
+						Type: v1.ServiceTypeLoadBalancer,
+					},
+				}
+				newSvc = oldSvc.DeepCopy()
+			},
+			expectedNeedsUpdate: false,
+		},
+		{
+			testName: "If appProtocol is set when previously unset",
+			updateFn: func() {
+				oldSvc = &v1.Service{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "tcp-service",
+						Namespace: "default",
+					},
+					Spec: v1.ServiceSpec{
+						Ports: []v1.ServicePort{{
+							Port:       80,
+							Protocol:   v1.ProtocolTCP,
+							TargetPort: intstr.Parse("22"),
+						}},
+						Type: v1.ServiceTypeLoadBalancer,
+					},
+				}
+				newSvc = oldSvc.DeepCopy()
+				protocol := "http"
+				newSvc.Spec.Ports[0].AppProtocol = &protocol
+			},
+			expectedNeedsUpdate: true,
+		},
+		{
+			testName: "If appProtocol is set to a different value",
+			updateFn: func() {
+				protocol := "http"
+				oldSvc = &v1.Service{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "tcp-service",
+						Namespace: "default",
+					},
+					Spec: v1.ServiceSpec{
+						Ports: []v1.ServicePort{{
+							Port:        80,
+							Protocol:    v1.ProtocolTCP,
+							TargetPort:  intstr.Parse("22"),
+							AppProtocol: &protocol,
+						}},
+						Type: v1.ServiceTypeLoadBalancer,
+					},
+				}
+				newSvc = oldSvc.DeepCopy()
+				newProtocol := "tcp"
+				newSvc.Spec.Ports[0].AppProtocol = &newProtocol
 			},
 			expectedNeedsUpdate: true,
 		},

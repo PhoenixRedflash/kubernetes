@@ -71,8 +71,6 @@ func runKubeletConfigPhase() func(c workflow.RunData) error {
 			return err
 		}
 
-		// TODO: Checkpoint the current configuration first so that if something goes wrong it can be recovered
-
 		// Store the kubelet component configuration.
 		if err = kubeletphase.WriteConfigToDisk(&cfg.ClusterConfiguration, kubeletDir, data.PatchesDir(), data.OutputWriter()); err != nil {
 			return err
@@ -84,12 +82,6 @@ func runKubeletConfigPhase() func(c workflow.RunData) error {
 				return errors.Wrap(err, "error printing files on dryrun")
 			}
 			return nil
-		}
-
-		// TODO: Temporary workaround. Remove in 1.27:
-		// https://github.com/kubernetes/kubeadm/issues/2626
-		if err := upgrade.CleanupKubeletDynamicEnvFileContainerRuntime(dryRun); err != nil {
-			return err
 		}
 
 		fmt.Println("[upgrade] The configuration for this node was successfully updated!")

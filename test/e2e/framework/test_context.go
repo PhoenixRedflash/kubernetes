@@ -17,6 +17,7 @@ limitations under the License.
 package framework
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -30,8 +31,8 @@ import (
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
-	"github.com/onsi/ginkgo/v2/reporters"
 	"github.com/onsi/ginkgo/v2/types"
+	gomegaformat "github.com/onsi/gomega/format"
 
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -39,6 +40,8 @@ import (
 	"k8s.io/klog/v2"
 
 	kubeletconfig "k8s.io/kubernetes/pkg/kubelet/apis/config"
+	"k8s.io/kubernetes/test/e2e/framework/internal/junit"
+	"k8s.io/kubernetes/test/utils/image"
 	"k8s.io/kubernetes/test/utils/kubeconfig"
 )
 
@@ -197,6 +200,9 @@ type TestContextType struct {
 
 // NodeKillerConfig describes configuration of NodeKiller -- a utility to
 // simulate node failures.
+//
+// TODO: move this and the corresponding command line flags into
+// test/e2e/framework/node.
 type NodeKillerConfig struct {
 	// Enabled determines whether NodeKill should do anything at all.
 	// All other options below are ignored if Enabled = false.
@@ -210,8 +216,10 @@ type NodeKillerConfig struct {
 	JitterFactor float64
 	// SimulatedDowntime is a duration between node is killed and recreated.
 	SimulatedDowntime time.Duration
-	// NodeKillerStopCh is a channel that is used to notify NodeKiller to stop killing nodes.
-	NodeKillerStopCh chan struct{}
+	// NodeKillerStopCtx is a context that is used to notify NodeKiller to stop killing nodes.
+	NodeKillerStopCtx context.Context
+	// NodeKillerStop is the cancel function for NodeKillerStopCtx.
+	NodeKillerStop func()
 }
 
 // NodeTestContextType is part of TestContextType, it is shared by all node e2e test.
@@ -304,6 +312,9 @@ func (tc TestContextType) ClusterIsIPv6() bool {
 // options themselves, copy flags from test/e2e/framework/config
 // as shown in HandleFlags.
 func RegisterCommonFlags(flags *flag.FlagSet) {
+	// The default is too low for objects like pods, even when using YAML. We double the default.
+	flags.IntVar(&gomegaformat.MaxLength, "gomega-max-length", 8000, "Sets the maximum size for the gomega formatter (= gomega.MaxLength). Use 0 to disable truncation.")
+
 	flags.StringVar(&TestContext.GatherKubeSystemResourceUsageData, "gather-resource-usage", "false", "If set to 'true' or 'all' framework will be monitoring resource usage of system all add-ons in (some) e2e tests, if set to 'master' framework will be monitoring master node only, if set to 'none' of 'false' monitoring will be turned off.")
 	flags.BoolVar(&TestContext.GatherLogsSizes, "gather-logs-sizes", false, "If set to true framework will be monitoring logs sizes on all machines running e2e tests.")
 	flags.IntVar(&TestContext.MaxNodesToGather, "max-nodes-to-gather-from", 20, "The maximum number of nodes to gather extended info from on test failure.")
@@ -335,7 +346,6 @@ func RegisterCommonFlags(flags *flag.FlagSet) {
 	flags.StringVar(&TestContext.NonblockingTaints, "non-blocking-taints", `node-role.kubernetes.io/control-plane,node-role.kubernetes.io/master`, "Nodes with taints in this comma-delimited list will not block the test framework from starting tests. The default taint 'node-role.kubernetes.io/master' is DEPRECATED and will be removed from the list in a future release.")
 
 	flags.BoolVar(&TestContext.ListImages, "list-images", false, "If true, will show list of images used for running tests.")
-	flags.BoolVar(&TestContext.ListConformanceTests, "list-conformance-tests", false, "If true, will show list of conformance tests.")
 	flags.StringVar(&TestContext.KubectlPath, "kubectl-path", "kubectl", "The kubectl binary to use. For development, you might use 'cluster/kubectl.sh' here.")
 
 	flags.StringVar(&TestContext.ProgressReportURL, "progress-report-url", "", "The URL to POST progress updates to as the suite runs to assist in aiding integrations. If empty, no messages sent.")
@@ -351,12 +361,8 @@ func RegisterCommonFlags(flags *flag.FlagSet) {
 func CreateGinkgoConfig() (types.SuiteConfig, types.ReporterConfig) {
 	// fetch the current config
 	suiteConfig, reporterConfig := ginkgo.GinkgoConfiguration()
-	// Turn on EmitSpecProgress to get spec progress (especially on interrupt)
-	suiteConfig.EmitSpecProgress = true
 	// Randomize specs as well as suites
 	suiteConfig.RandomizeAllSpecs = true
-	// Turn on verbose by default to get spec names
-	reporterConfig.Verbose = true
 	// Disable skipped tests unless they are explicitly requested.
 	if len(suiteConfig.FocusStrings) == 0 && len(suiteConfig.SkipStrings) == 0 {
 		suiteConfig.SkipStrings = []string{`\[Flaky\]|\[Feature:.+\]`}
@@ -453,7 +459,15 @@ func AfterReadingAllFlags(t *TestContextType) {
 	fs.Set("logtostderr", "false")
 	fs.Set("alsologtostderr", "false")
 	fs.Set("one_output", "true")
+	fs.Set("stderrthreshold", "10" /* higher than any of the severities -> none pass the threshold */)
 	klog.SetOutput(ginkgo.GinkgoWriter)
+
+	if t.ListImages {
+		for _, v := range image.GetImageConfigs() {
+			fmt.Println(v.GetE2EImage())
+		}
+		os.Exit(0)
+	}
 
 	// Only set a default host if one won't be supplied via kubeconfig
 	if len(t.Host) == 0 && len(t.KubeConfig) == 0 {
@@ -518,52 +532,23 @@ func AfterReadingAllFlags(t *TestContextType) {
 	}
 
 	if TestContext.ReportDir != "" {
-		ginkgo.ReportAfterSuite("Kubernetes e2e JUnit report", writeJUnitReport)
+		ginkgo.ReportAfterSuite("Kubernetes e2e JUnit report", func(report ginkgo.Report) {
+			// With Ginkgo v1, we used to write one file per
+			// parallel node. Now Ginkgo v2 automatically merges
+			// all results into a report for us. The 01 suffix is
+			// kept in case that users expect files to be called
+			// "junit_<prefix><number>.xml".
+			junitReport := path.Join(TestContext.ReportDir, "junit_"+TestContext.ReportPrefix+"01.xml")
+
+			// writeJUnitReport generates a JUnit file in the e2e
+			// report directory that is shorter than the one
+			// normally written by `ginkgo --junit-report`. This is
+			// needed because the full report can become too large
+			// for tools like Spyglass
+			// (https://github.com/kubernetes/kubernetes/issues/111510).
+			//
+			// Users who want the full report can use `--junit-report`.
+			junit.WriteJUnitReport(report, junitReport)
+		})
 	}
-}
-
-// writeJUnitReport generates a JUnit file in the e2e report directory that is
-// shorter than the one normally written by `ginkgo --junit-report`. This is
-// needed because the full report can become too large for tools like Spyglass
-// (https://github.com/kubernetes/kubernetes/issues/111510).
-//
-// Users who want the full report can use `--junit-report`.
-func writeJUnitReport(report ginkgo.Report) {
-	trimmedReport := report
-	trimmedReport.SpecReports = nil
-	for _, specReport := range report.SpecReports {
-		// Remove details for any spec that hasn't failed. In Prow,
-		// the test output captured in build-log.txt has all of this
-		// information, so we don't need it in the XML.
-		if specReport.State != types.SpecStateFailed {
-			specReport.CapturedGinkgoWriterOutput = ""
-			specReport.CapturedStdOutErr = ""
-		}
-
-		// Remove report entries generated by ginkgo.By("doing
-		// something") because those are not useful (just have the
-		// start time) and cause Spyglass to show an additional "open
-		// stdout" button with a summary of the steps, which usually
-		// doesn't help. We don't remove all entries because other
-		// measurements also get reported this way.
-		//
-		// Removing the report entries is okay because message text was
-		// already added to the test output when ginkgo.By was called.
-		reportEntries := specReport.ReportEntries
-		specReport.ReportEntries = nil
-		for _, reportEntry := range reportEntries {
-			if reportEntry.Name != "By Step" {
-				specReport.ReportEntries = append(specReport.ReportEntries, reportEntry)
-			}
-		}
-
-		trimmedReport.SpecReports = append(trimmedReport.SpecReports, specReport)
-	}
-
-	// With Ginkgo v1, we used to write one file per parallel node. Now
-	// Ginkgo v2 automatically merges all results into a report for us. The
-	// 01 suffix is kept in case that users expect files to be called
-	// "junit_<prefix><number>.xml".
-	junitReport := path.Join(TestContext.ReportDir, "junit_"+TestContext.ReportPrefix+"01.xml")
-	reporters.GenerateJUnitReport(trimmedReport, junitReport)
 }

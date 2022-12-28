@@ -34,11 +34,9 @@ import (
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	csitrans "k8s.io/csi-translation-lib"
 	"k8s.io/kubernetes/pkg/features"
-	"k8s.io/kubernetes/pkg/kubelet/configmap"
 	containertest "k8s.io/kubernetes/pkg/kubelet/container/testing"
 	kubepod "k8s.io/kubernetes/pkg/kubelet/pod"
 	podtest "k8s.io/kubernetes/pkg/kubelet/pod/testing"
-	"k8s.io/kubernetes/pkg/kubelet/secret"
 	"k8s.io/kubernetes/pkg/kubelet/volumemanager/cache"
 	"k8s.io/kubernetes/pkg/volume"
 	"k8s.io/kubernetes/pkg/volume/csimigration"
@@ -46,6 +44,12 @@ import (
 	"k8s.io/kubernetes/pkg/volume/util"
 	"k8s.io/kubernetes/pkg/volume/util/operationexecutor"
 	"k8s.io/kubernetes/pkg/volume/util/types"
+)
+
+const (
+	Removed     string = "removed"
+	Terminating string = "terminating"
+	Other       string = "other"
 )
 
 func pluginPVOmittingClient(dswp *desiredStateOfWorldPopulator) {
@@ -59,7 +63,7 @@ func pluginPVOmittingClient(dswp *desiredStateOfWorldPopulator) {
 	dswp.kubeClient = fakeClient
 }
 
-func prepareDswpWithVolume(t *testing.T) (*desiredStateOfWorldPopulator, kubepod.Manager) {
+func prepareDswpWithVolume(t *testing.T) (*desiredStateOfWorldPopulator, kubepod.Manager, *fakePodStateProvider) {
 	// create dswp
 	mode := v1.PersistentVolumeFilesystem
 	pv := &v1.PersistentVolume{
@@ -79,13 +83,16 @@ func prepareDswpWithVolume(t *testing.T) (*desiredStateOfWorldPopulator, kubepod
 			Phase: v1.ClaimBound,
 		},
 	}
-	dswp, fakePodManager, _, _, _ := createDswpWithVolume(t, pv, pvc)
-	return dswp, fakePodManager
+	dswp, fakePodManager, _, _, fakePodStateProvider := createDswpWithVolume(t, pv, pvc)
+	return dswp, fakePodManager, fakePodStateProvider
 }
 
 func TestFindAndAddNewPods_WithRescontructedVolume(t *testing.T) {
+	// Outer volume spec replacement is needed only when the old volume reconstruction is used
+	// (i.e. with SELinuxMountReadWriteOncePod disabled)
+	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.SELinuxMountReadWriteOncePod, false)()
 	// create dswp
-	dswp, fakePodManager := prepareDswpWithVolume(t)
+	dswp, fakePodManager, _ := prepareDswpWithVolume(t)
 
 	// create pod
 	fakeOuterVolumeName := "dswp-test-volume-name"
@@ -141,6 +148,9 @@ func TestFindAndAddNewPods_WithRescontructedVolume(t *testing.T) {
 			break
 		}
 	}
+	if dswp.hasAddedPods {
+		t.Fatalf("HasAddedPod should be false but it is true")
+	}
 	if !found {
 		t.Fatalf(
 			"Could not found pod volume %v in the list of actual state of world volumes to mount.",
@@ -149,9 +159,103 @@ func TestFindAndAddNewPods_WithRescontructedVolume(t *testing.T) {
 
 }
 
+func TestFindAndAddNewPods_WithDifferentConditions(t *testing.T) {
+	tests := []struct {
+		desc          string
+		hasAddedPods  bool
+		podState      string
+		expectedFound bool // Found pod is added to DSW
+	}{
+		{
+			desc:          "HasAddedPods is false, ShouldPodRuntimeBeRemoved and ShouldPodContainerBeTerminating are both true",
+			hasAddedPods:  false,
+			podState:      Removed,
+			expectedFound: false, // Pod should not be added to DSW
+		},
+		{
+			desc:          "HasAddedPods is false, ShouldPodRuntimeBeRemoved is false, ShouldPodContainerBeTerminating is true",
+			hasAddedPods:  false,
+			podState:      Terminating,
+			expectedFound: true, // Pod should be added to DSW
+		},
+		{
+			desc:          "HasAddedPods is false, other condition",
+			hasAddedPods:  false,
+			podState:      Other,
+			expectedFound: true, // Pod should be added to DSW
+		},
+		{
+			desc:          "HasAddedPods is true, ShouldPodRuntimeBeRemoved is false, ShouldPodContainerBeTerminating is true",
+			hasAddedPods:  true,
+			podState:      Terminating,
+			expectedFound: false, // Pod should not be added to DSW
+		},
+		{
+			desc:          "HasAddedPods is true, ShouldPodRuntimeBeRemoved and ShouldPodContainerBeTerminating are both true",
+			hasAddedPods:  true,
+			podState:      Removed,
+			expectedFound: false, // Pod should not be added to DSW
+		},
+		{
+			desc:          "HasAddedPods is true, other condition",
+			hasAddedPods:  true,
+			podState:      Other,
+			expectedFound: true, // Pod should be added to DSW
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			// create dswp
+			dswp, fakePodManager, fakePodState := prepareDswpWithVolume(t)
+
+			// create pod
+			containers := []v1.Container{
+				{
+					VolumeMounts: []v1.VolumeMount{
+						{
+							Name:      "dswp-test-volume-name",
+							MountPath: "/mnt",
+						},
+					},
+				},
+			}
+			pod := createPodWithVolume("dswp-test-pod", "dswp-test-volume-name", "file-bound", containers)
+
+			fakePodManager.AddPod(pod)
+
+			switch tc.podState {
+			case Removed:
+				fakePodState.removed = map[kubetypes.UID]struct{}{pod.UID: {}}
+			case Terminating:
+				fakePodState.terminating = map[kubetypes.UID]struct{}{pod.UID: {}}
+			case Other:
+				break
+			}
+
+			dswp.hasAddedPods = tc.hasAddedPods
+			// Action
+			dswp.findAndAddNewPods()
+
+			// Verify
+			podsInDSW := dswp.desiredStateOfWorld.GetPods()
+			found := false
+			if podsInDSW[types.UniquePodName(pod.UID)] {
+				found = true
+			}
+
+			if found != tc.expectedFound {
+				t.Fatalf(
+					"Pod with uid %v has expectedFound value %v in pods in DSW %v",
+					pod.UID, tc.expectedFound, podsInDSW)
+			}
+		})
+	}
+}
+
 func TestFindAndAddNewPods_WithReprocessPodAndVolumeRetrievalError(t *testing.T) {
 	// create dswp
-	dswp, fakePodManager := prepareDswpWithVolume(t)
+	dswp, fakePodManager, _ := prepareDswpWithVolume(t)
 
 	// create pod
 	containers := []v1.Container{
@@ -188,7 +292,7 @@ func TestFindAndAddNewPods_WithReprocessPodAndVolumeRetrievalError(t *testing.T)
 
 func TestFindAndAddNewPods_WithVolumeRetrievalError(t *testing.T) {
 	// create dswp
-	dswp, fakePodManager := prepareDswpWithVolume(t)
+	dswp, fakePodManager, _ := prepareDswpWithVolume(t)
 
 	pluginPVOmittingClient(dswp)
 
@@ -1476,6 +1580,10 @@ type fakePodStateProvider struct {
 
 func (p *fakePodStateProvider) ShouldPodContainersBeTerminating(uid kubetypes.UID) bool {
 	_, ok := p.terminating[uid]
+	// if ShouldPodRuntimeBeRemoved returns true, ShouldPodContainerBeTerminating should also return true
+	if !ok {
+		_, ok = p.removed[uid]
+	}
 	return ok
 }
 
@@ -1494,10 +1602,8 @@ func createDswpWithVolumeWithCustomPluginMgr(t *testing.T, pv *v1.PersistentVolu
 		return true, pv, nil
 	})
 
-	fakeSecretManager := secret.NewFakeManager()
-	fakeConfigMapManager := configmap.NewFakeManager()
 	fakePodManager := kubepod.NewBasicPodManager(
-		podtest.NewFakeMirrorClient(), fakeSecretManager, fakeConfigMapManager)
+		podtest.NewFakeMirrorClient())
 
 	seLinuxTranslator := util.NewFakeSELinuxLabelTranslator()
 	fakesDSW := cache.NewDesiredStateOfWorld(fakeVolumePluginMgr, seLinuxTranslator)

@@ -35,7 +35,7 @@ var (
 
 // New returns a Cache implementation.
 // It automatically starts a go routine that manages expiration of assumed pods.
-// "ttl" is how long the assumed pod will get expired.
+// "ttl" is how long the assumed pod will get expired, "0" means pod will never expire.
 // "stop" is the channel that would close the background goroutine.
 func New(ttl time.Duration, stop <-chan struct{}) Cache {
 	cache := newCache(ttl, cleanAssumedPeriod, stop)
@@ -506,16 +506,15 @@ func (cache *cacheImpl) AddPod(pod *v1.Pod) error {
 	currState, ok := cache.podStates[key]
 	switch {
 	case ok && cache.assumedPods.Has(key):
+		// When assuming, we've already added the Pod to cache,
+		// Just update here to make sure the Pod's status is up-to-date.
+		if err = cache.updatePod(currState.pod, pod); err != nil {
+			klog.ErrorS(err, "Error occurred while updating pod")
+		}
 		if currState.pod.Spec.NodeName != pod.Spec.NodeName {
 			// The pod was added to a different node than it was assumed to.
 			klog.InfoS("Pod was added to a different node than it was assumed", "podKey", key, "pod", klog.KObj(pod), "assumedNode", klog.KRef("", pod.Spec.NodeName), "currentNode", klog.KRef("", currState.pod.Spec.NodeName))
-			if err = cache.updatePod(currState.pod, pod); err != nil {
-				klog.ErrorS(err, "Error occurred while updating pod")
-			}
-		} else {
-			delete(cache.assumedPods, key)
-			cache.podStates[key].deadline = nil
-			cache.podStates[key].pod = pod
+			return nil
 		}
 	case !ok:
 		// Pod was expired. We should add it back.
@@ -538,17 +537,22 @@ func (cache *cacheImpl) UpdatePod(oldPod, newPod *v1.Pod) error {
 	defer cache.mu.Unlock()
 
 	currState, ok := cache.podStates[key]
+	if !ok {
+		return fmt.Errorf("pod %v(%v) is not added to scheduler cache, so cannot be updated", key, klog.KObj(oldPod))
+	}
+
 	// An assumed pod won't have Update/Remove event. It needs to have Add event
 	// before Update event, in which case the state would change from Assumed to Added.
-	if ok && !cache.assumedPods.Has(key) {
-		if currState.pod.Spec.NodeName != newPod.Spec.NodeName {
-			klog.ErrorS(nil, "Pod updated on a different node than previously added to", "podKey", key, "pod", klog.KObj(oldPod))
-			klog.ErrorS(nil, "scheduler cache is corrupted and can badly affect scheduling decisions")
-			klog.FlushAndExit(klog.ExitFlushTimeout, 1)
-		}
-		return cache.updatePod(oldPod, newPod)
+	if cache.assumedPods.Has(key) {
+		return fmt.Errorf("assumed pod %v(%v) should not be updated", key, klog.KObj(oldPod))
 	}
-	return fmt.Errorf("pod %v(%v) is not added to scheduler cache, so cannot be updated", key, klog.KObj(oldPod))
+
+	if currState.pod.Spec.NodeName != newPod.Spec.NodeName {
+		klog.ErrorS(nil, "Pod updated on a different node than previously added to", "podKey", key, "pod", klog.KObj(oldPod))
+		klog.ErrorS(nil, "scheduler cache is corrupted and can badly affect scheduling decisions")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+	}
+	return cache.updatePod(oldPod, newPod)
 }
 
 func (cache *cacheImpl) RemovePod(pod *v1.Pod) error {

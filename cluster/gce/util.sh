@@ -257,13 +257,13 @@ function copy-to-staging() {
 function set-preferred-region() {
   case ${ZONE} in
     asia-*)
-      PREFERRED_REGION=("asia" "us" "eu")
+      PREFERRED_REGION=("asia-northeast1" "us-central1" "europe-west6")
       ;;
     europe-*)
-      PREFERRED_REGION=("eu" "us" "asia")
+      PREFERRED_REGION=("europe-west6" "us-central1" "asia-northeast1")
       ;;
     *)
-      PREFERRED_REGION=("us" "eu" "asia")
+      PREFERRED_REGION=("us-central1" "europe-west6" "asia-northeast1")
       ;;
   esac
 
@@ -327,7 +327,7 @@ function upload-tars() {
 
   for region in "${PREFERRED_REGION[@]}"; do
     suffix="-${region}"
-    if [[ "${suffix}" == "-us" ]]; then
+    if [[ "${suffix}" == "-us-central1" ]]; then
       suffix=""
     fi
     local staging_bucket="gs://kubernetes-staging-${project_hash}${suffix}"
@@ -1265,6 +1265,11 @@ EOF
 DOCKER_LOG_MAX_FILE: $(yaml-quote "${DOCKER_LOG_MAX_FILE}")
 EOF
   fi
+  if [ -n "${CLOUD_PROVIDER_FLAG:-}" ]; then
+    cat >>"$file" <<EOF
+CLOUD_PROVIDER_FLAG: $(yaml-quote "${CLOUD_PROVIDER_FLAG}")
+EOF
+  fi
   if [ -n "${FEATURE_GATES:-}" ]; then
     cat >>"$file" <<EOF
 FEATURE_GATES: $(yaml-quote "${FEATURE_GATES}")
@@ -1311,6 +1316,7 @@ ETCD_PEER_KEY: $(yaml-quote "${ETCD_PEER_KEY_BASE64:-}")
 ETCD_PEER_CERT: $(yaml-quote "${ETCD_PEER_CERT_BASE64:-}")
 SERVICEACCOUNT_ISSUER: $(yaml-quote "${SERVICEACCOUNT_ISSUER:-}")
 KUBECTL_PRUNE_WHITELIST_OVERRIDE: $(yaml-quote "${KUBECTL_PRUNE_WHITELIST_OVERRIDE:-}")
+CCM_FEATURE_GATES:  $(yaml-quote "${CCM_FEATURE_GATES:-}")
 KUBE_SCHEDULER_RUNASUSER: 2001
 KUBE_SCHEDULER_RUNASGROUP: 2001
 KUBE_ADDON_MANAGER_RUNASUSER: 2002
@@ -2626,7 +2632,7 @@ function delete-subnetworks() {
       # This value should be kept in sync with number of regions.
       local parallelism=9
       gcloud compute networks subnets list --network="${NETWORK}" --project "${NETWORK_PROJECT}" --format='value(region.basename())' | \
-        xargs -i -P ${parallelism} gcloud --quiet compute networks subnets delete "${NETWORK}" --project "${NETWORK_PROJECT}" --region="{}" || true
+        xargs -I {} -P ${parallelism} gcloud --quiet compute networks subnets delete "${NETWORK}" --project "${NETWORK_PROJECT}" --region="{}" || true
     elif [[ "${CREATE_CUSTOM_NETWORK:-}" == "true" ]]; then
       echo "Deleting custom subnet..."
       gcloud --quiet compute networks subnets delete "${SUBNETWORK}" --project "${NETWORK_PROJECT}" --region="${REGION}" || true
@@ -3749,12 +3755,13 @@ function kube-down() {
     # Delete all remaining firewall rules and network.
     delete-firewall-rules \
       "${CLUSTER_NAME}-default-internal-master" \
-      "${CLUSTER_NAME}-default-internal-node" \
+      "${CLUSTER_NAME}-default-internal-node"
+
+    if [[ "${KUBE_DELETE_NETWORK}" == "true" ]]; then
+      delete-firewall-rules \
       "${NETWORK}-default-ssh" \
       "${NETWORK}-default-rdp" \
       "${NETWORK}-default-internal"  # Pre-1.5 clusters
-
-    if [[ "${KUBE_DELETE_NETWORK}" == "true" ]]; then
       delete-cloud-nat-router
       # Delete all remaining firewall rules in the network.
       delete-all-firewall-rules || true

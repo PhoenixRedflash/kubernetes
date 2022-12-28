@@ -90,8 +90,6 @@ def file_passes(filename, refs, regexs):
     if generated:
         if extension == "go":
             extension = "generatego"
-        elif extension == "bzl":
-            extension = "generatebzl"
 
     if extension != "":
         ref = refs[extension]
@@ -161,7 +159,9 @@ skipped_dirs = ['third_party', '_gopath', '_output', '.git', 'cluster/env.sh',
 
 # list all the files contain 'DO NOT EDIT', but are not generated
 skipped_ungenerated_files = [
-    'hack/lib/swagger.sh', 'hack/boilerplate/boilerplate.py']
+    'hack/update-generated-swagger-docs.sh',
+    'hack/boilerplate/boilerplate.py'
+]
 
 
 def normalize_files(files):

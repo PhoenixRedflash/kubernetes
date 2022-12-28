@@ -88,8 +88,15 @@ const (
 	// audited.
 	AdvancedAuditing featuregate.Feature = "AdvancedAuditing"
 
+	// owner: @cici37 @jpbetz
+	// kep: http://kep.k8s.io/3488
+	// alpha: v1.26
+	//
+	// Enables expression validation in Admission Control
+	ValidatingAdmissionPolicy featuregate.Feature = "ValidatingAdmissionPolicy"
+
 	// owner: @cici37
-	// kep: http://kep.k8s.io/2876
+	// kep: https://kep.k8s.io/2876
 	// alpha: v1.23
 	// beta: v1.25
 	//
@@ -115,14 +122,14 @@ const (
 	EfficientWatchResumption featuregate.Feature = "EfficientWatchResumption"
 
 	// owner: @aramase
-	// kep: http://kep.k8s.io/3299
+	// kep: https://kep.k8s.io/3299
 	// alpha: v1.25
 	//
 	// Enables KMS v2 API for encryption at rest.
 	KMSv2 featuregate.Feature = "KMSv2"
 
 	// owner: @jiahuif
-	// kep: http://kep.k8s.io/2887
+	// kep: https://kep.k8s.io/2887
 	// alpha: v1.23
 	// beta: v1.24
 	//
@@ -131,7 +138,7 @@ const (
 	OpenAPIEnums featuregate.Feature = "OpenAPIEnums"
 
 	// owner: @jefftree
-	// kep: http://kep.k8s.io/2896
+	// kep: https://kep.k8s.io/2896
 	// alpha: v1.23
 	// beta: v1.24
 	//
@@ -163,7 +170,7 @@ const (
 	ServerSideApply featuregate.Feature = "ServerSideApply"
 
 	// owner: @kevindelgado
-	// kep: http://kep.k8s.io/2885
+	// kep: https://kep.k8s.io/2885
 	// alpha: v1.23
 	// beta: v1.24
 	//
@@ -209,11 +216,13 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 
 	APIResponseCompression: {Default: true, PreRelease: featuregate.Beta},
 
-	APIServerIdentity: {Default: false, PreRelease: featuregate.Alpha},
+	APIServerIdentity: {Default: true, PreRelease: featuregate.Beta},
 
 	APIServerTracing: {Default: false, PreRelease: featuregate.Alpha},
 
 	AdvancedAuditing: {Default: true, PreRelease: featuregate.GA},
+
+	ValidatingAdmissionPolicy: {Default: false, PreRelease: featuregate.Alpha},
 
 	CustomResourceValidationExpressions: {Default: true, PreRelease: featuregate.Beta},
 
@@ -231,7 +240,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 
 	RemoveSelfLink: {Default: true, PreRelease: featuregate.GA, LockToDefault: true},
 
-	ServerSideApply: {Default: true, PreRelease: featuregate.GA},
+	ServerSideApply: {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.29
 
 	ServerSideFieldValidation: {Default: true, PreRelease: featuregate.Beta},
 

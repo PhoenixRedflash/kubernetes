@@ -75,6 +75,14 @@ func TestGetKubernetesImage(t *testing.T) {
 				KubernetesVersion: testversion,
 			},
 		},
+		{
+			image:    constants.KubeProxy,
+			expected: GetGenericImage(gcrPrefix, "kube-proxy", expected),
+			cfg: &kubeadmapi.ClusterConfiguration{
+				ImageRepository:   gcrPrefix,
+				KubernetesVersion: testversion,
+			},
+		},
 	}
 	for _, rt := range tests {
 		actual := GetKubernetesImage(rt.image, rt.cfg)
@@ -233,7 +241,7 @@ func TestGetDNSImage(t *testing.T) {
 		cfg      *kubeadmapi.ClusterConfiguration
 	}{
 		{
-			expected: "foo.io/coredns:v1.9.3",
+			expected: "foo.io/coredns:v1.10.0",
 			cfg: &kubeadmapi.ClusterConfiguration{
 				ImageRepository: "foo.io",
 				DNS: kubeadmapi.DNS{
@@ -242,7 +250,7 @@ func TestGetDNSImage(t *testing.T) {
 			},
 		},
 		{
-			expected: kubeadmapiv1beta2.DefaultImageRepository + "/coredns/coredns:v1.9.3",
+			expected: kubeadmapiv1beta2.DefaultImageRepository + "/coredns/coredns:v1.10.0",
 			cfg: &kubeadmapi.ClusterConfiguration{
 				ImageRepository: kubeadmapiv1beta2.DefaultImageRepository,
 				DNS: kubeadmapi.DNS{
@@ -251,13 +259,25 @@ func TestGetDNSImage(t *testing.T) {
 			},
 		},
 		{
-			expected: "foo.io/coredns/coredns:v1.9.3",
+			expected: "foo.io/coredns/coredns:v1.10.0",
 			cfg: &kubeadmapi.ClusterConfiguration{
 				ImageRepository: "foo.io",
 				DNS: kubeadmapi.DNS{
 					Type: kubeadmapi.CoreDNS,
 					ImageMeta: kubeadmapi.ImageMeta{
 						ImageRepository: "foo.io/coredns",
+					},
+				},
+			},
+		},
+		{
+			expected: "foo.io/coredns/coredns:v1.11.0",
+			cfg: &kubeadmapi.ClusterConfiguration{
+				ImageRepository: "foo.io/coredns",
+				DNS: kubeadmapi.DNS{
+					Type: kubeadmapi.CoreDNS,
+					ImageMeta: kubeadmapi.ImageMeta{
+						ImageTag: "v1.11.0",
 					},
 				},
 			},
