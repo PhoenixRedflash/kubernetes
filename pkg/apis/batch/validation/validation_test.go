@@ -19,7 +19,6 @@ package validation
 import (
 	_ "time/tzdata"
 
-	"archive/zip"
 	"fmt"
 	"io"
 	"os"
