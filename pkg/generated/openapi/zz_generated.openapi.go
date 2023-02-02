@@ -50469,6 +50469,13 @@ func schema_k8sio_cloud_provider_config_v1alpha1_CloudControllerManagerConfigura
 							Ref:         ref("k8s.io/cloud-provider/config/v1alpha1.KubeCloudSharedConfiguration"),
 						},
 					},
+					"NodeController": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NodeController holds configuration for node controller related features.",
+							Default:     map[string]interface{}{},
+							Ref:         ref("k8s.io/cloud-provider/controllers/node/config/v1alpha1.NodeControllerConfiguration"),
+						},
+					},
 					"ServiceController": {
 						SchemaProps: spec.SchemaProps{
 							Description: "ServiceControllerConfiguration holds configuration for ServiceController related features.",
@@ -50484,11 +50491,11 @@ func schema_k8sio_cloud_provider_config_v1alpha1_CloudControllerManagerConfigura
 						},
 					},
 				},
-				Required: []string{"Generic", "KubeCloudShared", "ServiceController", "NodeStatusUpdateFrequency"},
+				Required: []string{"Generic", "KubeCloudShared", "NodeController", "ServiceController", "NodeStatusUpdateFrequency"},
 			},
 		},
 		Dependencies: []string{
-			"k8s.io/apimachinery/pkg/apis/meta/v1.Duration", "k8s.io/cloud-provider/config/v1alpha1.KubeCloudSharedConfiguration", "k8s.io/cloud-provider/controllers/service/config/v1alpha1.ServiceControllerConfiguration", "k8s.io/controller-manager/config/v1alpha1.GenericControllerManagerConfiguration"},
+			"k8s.io/apimachinery/pkg/apis/meta/v1.Duration", "k8s.io/cloud-provider/config/v1alpha1.KubeCloudSharedConfiguration", "k8s.io/cloud-provider/controllers/node/config/v1alpha1.NodeControllerConfiguration", "k8s.io/cloud-provider/controllers/service/config/v1alpha1.ServiceControllerConfiguration", "k8s.io/controller-manager/config/v1alpha1.GenericControllerManagerConfiguration"},
 	}
 }
 
@@ -53564,7 +53571,7 @@ func schema_k8sio_kube_scheduler_config_v1_KubeSchedulerConfiguration(ref common
 					},
 					"enableContentionProfiling": {
 						SchemaProps: spec.SchemaProps{
-							Description: "enableContentionProfiling enables lock contention profiling, if enableProfiling is true.",
+							Description: "enableContentionProfiling enables block profiling, if enableProfiling is true.",
 							Type:        []string{"boolean"},
 							Format:      "",
 						},
@@ -54691,7 +54698,7 @@ func schema_k8sio_kube_scheduler_config_v1beta2_KubeSchedulerConfiguration(ref c
 					},
 					"enableContentionProfiling": {
 						SchemaProps: spec.SchemaProps{
-							Description: "enableContentionProfiling enables lock contention profiling, if enableProfiling is true.",
+							Description: "enableContentionProfiling enables block profiling, if enableProfiling is true.",
 							Type:        []string{"boolean"},
 							Format:      "",
 						},
@@ -55797,7 +55804,7 @@ func schema_k8sio_kube_scheduler_config_v1beta3_KubeSchedulerConfiguration(ref c
 					},
 					"enableContentionProfiling": {
 						SchemaProps: spec.SchemaProps{
-							Description: "enableContentionProfiling enables lock contention profiling, if enableProfiling is true.",
+							Description: "enableContentionProfiling enables block profiling, if enableProfiling is true.",
 							Type:        []string{"boolean"},
 							Format:      "",
 						},
@@ -57308,7 +57315,7 @@ func schema_k8sio_kubelet_config_v1beta1_KubeletConfiguration(ref common.Referen
 					},
 					"enableContentionProfiling": {
 						SchemaProps: spec.SchemaProps{
-							Description: "enableContentionProfiling enables lock contention profiling, if enableDebuggingHandlers is true. Default: false",
+							Description: "enableContentionProfiling enables block profiling, if enableDebuggingHandlers is true. Default: false",
 							Type:        []string{"boolean"},
 							Format:      "",
 						},

@@ -1,5 +1,5 @@
 /*
-Copyright 2021 The Kubernetes Authors.
+Copyright 2022 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,12 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package leadermigration
+package config
 
-import config "k8s.io/controller-manager/config"
-
-// Enabled checks whether Leader Migration should be enabled, given the GenericControllerManagerConfiguration.
-// It considers the feature gate first, and will always return false if the feature gate is not enabled.
-func Enabled(genericConfig *config.GenericControllerManagerConfiguration) bool {
-	return genericConfig.LeaderElection.LeaderElect && genericConfig.LeaderMigrationEnabled
+// NodeControllerConfiguration contains elements describing NodeController.
+type NodeControllerConfiguration struct {
+	// ConcurrentNodeSyncs is the number of workers
+	// concurrently synchronizing nodes
+	ConcurrentNodeSyncs int32
 }
