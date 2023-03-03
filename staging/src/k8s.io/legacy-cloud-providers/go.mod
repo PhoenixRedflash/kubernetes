@@ -27,7 +27,7 @@ require (
 	k8s.io/cloud-provider v0.0.0
 	k8s.io/component-base v0.0.0
 	k8s.io/csi-translation-lib v0.0.0
-	k8s.io/klog/v2 v2.80.1
+	k8s.io/klog/v2 v2.90.1
 	k8s.io/utils v0.0.0-20230209194617-a36077c30491
 	sigs.k8s.io/yaml v1.3.0
 )
@@ -52,7 +52,7 @@ require (
 	github.com/go-openapi/swag v0.22.3 // indirect
 	github.com/gofrs/uuid v4.0.0+incompatible // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/golang-jwt/jwt/v4 v4.2.0 // indirect
+	github.com/golang-jwt/jwt/v4 v4.4.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/gnostic v0.5.7-v3refs // indirect

@@ -17,7 +17,7 @@ require (
 	github.com/spf13/cobra v1.6.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.8.1
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.35.0
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.35.1
 	go.opentelemetry.io/otel v1.10.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.10.0
 	go.opentelemetry.io/otel/sdk v1.10.0
@@ -26,7 +26,7 @@ require (
 	golang.org/x/sys v0.5.0
 	k8s.io/apimachinery v0.0.0
 	k8s.io/client-go v0.0.0
-	k8s.io/klog/v2 v2.80.1
+	k8s.io/klog/v2 v2.90.1
 	k8s.io/utils v0.0.0-20230209194617-a36077c30491
 	sigs.k8s.io/json v0.0.0-20220713155537-f223a00ba0e2
 )

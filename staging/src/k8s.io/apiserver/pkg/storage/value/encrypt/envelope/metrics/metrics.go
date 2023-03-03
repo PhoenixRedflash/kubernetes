@@ -64,8 +64,9 @@ var (
 	lastToStorage                                   time.Time
 	keyIDHashTotalMetricLabels                      *lru.Cache
 	keyIDHashStatusLastTimestampSecondsMetricLabels *lru.Cache
-	cacheSize                                       int = 10
+	cacheSize                                       = 100
 
+	// This metric is only used for KMS v1 API.
 	dekCacheFillPercent = metrics.NewGauge(
 		&metrics.GaugeOpts{
 			Namespace:      namespace,
@@ -75,8 +76,9 @@ var (
 			StabilityLevel: metrics.ALPHA,
 		},
 	)
-	// These metrics are made public to be used by unit tests.
-	DekCacheInterArrivals = metrics.NewHistogramVec(
+
+	// This metric is only used for KMS v1 API.
+	dekCacheInterArrivals = metrics.NewHistogramVec(
 		&metrics.HistogramOpts{
 			Namespace:      namespace,
 			Subsystem:      subsystem,
@@ -88,6 +90,7 @@ var (
 		[]string{"transformation_type"},
 	)
 
+	// These metrics are made public to be used by unit tests.
 	KMSOperationsLatencyMetric = metrics.NewHistogramVec(
 		&metrics.HistogramOpts{
 			Namespace:      namespace,
@@ -96,8 +99,8 @@ var (
 			Help:           "KMS operation duration with gRPC error code status total.",
 			StabilityLevel: metrics.ALPHA,
 			// Use custom buckets to avoid the default buckets which are too small for KMS operations.
-			// Ranges from 1ms to 2m11s
-			Buckets: metrics.ExponentialBuckets(0.001, 2, 18),
+			// Start 0.1ms with the last bucket being [~52s, +Inf)
+			Buckets: metrics.ExponentialBuckets(0.0001, 2, 20),
 		},
 		[]string{"provider_name", "method_name", "grpc_status_code"},
 	)
@@ -142,6 +145,17 @@ var (
 		},
 		[]string{"provider_name", "key_id_hash"},
 	)
+
+	InvalidKeyIDFromStatusTotal = metrics.NewCounterVec(
+		&metrics.CounterOpts{
+			Namespace:      namespace,
+			Subsystem:      subsystem,
+			Name:           "invalid_key_id_from_status_total",
+			Help:           "Number of times an invalid keyID is returned by the Status RPC call split by error.",
+			StabilityLevel: metrics.ALPHA,
+		},
+		[]string{"provider_name", "error"},
+	)
 )
 
 var registerMetricsFunc sync.Once
@@ -182,10 +196,11 @@ func RegisterMetrics() {
 			},
 		}
 		legacyregistry.MustRegister(dekCacheFillPercent)
-		legacyregistry.MustRegister(DekCacheInterArrivals)
+		legacyregistry.MustRegister(dekCacheInterArrivals)
 		legacyregistry.MustRegister(KeyIDHashTotal)
 		legacyregistry.MustRegister(KeyIDHashLastTimestampSeconds)
 		legacyregistry.MustRegister(KeyIDHashStatusLastTimestampSeconds)
+		legacyregistry.MustRegister(InvalidKeyIDFromStatusTotal)
 		legacyregistry.MustRegister(KMSOperationsLatencyMetric)
 	})
 }
@@ -209,6 +224,10 @@ func RecordKeyIDFromStatus(providerName, keyID string) {
 	KeyIDHashStatusLastTimestampSeconds.WithLabelValues(providerName, keyIDHash).SetToCurrentTime()
 }
 
+func RecordInvalidKeyIDFromStatus(providerName, errCode string) {
+	InvalidKeyIDFromStatusTotal.WithLabelValues(providerName, errCode).Inc()
+}
+
 func RecordArrival(transformationType string, start time.Time) {
 	switch transformationType {
 	case FromStorageLabel:
@@ -218,7 +237,7 @@ func RecordArrival(transformationType string, start time.Time) {
 		if lastFromStorage.IsZero() {
 			lastFromStorage = start
 		}
-		DekCacheInterArrivals.WithLabelValues(transformationType).Observe(start.Sub(lastFromStorage).Seconds())
+		dekCacheInterArrivals.WithLabelValues(transformationType).Observe(start.Sub(lastFromStorage).Seconds())
 		lastFromStorage = start
 	case ToStorageLabel:
 		lockLastToStorage.Lock()
@@ -227,7 +246,7 @@ func RecordArrival(transformationType string, start time.Time) {
 		if lastToStorage.IsZero() {
 			lastToStorage = start
 		}
-		DekCacheInterArrivals.WithLabelValues(transformationType).Observe(start.Sub(lastToStorage).Seconds())
+		dekCacheInterArrivals.WithLabelValues(transformationType).Observe(start.Sub(lastToStorage).Seconds())
 		lastToStorage = start
 	}
 }

@@ -54,6 +54,7 @@ import (
 	e2estatefulset "k8s.io/kubernetes/test/e2e/framework/statefulset"
 	imageutils "k8s.io/kubernetes/test/utils/image"
 	admissionapi "k8s.io/pod-security-admission/api"
+	"k8s.io/utils/pointer"
 )
 
 const (
@@ -156,6 +157,10 @@ var _ = SIGDescribe("StatefulSet", func() {
 			ginkgo.By("Running " + cmd + " in all stateful pods")
 			framework.ExpectNoError(e2estatefulset.ExecInStatefulPods(ctx, c, ss, cmd))
 
+			cmd = "ln -s /data/hostname /data/hostname-symlink"
+			ginkgo.By("Running " + cmd + " in all stateful pods")
+			framework.ExpectNoError(e2estatefulset.ExecInStatefulPods(ctx, c, ss, cmd))
+
 			ginkgo.By("Restarting statefulset " + ss.Name)
 			e2estatefulset.Restart(ctx, c, ss)
 			e2estatefulset.WaitForRunningAndReady(ctx, c, *ss.Spec.Replicas, ss)
@@ -164,6 +169,10 @@ var _ = SIGDescribe("StatefulSet", func() {
 			framework.ExpectNoError(e2estatefulset.CheckMount(ctx, c, ss, "/data"))
 
 			cmd = "if [ \"$(cat /data/hostname)\" = \"$(hostname)\" ]; then exit 0; else exit 1; fi"
+			ginkgo.By("Running " + cmd + " in all stateful pods")
+			framework.ExpectNoError(e2estatefulset.ExecInStatefulPods(ctx, c, ss, cmd))
+
+			cmd = "if [ \"$(cat /data/hostname-symlink)\" = \"$(hostname)\" ]; then exit 0; else exit 1; fi"
 			ginkgo.By("Running " + cmd + " in all stateful pods")
 			framework.ExpectNoError(e2estatefulset.ExecInStatefulPods(ctx, c, ss, cmd))
 		})
@@ -322,10 +331,8 @@ var _ = SIGDescribe("StatefulSet", func() {
 				Type: appsv1.RollingUpdateStatefulSetStrategyType,
 				RollingUpdate: func() *appsv1.RollingUpdateStatefulSetStrategy {
 					return &appsv1.RollingUpdateStatefulSetStrategy{
-						Partition: func() *int32 {
-							i := int32(3)
-							return &i
-						}()}
+						Partition: pointer.Int32(3),
+					}
 				}(),
 			}
 			ss, err := c.AppsV1().StatefulSets(ns).Create(ctx, ss, metav1.CreateOptions{})
@@ -377,10 +384,8 @@ var _ = SIGDescribe("StatefulSet", func() {
 				Type: appsv1.RollingUpdateStatefulSetStrategyType,
 				RollingUpdate: func() *appsv1.RollingUpdateStatefulSetStrategy {
 					return &appsv1.RollingUpdateStatefulSetStrategy{
-						Partition: func() *int32 {
-							i := int32(2)
-							return &i
-						}()}
+						Partition: pointer.Int32(2),
+					}
 				}(),
 			}
 			ss, err = updateStatefulSetWithRetries(ctx, c, ns, ss.Name, func(update *appsv1.StatefulSet) {
@@ -388,10 +393,8 @@ var _ = SIGDescribe("StatefulSet", func() {
 					Type: appsv1.RollingUpdateStatefulSetStrategyType,
 					RollingUpdate: func() *appsv1.RollingUpdateStatefulSetStrategy {
 						return &appsv1.RollingUpdateStatefulSetStrategy{
-							Partition: func() *int32 {
-								i := int32(2)
-								return &i
-							}()}
+							Partition: pointer.Int32(2),
+						}
 					}(),
 				}
 			})

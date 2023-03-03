@@ -30,11 +30,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/storage/value"
 	kmstypes "k8s.io/apiserver/pkg/storage/value/encrypt/envelope/kmsv2/v2alpha1"
 	"k8s.io/apiserver/pkg/storage/value/encrypt/envelope/metrics"
 	"k8s.io/klog/v2"
-	kmsservice "k8s.io/kms/service"
+	kmsservice "k8s.io/kms/pkg/service"
 	"k8s.io/utils/clock"
 )
 
@@ -48,16 +49,21 @@ const (
 	KMSAPIVersion = "v2alpha1"
 	// annotationsMaxSize is the maximum size of the annotations.
 	annotationsMaxSize = 32 * 1024 // 32 kB
-	// keyIDMaxSize is the maximum size of the keyID.
-	keyIDMaxSize = 1 * 1024 // 1 kB
+	// KeyIDMaxSize is the maximum size of the keyID.
+	KeyIDMaxSize = 1 * 1024 // 1 kB
 	// encryptedDEKMaxSize is the maximum size of the encrypted DEK.
 	encryptedDEKMaxSize = 1 * 1024 // 1 kB
 	// cacheTTL is the default time-to-live for the cache entry.
 	cacheTTL = 1 * time.Hour
+	// error code
+	errKeyIDOKCode      ErrCodeKeyID = "ok"
+	errKeyIDEmptyCode   ErrCodeKeyID = "empty"
+	errKeyIDTooLongCode ErrCodeKeyID = "too_long"
 )
 
 type KeyIDGetterFunc func(context.Context) (keyID string, err error)
 type ProbeHealthzCheckFunc func(context.Context) (err error)
+type ErrCodeKeyID string
 
 type envelopeTransformer struct {
 	envelopeService   kmsservice.Service
@@ -91,8 +97,6 @@ func newEnvelopeTransformerWithClock(envelopeService kmsservice.Service, provide
 
 // TransformFromStorage decrypts data encrypted by this transformer using envelope encryption.
 func (t *envelopeTransformer) TransformFromStorage(ctx context.Context, data []byte, dataCtx value.Context) ([]byte, bool, error) {
-	metrics.RecordArrival(metrics.FromStorageLabel, time.Now())
-
 	// Deserialize the EncryptedObject from the data.
 	encryptedObject, err := t.doDecode(data)
 	if err != nil {
@@ -104,8 +108,12 @@ func (t *envelopeTransformer) TransformFromStorage(ctx context.Context, data []b
 	if transformer == nil {
 		value.RecordCacheMiss()
 
+		requestInfo := getRequestInfoFromContext(ctx)
 		uid := string(uuid.NewUUID())
-		klog.V(6).InfoS("Decrypting content using envelope service", "uid", uid, "key", string(dataCtx.AuthenticatedData()))
+		klog.V(6).InfoS("decrypting content using envelope service", "uid", uid, "key", string(dataCtx.AuthenticatedData()),
+			"group", requestInfo.APIGroup, "version", requestInfo.APIVersion, "resource", requestInfo.Resource, "subresource", requestInfo.Subresource,
+			"verb", requestInfo.Verb, "namespace", requestInfo.Namespace, "name", requestInfo.Name)
+
 		key, err := t.envelopeService.Decrypt(ctx, uid, &kmsservice.DecryptRequest{
 			Ciphertext:  encryptedObject.EncryptedDEK,
 			KeyID:       encryptedObject.KeyID,
@@ -143,14 +151,16 @@ func (t *envelopeTransformer) TransformFromStorage(ctx context.Context, data []b
 
 // TransformToStorage encrypts data to be written to disk using envelope encryption.
 func (t *envelopeTransformer) TransformToStorage(ctx context.Context, data []byte, dataCtx value.Context) ([]byte, error) {
-	metrics.RecordArrival(metrics.ToStorageLabel, time.Now())
 	newKey, err := generateKey(32)
 	if err != nil {
 		return nil, err
 	}
 
+	requestInfo := getRequestInfoFromContext(ctx)
 	uid := string(uuid.NewUUID())
-	klog.V(6).InfoS("encrypting content using envelope service", "uid", uid, "key", string(dataCtx.AuthenticatedData()))
+	klog.V(6).InfoS("encrypting content using envelope service", "uid", uid, "key", string(dataCtx.AuthenticatedData()),
+		"group", requestInfo.APIGroup, "version", requestInfo.APIVersion, "resource", requestInfo.Resource, "subresource", requestInfo.Subresource,
+		"verb", requestInfo.Verb, "namespace", requestInfo.Namespace, "name", requestInfo.Name)
 	resp, err := t.envelopeService.Encrypt(ctx, uid, newKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt DEK, error: %w", err)
@@ -247,7 +257,7 @@ func validateEncryptedObject(o *kmstypes.EncryptedObject) error {
 	if err := validateEncryptedDEK(o.EncryptedDEK); err != nil {
 		return fmt.Errorf("failed to validate encrypted DEK: %w", err)
 	}
-	if err := ValidateKeyID(o.KeyID); err != nil {
+	if _, err := ValidateKeyID(o.KeyID); err != nil {
 		return fmt.Errorf("failed to validate key id: %w", err)
 	}
 	if err := validateAnnotations(o.Annotations); err != nil {
@@ -290,12 +300,19 @@ func validateAnnotations(annotations map[string][]byte) error {
 // ValidateKeyID tests the following:
 // 1. The keyID is not empty.
 // 2. The size of keyID is less than 1 kB.
-func ValidateKeyID(keyID string) error {
+func ValidateKeyID(keyID string) (ErrCodeKeyID, error) {
 	if len(keyID) == 0 {
-		return fmt.Errorf("keyID is empty")
+		return errKeyIDEmptyCode, fmt.Errorf("keyID is empty")
 	}
-	if len(keyID) > keyIDMaxSize {
-		return fmt.Errorf("keyID is %d bytes, which exceeds the max size of %d", len(keyID), keyIDMaxSize)
+	if len(keyID) > KeyIDMaxSize {
+		return errKeyIDTooLongCode, fmt.Errorf("keyID is %d bytes, which exceeds the max size of %d", len(keyID), KeyIDMaxSize)
 	}
-	return nil
+	return errKeyIDOKCode, nil
+}
+
+func getRequestInfoFromContext(ctx context.Context) *genericapirequest.RequestInfo {
+	if reqInfo, found := genericapirequest.RequestInfoFrom(ctx); found {
+		return reqInfo
+	}
+	return &genericapirequest.RequestInfo{}
 }

@@ -240,6 +240,7 @@ const (
 	// owner: @derekwaynecarr
 	// alpha: v1.20
 	// beta: v1.21 (off by default until 1.22)
+	// ga: v1.27
 	//
 	// Enables usage of hugepages-<size> in downward API.
 	DownwardAPIHugePages featuregate.Feature = "DownwardAPIHugePages"
@@ -401,6 +402,7 @@ const (
 
 	// owner: @ahg
 	// beta: v1.23
+	// stable: v1.27
 	//
 	// Allow updating node scheduling directives in the pod template of jobs. Specifically,
 	// node affinity, selector and tolerations. This is allowed only for suspended jobs
@@ -612,6 +614,7 @@ const (
 	// owner: @Huang-Wei
 	// kep: https://kep.k8s.io/3521
 	// alpha: v1.26
+	// beta: v1.27
 	//
 	// Enable users to specify when a Pod is ready for scheduling.
 	PodSchedulingReadiness featuregate.Feature = "PodSchedulingReadiness"
@@ -682,6 +685,15 @@ const (
 	// Request API instead of generating one self signed and auto rotates the
 	// certificate as expiration approaches.
 	RotateKubeletServerCertificate featuregate.Feature = "RotateKubeletServerCertificate"
+
+	// owner: @danielvegamyhre
+	// kep: https://kep.k8s.io/2413
+	// beta: v1.27
+	//
+	// Allows mutating spec.completions for Indexed job when done in tandem with
+	// spec.parallelism. Specifically, spec.completions is mutable iff spec.completions
+	// equals to spec.parallelism before and after the update.
+	ElasticIndexedJob featuregate.Feature = "ElasticIndexedJob"
 
 	// owner: @saschagrunert
 	// kep: https://kep.k8s.io/2413
@@ -834,6 +846,13 @@ const (
 	// instead of changing each file on the volumes recursively.
 	// Initial implementation focused on ReadWriteOncePod volumes.
 	SELinuxMountReadWriteOncePod featuregate.Feature = "SELinuxMountReadWriteOncePod"
+
+	// owner: @vinaykul
+	// kep: http://kep.k8s.io/1287
+	// alpha: v1.27
+	//
+	// Enables In-Place Pod Vertical Scaling
+	InPlacePodVerticalScaling featuregate.Feature = "InPlacePodVerticalScaling"
 )
 
 func init() {
@@ -901,7 +920,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 
 	DisableKubeletCloudCredentialProviders: {Default: false, PreRelease: featuregate.Alpha},
 
-	DownwardAPIHugePages: {Default: true, PreRelease: featuregate.Beta}, // on by default in 1.22
+	DownwardAPIHugePages: {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in v1.29
 
 	EndpointSliceTerminatingCondition: {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in v1.28
 
@@ -945,7 +964,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 
 	JobPodFailurePolicy: {Default: true, PreRelease: featuregate.Beta},
 
-	JobMutableNodeSchedulingDirectives: {Default: true, PreRelease: featuregate.Beta},
+	JobMutableNodeSchedulingDirectives: {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.29
 
 	JobReadyPods: {Default: true, PreRelease: featuregate.Beta},
 
@@ -1001,7 +1020,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 
 	PodHasNetworkCondition: {Default: false, PreRelease: featuregate.Alpha},
 
-	PodSchedulingReadiness: {Default: false, PreRelease: featuregate.Alpha},
+	PodSchedulingReadiness: {Default: true, PreRelease: featuregate.Beta},
 
 	PodSecurity: {Default: true, PreRelease: featuregate.GA, LockToDefault: true},
 
@@ -1020,6 +1039,8 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 	RetroactiveDefaultStorageClass: {Default: true, PreRelease: featuregate.Beta},
 
 	RotateKubeletServerCertificate: {Default: true, PreRelease: featuregate.Beta},
+
+	ElasticIndexedJob: {Default: true, PreRelease: featuregate.Beta},
 
 	SeccompDefault: {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.29
 
@@ -1060,6 +1081,8 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 	NodeInclusionPolicyInPodTopologySpread: {Default: true, PreRelease: featuregate.Beta},
 
 	SELinuxMountReadWriteOncePod: {Default: false, PreRelease: featuregate.Alpha},
+
+	InPlacePodVerticalScaling: {Default: false, PreRelease: featuregate.Alpha},
 
 	// inherited features from generic apiserver, relisted here to get a conflict if it is changed
 	// unintentionally on either side:
