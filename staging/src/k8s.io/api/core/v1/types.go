@@ -577,7 +577,7 @@ const (
 	PersistentVolumeClaimNodeExpansionFailed PersistentVolumeClaimResizeStatus = "NodeExpansionFailed"
 )
 
-// PersistentVolumeClaimCondition contails details about state of pvc
+// PersistentVolumeClaimCondition contains details about state of pvc
 type PersistentVolumeClaimCondition struct {
 	Type   PersistentVolumeClaimConditionType `json:"type" protobuf:"bytes,1,opt,name=type,casttype=PersistentVolumeClaimConditionType"`
 	Status ConditionStatus                    `json:"status" protobuf:"bytes,2,opt,name=status,casttype=ConditionStatus"`
@@ -735,7 +735,7 @@ type EmptyDirVolumeSource struct {
 	// The maximum usage on memory medium EmptyDir would be the minimum value between
 	// the SizeLimit specified here and the sum of memory limits of all containers in a pod.
 	// The default is nil which means that the limit is undefined.
-	// More info: http://kubernetes.io/docs/user-guide/volumes#emptydir
+	// More info: https://kubernetes.io/docs/concepts/storage/volumes#emptydir
 	// +optional
 	SizeLimit *resource.Quantity `json:"sizeLimit,omitempty" protobuf:"bytes,2,opt,name=sizeLimit"`
 }
@@ -1834,9 +1834,10 @@ type CSIPersistentVolumeSource struct {
 	// nodeExpandSecretRef is a reference to the secret object containing
 	// sensitive information to pass to the CSI driver to complete the CSI
 	// NodeExpandVolume call.
-	// This is an alpha field and requires enabling CSINodeExpandSecret feature gate.
+	// This is a beta field which is enabled default by CSINodeExpandSecret feature gate.
 	// This field is optional, may be omitted if no secret is required. If the
 	// secret object contains more than one secret, all secrets are passed.
+	// +featureGate=CSINodeExpandSecret
 	// +optional
 	NodeExpandSecretRef *SecretReference `json:"nodeExpandSecretRef,omitempty" protobuf:"bytes,10,opt,name=nodeExpandSecretRef"`
 }
@@ -2263,31 +2264,31 @@ const (
 	PullIfNotPresent PullPolicy = "IfNotPresent"
 )
 
-// ResourceResizePolicy specifies how Kubernetes should handle resource resize.
-type ResourceResizePolicy string
+// ResourceResizeRestartPolicy specifies how to handle container resource resize.
+type ResourceResizeRestartPolicy string
 
-// These are the valid resource resize policy values:
+// These are the valid resource resize restart policy values:
 const (
-	// RestartNotRequired tells Kubernetes to resize the container in-place
+	// 'NotRequired' means Kubernetes will try to resize the container
 	// without restarting it, if possible. Kubernetes may however choose to
 	// restart the container if it is unable to actuate resize without a
 	// restart. For e.g. the runtime doesn't support restart-free resizing.
-	RestartNotRequired ResourceResizePolicy = "RestartNotRequired"
-	// 'RestartRequired' tells Kubernetes to resize the container in-place
+	NotRequired ResourceResizeRestartPolicy = "NotRequired"
+	// 'RestartContainer' means Kubernetes will resize the container in-place
 	// by stopping and starting the container when new resources are applied.
 	// This is needed for legacy applications. For e.g. java apps using the
 	// -xmxN flag which are unable to use resized memory without restarting.
-	RestartRequired ResourceResizePolicy = "RestartRequired"
+	RestartContainer ResourceResizeRestartPolicy = "RestartContainer"
 )
 
-// ContainerResizePolicy represents resource resize policy for a single container.
+// ContainerResizePolicy represents resource resize policy for the container.
 type ContainerResizePolicy struct {
-	// Name of the resource type to which this resource resize policy applies.
+	// Name of the resource to which this resource resize policy applies.
 	// Supported values: cpu, memory.
 	ResourceName ResourceName `json:"resourceName" protobuf:"bytes,1,opt,name=resourceName,casttype=ResourceName"`
-	// Resource resize policy applicable to the specified resource name.
-	// If not specified, it defaults to RestartNotRequired.
-	Policy ResourceResizePolicy `json:"policy" protobuf:"bytes,2,opt,name=policy,casttype=ResourceResizePolicy"`
+	// Restart policy to apply when specified resource is resized.
+	// If not specified, it defaults to NotRequired.
+	RestartPolicy ResourceResizeRestartPolicy `json:"restartPolicy" protobuf:"bytes,2,opt,name=restartPolicy,casttype=ResourceResizeRestartPolicy"`
 }
 
 // PreemptionPolicy describes a policy for if/when to preempt a pod.
@@ -2548,8 +2549,6 @@ type ProbeHandler struct {
 	TCPSocket *TCPSocketAction `json:"tcpSocket,omitempty" protobuf:"bytes,3,opt,name=tcpSocket"`
 
 	// GRPC specifies an action involving a GRPC port.
-	// This is a beta field and requires enabling GRPCContainerProbe feature gate.
-	// +featureGate=GRPCContainerProbe
 	// +optional
 	GRPC *GRPCAction `json:"grpc,omitempty" protobuf:"bytes,4,opt,name=grpc"`
 }
@@ -2663,39 +2662,61 @@ type ContainerState struct {
 
 // ContainerStatus contains details for the current status of this container.
 type ContainerStatus struct {
-	// This must be a DNS_LABEL. Each container in a pod must have a unique name.
+	// Name is a DNS_LABEL representing the unique name of the container.
+	// Each container in a pod must have a unique name across all container types.
 	// Cannot be updated.
 	Name string `json:"name" protobuf:"bytes,1,opt,name=name"`
-	// Details about the container's current condition.
+	// State holds details about the container's current condition.
 	// +optional
 	State ContainerState `json:"state,omitempty" protobuf:"bytes,2,opt,name=state"`
-	// Details about the container's last termination condition.
+	// LastTerminationState holds the last termination state of the container to
+	// help debug container crashes and restarts. This field is not
+	// populated if the container is still running and RestartCount is 0.
 	// +optional
 	LastTerminationState ContainerState `json:"lastState,omitempty" protobuf:"bytes,3,opt,name=lastState"`
-	// Specifies whether the container has passed its readiness probe.
+	// Ready specifies whether the container is currently passing its readiness check.
+	// The value will change as readiness probes keep executing. If no readiness
+	// probes are specified, this field defaults to true once the container is
+	// fully started (see Started field).
+	//
+	// The value is typically used to determine whether a container is ready to
+	// accept traffic.
 	Ready bool `json:"ready" protobuf:"varint,4,opt,name=ready"`
-	// The number of times the container has been restarted.
+	// RestartCount holds the number of times the container has been restarted.
+	// Kubelet makes an effort to always increment the value, but there
+	// are cases when the state may be lost due to node restarts and then the value
+	// may be reset to 0. The value is never negative.
 	RestartCount int32 `json:"restartCount" protobuf:"varint,5,opt,name=restartCount"`
-	// The image the container is running.
+	// Image is the name of container image that the container is running.
+	// The container image may not match the image used in the PodSpec,
+	// as it may have been resolved by the runtime.
 	// More info: https://kubernetes.io/docs/concepts/containers/images.
 	Image string `json:"image" protobuf:"bytes,6,opt,name=image"`
-	// ImageID of the container's image.
+	// ImageID is the image ID of the container's image. The image ID may not
+	// match the image ID of the image used in the PodSpec, as it may have been
+	// resolved by the runtime.
 	ImageID string `json:"imageID" protobuf:"bytes,7,opt,name=imageID"`
-	// Container's ID in the format '<type>://<container_id>'.
+	// ContainerID is the ID of the container in the format '<type>://<container_id>'.
+	// Where type is a container runtime identifier, returned from Version call of CRI API
+	// (for example "containerd").
 	// +optional
 	ContainerID string `json:"containerID,omitempty" protobuf:"bytes,8,opt,name=containerID"`
-	// Specifies whether the container has passed its startup probe.
-	// Initialized as false, becomes true after startupProbe is considered successful.
-	// Resets to false when the container is restarted, or if kubelet loses state temporarily.
-	// Is always true when no startupProbe is defined.
+	// Started indicates whether the container has finished its postStart lifecycle hook
+	// and passed its startup probe.
+	// Initialized as false, becomes true after startupProbe is considered
+	// successful. Resets to false when the container is restarted, or if kubelet
+	// loses state temporarily. In both cases, startup probes will run again.
+	// Is always true when no startupProbe is defined and container is running and
+	// has passed the postStart lifecycle hook. The null value must be treated the
+	// same as false.
 	// +optional
 	Started *bool `json:"started,omitempty" protobuf:"varint,9,opt,name=started"`
-	// ResourcesAllocated represents the compute resources allocated for this container by the
+	// AllocatedResources represents the compute resources allocated for this container by the
 	// node. Kubelet sets this value to Container.Resources.Requests upon successful pod admission
 	// and after successfully admitting desired pod resize.
 	// +featureGate=InPlacePodVerticalScaling
 	// +optional
-	ResourcesAllocated ResourceList `json:"resourcesAllocated,omitempty" protobuf:"bytes,10,rep,name=resourcesAllocated,casttype=ResourceList,castkey=ResourceName"`
+	AllocatedResources ResourceList `json:"allocatedResources,omitempty" protobuf:"bytes,10,rep,name=allocatedResources,casttype=ResourceList,castkey=ResourceName"`
 	// Resources represents the compute resource requests and limits that have been successfully
 	// enacted on the running container after it has been started or has been successfully resized.
 	// +featureGate=InPlacePodVerticalScaling
@@ -3676,8 +3697,12 @@ type TopologySpreadConstraint struct {
 	// spreading will be calculated. The keys are used to lookup values from the
 	// incoming pod labels, those key-value labels are ANDed with labelSelector
 	// to select the group of existing pods over which spreading will be calculated
-	// for the incoming pod. Keys that don't exist in the incoming pod labels will
+	// for the incoming pod. The same key is forbidden to exist in both MatchLabelKeys and LabelSelector.
+	// MatchLabelKeys cannot be set when LabelSelector isn't set.
+	// Keys that don't exist in the incoming pod labels will
 	// be ignored. A null or empty list means only match against labelSelector.
+	//
+	// This is a beta field and requires the MatchLabelKeysInPodTopologySpread feature gate to be enabled (enabled by default).
 	// +listType=atomic
 	// +optional
 	MatchLabelKeys []string `json:"matchLabelKeys,omitempty" protobuf:"bytes,8,opt,name=matchLabelKeys"`
@@ -4495,6 +4520,9 @@ const (
 	// LoadBalancerPortsError represents the condition of the requested ports
 	// on the cloud load balancer instance.
 	LoadBalancerPortsError = "LoadBalancerPortsError"
+	// LoadBalancerPortsErrorReason reason in ServiceStatus condition LoadBalancerPortsError
+	// means the LoadBalancer was not able to be configured correctly.
+	LoadBalancerPortsErrorReason = "LoadBalancerMixedProtocolNotSupported"
 )
 
 // ServiceStatus represents the current status of a service.
@@ -5072,10 +5100,18 @@ type EndpointPort struct {
 	Protocol Protocol `json:"protocol,omitempty" protobuf:"bytes,3,opt,name=protocol,casttype=Protocol"`
 
 	// The application protocol for this port.
+	// This is used as a hint for implementations to offer richer behavior for protocols that they understand.
 	// This field follows standard Kubernetes label syntax.
-	// Un-prefixed names are reserved for IANA standard service names (as per
+	// Valid values are either:
+	//
+	// * Un-prefixed protocol names - reserved for IANA standard service names (as per
 	// RFC-6335 and https://www.iana.org/assignments/service-names).
-	// Non-standard protocols should use prefixed names such as
+	//
+	// * Kubernetes-defined prefixed names:
+	//   * 'kubernetes.io/h2c' - HTTP/2 over cleartext as described in https://www.rfc-editor.org/rfc/rfc7540
+	//   * 'kubernetes.io/grpc' - gRPC over HTTP/2 as described in https://github.com/grpc/grpc/blob/v1.51.1/doc/PROTOCOL-HTTP2.md
+	//
+	// * Other protocols should use implementation-defined prefixed names such as
 	// mycompany.com/my-custom-protocol.
 	// +optional
 	AppProtocol *string `json:"appProtocol,omitempty" protobuf:"bytes,4,opt,name=appProtocol"`
@@ -6850,6 +6886,13 @@ const (
 	// Name of header that specifies a request ID used to associate the error
 	// and data streams for a single forwarded connection
 	PortForwardRequestIDHeader = "requestID"
+)
+
+const (
+	// MixedProtocolNotSupported error in PortStatus means that the cloud provider
+	// can't publish the port on the load balancer because mixed values of protocols
+	// on the same LoadBalancer type of Service are not supported by the cloud provider.
+	MixedProtocolNotSupported = "MixedProtocolNotSupported"
 )
 
 // PortStatus represents the error condition of a service port

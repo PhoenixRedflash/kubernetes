@@ -18,6 +18,7 @@ package cacher
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 )
@@ -51,9 +52,18 @@ func Test_newReadySetIdempotent(t *testing.T) {
 	ready.set(false)
 	ready.set(false)
 	ready.set(false)
+	if generation, ok := ready.checkAndReadGeneration(); generation != 0 || ok {
+		t.Errorf("unexpected state: generation=%v ready=%v", generation, ok)
+	}
+	ready.set(true)
+	if generation, ok := ready.checkAndReadGeneration(); generation != 1 || !ok {
+		t.Errorf("unexpected state: generation=%v ready=%v", generation, ok)
+	}
 	ready.set(true)
 	ready.set(true)
-	ready.set(true)
+	if generation, ok := ready.checkAndReadGeneration(); generation != 1 || !ok {
+		t.Errorf("unexpected state: generation=%v ready=%v", generation, ok)
+	}
 	ready.set(false)
 	// create 10 goroutines waiting for ready and stop
 	for i := 0; i < 10; i++ {
@@ -67,6 +77,9 @@ func Test_newReadySetIdempotent(t *testing.T) {
 		t.Errorf("ready should be blocking")
 	}
 	ready.set(true)
+	if generation, ok := ready.checkAndReadGeneration(); generation != 2 || !ok {
+		t.Errorf("unexpected state: generation=%v ready=%v", generation, ok)
+	}
 	for i := 0; i < 10; i++ {
 		if err := <-errCh; err != nil {
 			t.Errorf("unexpected error on channel %d", i)
@@ -81,18 +94,26 @@ func Test_newReadyRacy(t *testing.T) {
 	errCh := make(chan error, concurrency)
 	ready := newReady()
 	ready.set(false)
+
+	wg := sync.WaitGroup{}
+	wg.Add(2 * concurrency)
 	for i := 0; i < concurrency; i++ {
 		go func() {
 			errCh <- ready.wait(context.Background())
 		}()
 		go func() {
+			defer wg.Done()
 			ready.set(false)
 		}()
 		go func() {
+			defer wg.Done()
 			ready.set(true)
 		}()
 	}
+	// Last one has to be set to true.
+	wg.Wait()
 	ready.set(true)
+
 	for i := 0; i < concurrency; i++ {
 		if err := <-errCh; err != nil {
 			t.Errorf("unexpected error %v on channel %d", err, i)

@@ -448,7 +448,7 @@ func TestGeneratePodCopyWithDebugContainer(t *testing.T) {
 						"test": "test",
 					},
 					ResourceVersion:   "1",
-					CreationTimestamp: metav1.Time{time.Now()},
+					CreationTimestamp: metav1.Time{Time: time.Now()},
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -1202,6 +1202,46 @@ func TestGeneratePodCopyWithDebugContainer(t *testing.T) {
 			},
 		},
 		{
+			name: "baseline profile not share process when user explicitly disables it",
+			opts: &DebugOptions{
+				CopyTo:                "debugger",
+				Container:             "debugger",
+				Image:                 "busybox",
+				PullPolicy:            corev1.PullIfNotPresent,
+				Profile:               ProfileBaseline,
+				ShareProcesses:        false,
+				shareProcessedChanged: true,
+			},
+			havePod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "target",
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name: "debugger",
+						},
+					},
+					NodeName: "node-1",
+				},
+			},
+			wantPod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "debugger",
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:            "debugger",
+							Image:           "busybox",
+							ImagePullPolicy: corev1.PullIfNotPresent,
+						},
+					},
+					ShareProcessNamespace: pointer.Bool(false),
+				},
+			},
+		},
+		{
 			name: "restricted profile",
 			opts: &DebugOptions{
 				CopyTo:     "debugger",
@@ -1601,6 +1641,12 @@ func TestGenerateNodeDebugPod(t *testing.T) {
 							ImagePullPolicy:          corev1.PullIfNotPresent,
 							TerminationMessagePolicy: corev1.TerminationMessageReadFile,
 							VolumeMounts:             nil,
+							SecurityContext: &corev1.SecurityContext{
+								RunAsNonRoot: pointer.Bool(true),
+								Capabilities: &corev1.Capabilities{
+									Drop: []corev1.Capability{"ALL"},
+								},
+							},
 						},
 					},
 					HostIPC:       false,

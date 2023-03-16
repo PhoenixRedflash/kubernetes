@@ -41,6 +41,7 @@ import (
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/component-base/featuregate"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
+	kubeletapis "k8s.io/kubelet/pkg/apis"
 	"k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/capabilities"
 	"k8s.io/kubernetes/pkg/features"
@@ -52,6 +53,11 @@ const (
 	dnsSubdomainLabelErrMsg = "a lowercase RFC 1123 subdomain"
 	envVarNameErrMsg        = "a valid environment variable name must consist of"
 )
+
+type topologyPair struct {
+	key   string
+	value string
+}
 
 func line() string {
 	_, _, line, ok := runtime.Caller(1)
@@ -1088,6 +1094,29 @@ func simpleVolumeNodeAffinity(key, value string) *core.VolumeNodeAffinity {
 	}
 }
 
+func multipleVolumeNodeAffinity(terms [][]topologyPair) *core.VolumeNodeAffinity {
+	nodeSelectorTerms := []core.NodeSelectorTerm{}
+	for _, term := range terms {
+		matchExpressions := []core.NodeSelectorRequirement{}
+		for _, topology := range term {
+			matchExpressions = append(matchExpressions, core.NodeSelectorRequirement{
+				Key:      topology.key,
+				Operator: core.NodeSelectorOpIn,
+				Values:   []string{topology.value},
+			})
+		}
+		nodeSelectorTerms = append(nodeSelectorTerms, core.NodeSelectorTerm{
+			MatchExpressions: matchExpressions,
+		})
+	}
+
+	return &core.VolumeNodeAffinity{
+		Required: &core.NodeSelector{
+			NodeSelectorTerms: nodeSelectorTerms,
+		},
+	}
+}
+
 func TestValidateVolumeNodeAffinityUpdate(t *testing.T) {
 	scenarios := map[string]struct {
 		isExpectedFailure bool
@@ -1109,6 +1138,268 @@ func TestValidateVolumeNodeAffinityUpdate(t *testing.T) {
 			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity("foo", "bar")),
 			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity("foo", "bar2")),
 		},
+		"affinity-non-beta-label-changed": {
+			isExpectedFailure: true,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity("foo", "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity("foo2", "bar")),
+		},
+		"affinity-zone-beta-unchanged": {
+			isExpectedFailure: false,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelFailureDomainBetaZone, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelFailureDomainBetaZone, "bar")),
+		},
+		"affinity-zone-beta-label-to-GA": {
+			isExpectedFailure: false,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelFailureDomainBetaZone, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelTopologyZone, "bar")),
+		},
+		"affinity-zone-beta-label-to-non-GA": {
+			isExpectedFailure: true,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelFailureDomainBetaZone, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity("foo", "bar")),
+		},
+		"affinity-zone-GA-label-changed": {
+			isExpectedFailure: true,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelTopologyZone, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelFailureDomainBetaZone, "bar")),
+		},
+		"affinity-region-beta-unchanged": {
+			isExpectedFailure: false,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelFailureDomainBetaRegion, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelFailureDomainBetaRegion, "bar")),
+		},
+		"affinity-region-beta-label-to-GA": {
+			isExpectedFailure: false,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelFailureDomainBetaRegion, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelTopologyRegion, "bar")),
+		},
+		"affinity-region-beta-label-to-non-GA": {
+			isExpectedFailure: true,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelFailureDomainBetaRegion, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity("foo", "bar")),
+		},
+		"affinity-region-GA-label-changed": {
+			isExpectedFailure: true,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelTopologyRegion, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelFailureDomainBetaRegion, "bar")),
+		},
+		"affinity-os-beta-label-unchanged": {
+			isExpectedFailure: false,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(kubeletapis.LabelOS, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(kubeletapis.LabelOS, "bar")),
+		},
+		"affinity-os-beta-label-to-GA": {
+			isExpectedFailure: false,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(kubeletapis.LabelOS, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelOSStable, "bar")),
+		},
+		"affinity-os-beta-label-to-non-GA": {
+			isExpectedFailure: true,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(kubeletapis.LabelOS, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity("foo", "bar")),
+		},
+		"affinity-os-GA-label-changed": {
+			isExpectedFailure: true,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelOSStable, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(kubeletapis.LabelOS, "bar")),
+		},
+		"affinity-arch-beta-label-unchanged": {
+			isExpectedFailure: false,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(kubeletapis.LabelArch, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(kubeletapis.LabelArch, "bar")),
+		},
+		"affinity-arch-beta-label-to-GA": {
+			isExpectedFailure: false,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(kubeletapis.LabelArch, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelArchStable, "bar")),
+		},
+		"affinity-arch-beta-label-to-non-GA": {
+			isExpectedFailure: true,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(kubeletapis.LabelArch, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity("foo", "bar")),
+		},
+		"affinity-arch-GA-label-changed": {
+			isExpectedFailure: true,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelArchStable, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(kubeletapis.LabelArch, "bar")),
+		},
+		"affinity-instanceType-beta-label-unchanged": {
+			isExpectedFailure: false,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelInstanceType, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelInstanceType, "bar")),
+		},
+		"affinity-instanceType-beta-label-to-GA": {
+			isExpectedFailure: false,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelInstanceType, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelInstanceTypeStable, "bar")),
+		},
+		"affinity-instanceType-beta-label-to-non-GA": {
+			isExpectedFailure: true,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelInstanceType, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity("foo", "bar")),
+		},
+		"affinity-instanceType-GA-label-changed": {
+			isExpectedFailure: true,
+			oldPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelInstanceTypeStable, "bar")),
+			newPV:             testVolumeWithNodeAffinity(simpleVolumeNodeAffinity(v1.LabelInstanceType, "bar")),
+		},
+		"affinity-same-terms-expressions-length-beta-to-GA-partially-changed": {
+			isExpectedFailure: false,
+			oldPV: testVolumeWithNodeAffinity(multipleVolumeNodeAffinity([][]topologyPair{
+				{
+					topologyPair{"foo", "bar"},
+				},
+				{
+					topologyPair{v1.LabelFailureDomainBetaZone, "bar"},
+					topologyPair{v1.LabelFailureDomainBetaRegion, "bar"},
+				},
+				{
+					topologyPair{kubeletapis.LabelOS, "bar"},
+					topologyPair{kubeletapis.LabelArch, "bar"},
+					topologyPair{v1.LabelInstanceType, "bar"},
+				},
+			})),
+			newPV: testVolumeWithNodeAffinity(multipleVolumeNodeAffinity([][]topologyPair{
+				{
+					topologyPair{"foo", "bar"},
+				},
+				{
+					topologyPair{v1.LabelTopologyZone, "bar"},
+					topologyPair{v1.LabelFailureDomainBetaRegion, "bar"},
+				},
+				{
+					topologyPair{kubeletapis.LabelOS, "bar"},
+					topologyPair{v1.LabelArchStable, "bar"},
+					topologyPair{v1.LabelInstanceTypeStable, "bar"},
+				},
+			})),
+		},
+		"affinity-same-terms-expressions-length-beta-to-non-GA-partially-changed": {
+			isExpectedFailure: true,
+			oldPV: testVolumeWithNodeAffinity(multipleVolumeNodeAffinity([][]topologyPair{
+				{
+					topologyPair{"foo", "bar"},
+				},
+				{
+					topologyPair{v1.LabelFailureDomainBetaZone, "bar"},
+					topologyPair{v1.LabelFailureDomainBetaRegion, "bar"},
+				},
+			})),
+			newPV: testVolumeWithNodeAffinity(multipleVolumeNodeAffinity([][]topologyPair{
+				{
+					topologyPair{"foo", "bar"},
+				},
+				{
+					topologyPair{v1.LabelFailureDomainBetaZone, "bar"},
+					topologyPair{"foo", "bar"},
+				},
+			})),
+		},
+		"affinity-same-terms-expressions-length-GA-partially-changed": {
+			isExpectedFailure: true,
+			oldPV: testVolumeWithNodeAffinity(multipleVolumeNodeAffinity([][]topologyPair{
+				{
+					topologyPair{"foo", "bar"},
+				},
+				{
+					topologyPair{v1.LabelTopologyZone, "bar"},
+					topologyPair{v1.LabelFailureDomainBetaZone, "bar"},
+					topologyPair{v1.LabelOSStable, "bar"},
+				},
+			})),
+			newPV: testVolumeWithNodeAffinity(multipleVolumeNodeAffinity([][]topologyPair{
+				{
+					topologyPair{"foo", "bar"},
+				},
+				{
+					topologyPair{v1.LabelFailureDomainBetaZone, "bar"},
+					topologyPair{v1.LabelFailureDomainBetaZone, "bar"},
+					topologyPair{v1.LabelOSStable, "bar"},
+				},
+			})),
+		},
+		"affinity-same-terms-expressions-length-beta-fully-changed": {
+			isExpectedFailure: false,
+			oldPV: testVolumeWithNodeAffinity(multipleVolumeNodeAffinity([][]topologyPair{
+				{
+					topologyPair{"foo", "bar"},
+				},
+				{
+					topologyPair{v1.LabelFailureDomainBetaZone, "bar"},
+					topologyPair{v1.LabelFailureDomainBetaRegion, "bar"},
+				},
+				{
+					topologyPair{kubeletapis.LabelOS, "bar"},
+					topologyPair{kubeletapis.LabelArch, "bar"},
+					topologyPair{v1.LabelInstanceType, "bar"},
+				},
+			})),
+			newPV: testVolumeWithNodeAffinity(multipleVolumeNodeAffinity([][]topologyPair{
+				{
+					topologyPair{"foo", "bar"},
+				},
+				{
+					topologyPair{v1.LabelTopologyZone, "bar"},
+					topologyPair{v1.LabelTopologyRegion, "bar"},
+				},
+				{
+					topologyPair{v1.LabelOSStable, "bar"},
+					topologyPair{v1.LabelArchStable, "bar"},
+					topologyPair{v1.LabelInstanceTypeStable, "bar"},
+				},
+			})),
+		},
+		"affinity-same-terms-expressions-length-beta-GA-mixed-fully-changed": {
+			isExpectedFailure: true,
+			oldPV: testVolumeWithNodeAffinity(multipleVolumeNodeAffinity([][]topologyPair{
+				{
+					topologyPair{"foo", "bar"},
+				},
+				{
+					topologyPair{v1.LabelFailureDomainBetaZone, "bar"},
+					topologyPair{v1.LabelTopologyZone, "bar"},
+				},
+			})),
+			newPV: testVolumeWithNodeAffinity(multipleVolumeNodeAffinity([][]topologyPair{
+				{
+					topologyPair{"foo", "bar"},
+				},
+				{
+					topologyPair{v1.LabelTopologyZone, "bar"},
+					topologyPair{v1.LabelFailureDomainBetaZone, "bar2"},
+				},
+			})),
+		},
+		"affinity-same-terms-length-different-expressions-length-beta-changed": {
+			isExpectedFailure: true,
+			oldPV: testVolumeWithNodeAffinity(multipleVolumeNodeAffinity([][]topologyPair{
+				{
+					topologyPair{v1.LabelFailureDomainBetaZone, "bar"},
+				},
+			})),
+			newPV: testVolumeWithNodeAffinity(multipleVolumeNodeAffinity([][]topologyPair{
+				{
+					topologyPair{v1.LabelTopologyZone, "bar"},
+					topologyPair{v1.LabelFailureDomainBetaRegion, "bar"},
+				},
+			})),
+		},
+		"affinity-different-terms-expressions-length-beta-changed": {
+			isExpectedFailure: true,
+			oldPV: testVolumeWithNodeAffinity(multipleVolumeNodeAffinity([][]topologyPair{
+				{
+					topologyPair{v1.LabelFailureDomainBetaZone, "bar"},
+				},
+			})),
+			newPV: testVolumeWithNodeAffinity(multipleVolumeNodeAffinity([][]topologyPair{
+				{
+					topologyPair{v1.LabelTopologyZone, "bar"},
+				},
+				{
+					topologyPair{v1.LabelArchStable, "bar"},
+				},
+			})),
+		},
 		"nil-to-obj": {
 			isExpectedFailure: false,
 			oldPV:             testVolumeWithNodeAffinity(nil),
@@ -1122,6 +1413,8 @@ func TestValidateVolumeNodeAffinityUpdate(t *testing.T) {
 	}
 
 	for name, scenario := range scenarios {
+		originalNewPV := scenario.newPV.DeepCopy()
+		originalOldPV := scenario.oldPV.DeepCopy()
 		opts := ValidationOptionsForPersistentVolume(scenario.newPV, scenario.oldPV)
 		errs := ValidatePersistentVolumeUpdate(scenario.newPV, scenario.oldPV, opts)
 		if len(errs) == 0 && scenario.isExpectedFailure {
@@ -1129,6 +1422,12 @@ func TestValidateVolumeNodeAffinityUpdate(t *testing.T) {
 		}
 		if len(errs) > 0 && !scenario.isExpectedFailure {
 			t.Errorf("Unexpected failure for scenario: %s - %+v", name, errs)
+		}
+		if diff := cmp.Diff(originalNewPV, scenario.newPV); len(diff) > 0 {
+			t.Errorf("newPV was modified: %s", diff)
+		}
+		if diff := cmp.Diff(originalOldPV, scenario.oldPV); len(diff) > 0 {
+			t.Errorf("oldPV was modified: %s", diff)
 		}
 	}
 }
@@ -6710,7 +7009,7 @@ func TestValidatePullPolicy(t *testing.T) {
 func TestValidateResizePolicy(t *testing.T) {
 	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.InPlacePodVerticalScaling, true)()
 	tSupportedResizeResources := sets.NewString(string(core.ResourceCPU), string(core.ResourceMemory))
-	tSupportedResizePolicies := sets.NewString(string(core.RestartNotRequired), string(core.RestartRequired))
+	tSupportedResizePolicies := sets.NewString(string(core.NotRequired), string(core.RestartContainer))
 	type T struct {
 		PolicyList  []core.ContainerResizePolicy
 		ExpectError bool
@@ -6719,22 +7018,22 @@ func TestValidateResizePolicy(t *testing.T) {
 	testCases := map[string]T{
 		"ValidCPUandMemoryPolicies": {
 			[]core.ContainerResizePolicy{
-				{ResourceName: "cpu", Policy: "RestartNotRequired"},
-				{ResourceName: "memory", Policy: "RestartRequired"},
+				{ResourceName: "cpu", RestartPolicy: "NotRequired"},
+				{ResourceName: "memory", RestartPolicy: "RestartContainer"},
 			},
 			false,
 			nil,
 		},
 		"ValidCPUPolicy": {
 			[]core.ContainerResizePolicy{
-				{ResourceName: "cpu", Policy: "RestartRequired"},
+				{ResourceName: "cpu", RestartPolicy: "RestartContainer"},
 			},
 			false,
 			nil,
 		},
 		"ValidMemoryPolicy": {
 			[]core.ContainerResizePolicy{
-				{ResourceName: "memory", Policy: "RestartNotRequired"},
+				{ResourceName: "memory", RestartPolicy: "NotRequired"},
 			},
 			false,
 			nil,
@@ -6746,39 +7045,39 @@ func TestValidateResizePolicy(t *testing.T) {
 		},
 		"ValidCPUandInvalidMemoryPolicy": {
 			[]core.ContainerResizePolicy{
-				{ResourceName: "cpu", Policy: "RestartNotRequired"},
-				{ResourceName: "memory", Policy: "Restarrrt"},
+				{ResourceName: "cpu", RestartPolicy: "NotRequired"},
+				{ResourceName: "memory", RestartPolicy: "Restarrrt"},
 			},
 			true,
-			field.ErrorList{field.NotSupported(field.NewPath("field"), core.ResourceResizePolicy("Restarrrt"), tSupportedResizePolicies.List())},
+			field.ErrorList{field.NotSupported(field.NewPath("field"), core.ResourceResizeRestartPolicy("Restarrrt"), tSupportedResizePolicies.List())},
 		},
 		"ValidMemoryandInvalidCPUPolicy": {
 			[]core.ContainerResizePolicy{
-				{ResourceName: "cpu", Policy: "RestartNotRequirrred"},
-				{ResourceName: "memory", Policy: "RestartRequired"},
+				{ResourceName: "cpu", RestartPolicy: "RestartNotRequirrred"},
+				{ResourceName: "memory", RestartPolicy: "RestartContainer"},
 			},
 			true,
-			field.ErrorList{field.NotSupported(field.NewPath("field"), core.ResourceResizePolicy("RestartNotRequirrred"), tSupportedResizePolicies.List())},
+			field.ErrorList{field.NotSupported(field.NewPath("field"), core.ResourceResizeRestartPolicy("RestartNotRequirrred"), tSupportedResizePolicies.List())},
 		},
 		"InvalidResourceNameValidPolicy": {
 			[]core.ContainerResizePolicy{
-				{ResourceName: "cpuuu", Policy: "RestartNotRequired"},
+				{ResourceName: "cpuuu", RestartPolicy: "NotRequired"},
 			},
 			true,
 			field.ErrorList{field.NotSupported(field.NewPath("field"), core.ResourceName("cpuuu"), tSupportedResizeResources.List())},
 		},
 		"ValidResourceNameMissingPolicy": {
 			[]core.ContainerResizePolicy{
-				{ResourceName: "memory", Policy: ""},
+				{ResourceName: "memory", RestartPolicy: ""},
 			},
 			true,
 			field.ErrorList{field.Required(field.NewPath("field"), "")},
 		},
 		"RepeatedPolicies": {
 			[]core.ContainerResizePolicy{
-				{ResourceName: "cpu", Policy: "RestartNotRequired"},
-				{ResourceName: "memory", Policy: "RestartRequired"},
-				{ResourceName: "cpu", Policy: "RestartRequired"},
+				{ResourceName: "cpu", RestartPolicy: "NotRequired"},
+				{ResourceName: "memory", RestartPolicy: "RestartContainer"},
+				{ResourceName: "cpu", RestartPolicy: "RestartContainer"},
 			},
 			true,
 			field.ErrorList{field.Duplicate(field.NewPath("field").Index(2), core.ResourceCPU)},
@@ -7176,7 +7475,7 @@ func TestValidateEphemeralContainers(t *testing.T) {
 						ImagePullPolicy:          "IfNotPresent",
 						TerminationMessagePolicy: "File",
 						ResizePolicy: []core.ContainerResizePolicy{
-							{ResourceName: "cpu", Policy: "RestartNotRequired"},
+							{ResourceName: "cpu", RestartPolicy: "NotRequired"},
 						},
 					},
 				},
@@ -7403,8 +7702,8 @@ func TestValidateContainers(t *testing.T) {
 			Name:  "resources-resize-policy",
 			Image: "image",
 			ResizePolicy: []core.ContainerResizePolicy{
-				{ResourceName: "cpu", Policy: "RestartNotRequired"},
-				{ResourceName: "memory", Policy: "RestartRequired"},
+				{ResourceName: "cpu", RestartPolicy: "NotRequired"},
+				{ResourceName: "memory", RestartPolicy: "RestartContainer"},
 			},
 			ImagePullPolicy:          "IfNotPresent",
 			TerminationMessagePolicy: "File",
@@ -9178,7 +9477,7 @@ func TestValidatePodSpec(t *testing.T) {
 					Name:  "initctr",
 					Image: "initimage",
 					ResizePolicy: []core.ContainerResizePolicy{
-						{ResourceName: "cpu", Policy: "RestartNotRequired"},
+						{ResourceName: "cpu", RestartPolicy: "NotRequired"},
 					},
 					ImagePullPolicy:          "IfNotPresent",
 					TerminationMessagePolicy: "File",
@@ -9189,7 +9488,7 @@ func TestValidatePodSpec(t *testing.T) {
 					Name:  "ctr",
 					Image: "image",
 					ResizePolicy: []core.ContainerResizePolicy{
-						{ResourceName: "cpu", Policy: "RestartNotRequired"},
+						{ResourceName: "cpu", RestartPolicy: "NotRequired"},
 					},
 					ImagePullPolicy:          "IfNotPresent",
 					TerminationMessagePolicy: "File",
@@ -10996,6 +11295,7 @@ func TestValidatePodUpdate(t *testing.T) {
 	tests := []struct {
 		new  core.Pod
 		old  core.Pod
+		opts PodValidationOptions
 		err  string
 		test string
 	}{
@@ -12485,6 +12785,952 @@ func TestValidatePodUpdate(t *testing.T) {
 			err:  "",
 			test: "update pod spec schedulingGates: legal deletion",
 		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					NodeSelector: map[string]string{
+						"foo": "bar",
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			err:  "Forbidden: pod updates may not change fields other than `spec.containers[*].image",
+			test: "node selector is immutable when AllowMutableNodeSelector is false",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					NodeSelector: map[string]string{
+						"foo": "bar",
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			test: "adding node selector is allowed for gated pods",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					NodeSelector: map[string]string{
+						"foo": "bar",
+					},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					NodeSelector: map[string]string{
+						"foo":  "bar",
+						"foo2": "bar2",
+					},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			err:  "Forbidden: pod updates may not change fields other than `spec.containers[*].image",
+			test: "adding node selector is not allowed for non-gated pods",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					NodeSelector: map[string]string{
+						"foo": "bar",
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			err:  "spec.nodeSelector: Invalid value:",
+			test: "removing node selector is not allowed for gated pods",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					NodeSelector: map[string]string{
+						"foo": "bar",
+					},
+				},
+			},
+			new: core.Pod{},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			err:  "Forbidden: pod updates may not change fields other than `spec.containers[*].image",
+			test: "removing node selector is not allowed for non-gated pods",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					NodeSelector: map[string]string{
+						"foo": "bar",
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					NodeSelector: map[string]string{
+						"foo":  "bar",
+						"foo2": "bar2",
+					},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			test: "old pod spec has scheduling gate, new pod spec does not, and node selector is added",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					NodeSelector: map[string]string{
+						"foo": "bar",
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					NodeSelector: map[string]string{
+						"foo": "new value",
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			err:  "spec.nodeSelector: Invalid value:",
+			test: "modifying value of existing node selector is not allowed",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								// Add 1 MatchExpression and 1 MatchField.
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+											{
+												Key:      "expr2",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo2"},
+											},
+										},
+										MatchFields: []core.NodeSelectorRequirement{
+											{
+												Key:      "metadata.name",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			test: "addition to nodeAffinity is allowed for gated pods",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			err:  "spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms: Invalid value:",
+			test: "old RequiredDuringSchedulingIgnoredDuringExecution is non-nil, new RequiredDuringSchedulingIgnoredDuringExecution is nil, pod is gated",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								// Add 1 MatchExpression and 1 MatchField.
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+											{
+												Key:      "expr2",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo2"},
+											},
+										},
+										MatchFields: []core.NodeSelectorRequirement{
+											{
+												Key:      "metadata.name",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			err:  "Forbidden: pod updates may not change fields other than `spec.containers[*].image",
+			test: "addition to nodeAffinity is not allowed for non-gated pods",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								// Add 1 MatchExpression and 1 MatchField.
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+											{
+												Key:      "expr2",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo2"},
+											},
+										},
+										MatchFields: []core.NodeSelectorRequirement{
+											{
+												Key:      "metadata.name",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			test: "old pod spec has scheduling gate, new pod spec does not, and node affinity addition occurs",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchFields: []core.NodeSelectorRequirement{
+											{
+												Key:      "metadata.name",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			err:  "spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0]: Invalid value:",
+			test: "nodeAffinity deletion from MatchExpressions not allowed",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+										MatchFields: []core.NodeSelectorRequirement{
+											{
+												Key:      "metadata.name",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								// Add 1 MatchExpression and 1 MatchField.
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			err:  "spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0]: Invalid value:",
+			test: "nodeAffinity deletion from MatchFields not allowed",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+										MatchFields: []core.NodeSelectorRequirement{
+											{
+												Key:      "metadata.name",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								// Add 1 MatchExpression and 1 MatchField.
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"bar"},
+											},
+										},
+										MatchFields: []core.NodeSelectorRequirement{
+											{
+												Key:      "metadata.name",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			err:  "spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0]: Invalid value:",
+			test: "nodeAffinity modification of item in MatchExpressions not allowed",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+										MatchFields: []core.NodeSelectorRequirement{
+											{
+												Key:      "metadata.name",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+										MatchFields: []core.NodeSelectorRequirement{
+											{
+												Key:      "metadata.name",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"bar"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			err:  "spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0]: Invalid value:",
+			test: "nodeAffinity modification of item in MatchFields not allowed",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+										MatchFields: []core.NodeSelectorRequirement{
+											{
+												Key:      "metadata.name",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+										MatchFields: []core.NodeSelectorRequirement{
+											{
+												Key:      "metadata.name",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"bar"},
+											},
+										},
+									},
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo2"},
+											},
+										},
+										MatchFields: []core.NodeSelectorRequirement{
+											{
+												Key:      "metadata.name",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"bar2"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			err:  "spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms: Invalid value:",
+			test: "nodeSelectorTerms addition on gated pod should fail",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							PreferredDuringSchedulingIgnoredDuringExecution: []core.PreferredSchedulingTerm{
+								{
+									Weight: 1.0,
+									Preference: core.NodeSelectorTerm{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							PreferredDuringSchedulingIgnoredDuringExecution: []core.PreferredSchedulingTerm{
+								{
+									Weight: 1.0,
+									Preference: core.NodeSelectorTerm{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo2"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			test: "preferredDuringSchedulingIgnoredDuringExecution can modified for gated pods",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							PreferredDuringSchedulingIgnoredDuringExecution: []core.PreferredSchedulingTerm{
+								{
+									Weight: 1.0,
+									Preference: core.NodeSelectorTerm{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							PreferredDuringSchedulingIgnoredDuringExecution: []core.PreferredSchedulingTerm{
+								{
+									Weight: 1.0,
+									Preference: core.NodeSelectorTerm{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+											{
+												Key:      "expr2",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo2"},
+											},
+										},
+										MatchFields: []core.NodeSelectorRequirement{
+											{
+												Key:      "metadata.name",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"bar"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			test: "preferredDuringSchedulingIgnoredDuringExecution can have additions for gated pods",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							PreferredDuringSchedulingIgnoredDuringExecution: []core.PreferredSchedulingTerm{
+								{
+									Weight: 1.0,
+									Preference: core.NodeSelectorTerm{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			test: "preferredDuringSchedulingIgnoredDuringExecution can have removals for gated pods",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					Affinity:        &core.Affinity{},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			err:  "spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms: Invalid value:",
+			test: "new node affinity is nil",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							PreferredDuringSchedulingIgnoredDuringExecution: []core.PreferredSchedulingTerm{
+								{
+									Weight: 1.0,
+									Preference: core.NodeSelectorTerm{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			test: "preferredDuringSchedulingIgnoredDuringExecution can have removals for gated pods",
+		},
+		{
+			old: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			new: core.Pod{
+				Spec: core.PodSpec{
+					Affinity: &core.Affinity{
+						NodeAffinity: &core.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &core.NodeSelector{
+								NodeSelectorTerms: []core.NodeSelectorTerm{
+									{
+										MatchExpressions: []core.NodeSelectorRequirement{
+											{
+												Key:      "expr",
+												Operator: core.NodeSelectorOpIn,
+												Values:   []string{"foo"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					SchedulingGates: []core.PodSchedulingGate{{Name: "baz"}},
+				},
+			},
+			opts: PodValidationOptions{
+				AllowMutableNodeSelectorAndNodeAffinity: true,
+			},
+			err:  "spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0]: Invalid value:",
+			test: "empty NodeSelectorTerm (selects nothing) cannot become populated (selects something)",
+		},
 	}
 	for _, test := range tests {
 		test.new.ObjectMeta.ResourceVersion = "1"
@@ -12512,7 +13758,7 @@ func TestValidatePodUpdate(t *testing.T) {
 			test.old.Spec.RestartPolicy = "Always"
 		}
 
-		errs := ValidatePodUpdate(&test.new, &test.old, PodValidationOptions{})
+		errs := ValidatePodUpdate(&test.new, &test.old, test.opts)
 		if test.err == "" {
 			if len(errs) != 0 {
 				t.Errorf("unexpected invalid: %s (%+v)\nA: %+v\nB: %+v", test.test, errs, test.new, test.old)
@@ -14712,6 +15958,14 @@ func TestValidateServiceCreate(t *testing.T) {
 			tweakSvc: func(s *core.Service) {
 				s.Spec.Type = core.ServiceTypeClusterIP
 				s.Spec.LoadBalancerClass = utilpointer.String("test.com/test-load-balancer-class")
+			},
+			numErrs: 1,
+		},
+		{
+			name: "topology annotations are mismatched",
+			tweakSvc: func(s *core.Service) {
+				s.Annotations[core.DeprecatedAnnotationTopologyAwareHints] = "original"
+				s.Annotations[core.AnnotationTopologyMode] = "different"
 			},
 			numErrs: 1,
 		},
@@ -17351,6 +18605,14 @@ func TestValidateServiceUpdate(t *testing.T) {
 			},
 			numErrs: 0,
 		},
+		{
+			name: "topology annotations are mismatched",
+			tweakSvc: func(oldSvc, newSvc *core.Service) {
+				newSvc.Annotations[core.DeprecatedAnnotationTopologyAwareHints] = "original"
+				newSvc.Annotations[core.AnnotationTopologyMode] = "different"
+			},
+			numErrs: 1,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -19227,7 +20489,7 @@ func TestValidateOSFields(t *testing.T) {
 		"Containers[*].Ports",
 		"Containers[*].ReadinessProbe",
 		"Containers[*].Resources",
-		"Containers[*].ResizePolicy[*].Policy",
+		"Containers[*].ResizePolicy[*].RestartPolicy",
 		"Containers[*].ResizePolicy[*].ResourceName",
 		"Containers[*].SecurityContext.RunAsNonRoot",
 		"Containers[*].Stdin",
@@ -19253,7 +20515,7 @@ func TestValidateOSFields(t *testing.T) {
 		"EphemeralContainers[*].EphemeralContainerCommon.Ports",
 		"EphemeralContainers[*].EphemeralContainerCommon.ReadinessProbe",
 		"EphemeralContainers[*].EphemeralContainerCommon.Resources",
-		"EphemeralContainers[*].EphemeralContainerCommon.ResizePolicy[*].Policy",
+		"EphemeralContainers[*].EphemeralContainerCommon.ResizePolicy[*].RestartPolicy",
 		"EphemeralContainers[*].EphemeralContainerCommon.ResizePolicy[*].ResourceName",
 		"EphemeralContainers[*].EphemeralContainerCommon.Stdin",
 		"EphemeralContainers[*].EphemeralContainerCommon.StdinOnce",
@@ -19281,7 +20543,7 @@ func TestValidateOSFields(t *testing.T) {
 		"InitContainers[*].Ports",
 		"InitContainers[*].ReadinessProbe",
 		"InitContainers[*].Resources",
-		"InitContainers[*].ResizePolicy[*].Policy",
+		"InitContainers[*].ResizePolicy[*].RestartPolicy",
 		"InitContainers[*].ResizePolicy[*].ResourceName",
 		"InitContainers[*].Stdin",
 		"InitContainers[*].StdinOnce",
@@ -20845,11 +22107,12 @@ func TestValidateTopologySpreadConstraints(t *testing.T) {
 				{
 					MaxSkew:           1,
 					TopologyKey:       "k8s.io/zone",
+					LabelSelector:     &metav1.LabelSelector{},
 					WhenUnsatisfiable: core.DoNotSchedule,
 					MatchLabelKeys:    []string{"/simple"},
 				},
 			},
-			wantFieldErrors: []*field.Error{field.Invalid(fieldPathMatchLabelKeys.Index(0), "/simple", "prefix part must be non-empty")},
+			wantFieldErrors: field.ErrorList{field.Invalid(fieldPathMatchLabelKeys.Index(0), "/simple", "prefix part must be non-empty")},
 		},
 		{
 			name: "key exists in both matchLabelKeys and labelSelector",
@@ -20870,7 +22133,19 @@ func TestValidateTopologySpreadConstraints(t *testing.T) {
 					},
 				},
 			},
-			wantFieldErrors: []*field.Error{field.Invalid(fieldPathMatchLabelKeys.Index(0), "foo", "exists in both matchLabelKeys and labelSelector")},
+			wantFieldErrors: field.ErrorList{field.Invalid(fieldPathMatchLabelKeys.Index(0), "foo", "exists in both matchLabelKeys and labelSelector")},
+		},
+		{
+			name: "key in MatchLabelKeys is forbidden to be specified when labelSelector is not set",
+			constraints: []core.TopologySpreadConstraint{
+				{
+					MaxSkew:           1,
+					TopologyKey:       "k8s.io/zone",
+					WhenUnsatisfiable: core.DoNotSchedule,
+					MatchLabelKeys:    []string{"foo"},
+				},
+			},
+			wantFieldErrors: field.ErrorList{field.Forbidden(fieldPathMatchLabelKeys, "must not be specified when labelSelector is not set")},
 		},
 		{
 			name: "invalid matchLabels set on labelSelector when AllowInvalidTopologySpreadConstraintLabelSelector is false",
@@ -22434,34 +23709,42 @@ func TestValidateDynamicResourceAllocation(t *testing.T) {
 	goodClaimSource := core.ClaimSource{
 		ResourceClaimName: &externalClaimName,
 	}
+	shortPodName := &metav1.ObjectMeta{
+		Name: "some-pod",
+	}
+	brokenPodName := &metav1.ObjectMeta{
+		Name: ".dot.com",
+	}
+	goodClaimTemplate := core.PodSpec{
+		Containers:    []core.Container{{Name: "ctr", Image: "image", ImagePullPolicy: "IfNotPresent", TerminationMessagePolicy: "File", Resources: core.ResourceRequirements{Claims: []core.ResourceClaim{{Name: "my-claim-template"}}}}},
+		RestartPolicy: core.RestartPolicyAlways,
+		DNSPolicy:     core.DNSClusterFirst,
+		ResourceClaims: []core.PodResourceClaim{
+			{
+				Name: "my-claim-template",
+				Source: core.ClaimSource{
+					ResourceClaimTemplateName: &externalClaimTemplateName,
+				},
+			},
+		},
+	}
+	goodClaimReference := core.PodSpec{
+		Containers:    []core.Container{{Name: "ctr", Image: "image", ImagePullPolicy: "IfNotPresent", TerminationMessagePolicy: "File", Resources: core.ResourceRequirements{Claims: []core.ResourceClaim{{Name: "my-claim-reference"}}}}},
+		RestartPolicy: core.RestartPolicyAlways,
+		DNSPolicy:     core.DNSClusterFirst,
+		ResourceClaims: []core.PodResourceClaim{
+			{
+				Name: "my-claim-reference",
+				Source: core.ClaimSource{
+					ResourceClaimName: &externalClaimName,
+				},
+			},
+		},
+	}
 
 	successCases := map[string]core.PodSpec{
-		"resource claim reference": {
-			Containers:    []core.Container{{Name: "ctr", Image: "image", ImagePullPolicy: "IfNotPresent", TerminationMessagePolicy: "File", Resources: core.ResourceRequirements{Claims: []core.ResourceClaim{{Name: "my-claim"}}}}},
-			RestartPolicy: core.RestartPolicyAlways,
-			DNSPolicy:     core.DNSClusterFirst,
-			ResourceClaims: []core.PodResourceClaim{
-				{
-					Name: "my-claim",
-					Source: core.ClaimSource{
-						ResourceClaimName: &externalClaimName,
-					},
-				},
-			},
-		},
-		"resource claim template": {
-			Containers:    []core.Container{{Name: "ctr", Image: "image", ImagePullPolicy: "IfNotPresent", TerminationMessagePolicy: "File", Resources: core.ResourceRequirements{Claims: []core.ResourceClaim{{Name: "my-claim"}}}}},
-			RestartPolicy: core.RestartPolicyAlways,
-			DNSPolicy:     core.DNSClusterFirst,
-			ResourceClaims: []core.PodResourceClaim{
-				{
-					Name: "my-claim",
-					Source: core.ClaimSource{
-						ResourceClaimTemplateName: &externalClaimTemplateName,
-					},
-				},
-			},
-		},
+		"resource claim reference": goodClaimTemplate,
+		"resource claim template":  goodClaimTemplate,
 		"multiple claims": {
 			Containers:    []core.Container{{Name: "ctr", Image: "image", ImagePullPolicy: "IfNotPresent", TerminationMessagePolicy: "File", Resources: core.ResourceRequirements{Claims: []core.ResourceClaim{{Name: "my-claim"}, {Name: "another-claim"}}}}},
 			RestartPolicy: core.RestartPolicyAlways,
@@ -22492,7 +23775,7 @@ func TestValidateDynamicResourceAllocation(t *testing.T) {
 	}
 	for k, v := range successCases {
 		t.Run(k, func(t *testing.T) {
-			if errs := ValidatePodSpec(&v, nil, field.NewPath("field"), PodValidationOptions{}); len(errs) != 0 {
+			if errs := ValidatePodSpec(&v, shortPodName, field.NewPath("field"), PodValidationOptions{}); len(errs) != 0 {
 				t.Errorf("expected success: %v", errs)
 			}
 		})
@@ -22637,10 +23920,43 @@ func TestValidateDynamicResourceAllocation(t *testing.T) {
 				},
 			},
 		},
+		"invalid claim template name": func() core.PodSpec {
+			spec := goodClaimTemplate.DeepCopy()
+			notLabel := ".foo_bar"
+			spec.ResourceClaims[0].Source.ResourceClaimTemplateName = &notLabel
+			return *spec
+		}(),
+		"invalid claim reference name": func() core.PodSpec {
+			spec := goodClaimReference.DeepCopy()
+			notLabel := ".foo_bar"
+			spec.ResourceClaims[0].Source.ResourceClaimName = &notLabel
+			return *spec
+		}(),
 	}
 	for k, v := range failureCases {
 		if errs := ValidatePodSpec(&v, nil, field.NewPath("field"), PodValidationOptions{}); len(errs) == 0 {
 			t.Errorf("expected failure for %q", k)
 		}
 	}
+
+	t.Run("generated-claim-name", func(t *testing.T) {
+		for _, spec := range []*core.PodSpec{&goodClaimTemplate, &goodClaimReference} {
+			claimName := spec.ResourceClaims[0].Name
+			t.Run(claimName, func(t *testing.T) {
+				for _, podMeta := range []*metav1.ObjectMeta{shortPodName, brokenPodName} {
+					t.Run(podMeta.Name, func(t *testing.T) {
+						errs := ValidatePodSpec(spec, podMeta, field.NewPath("field"), PodValidationOptions{})
+						// Only one out of the four combinations fails.
+						expectError := spec == &goodClaimTemplate && podMeta == brokenPodName
+						if expectError && len(errs) == 0 {
+							t.Error("did not get the expected failure")
+						}
+						if !expectError && len(errs) > 0 {
+							t.Errorf("unexpected failures: %+v", errs)
+						}
+					})
+				}
+			})
+		}
+	})
 }

@@ -39,7 +39,7 @@ import (
 	flowcontrolv1beta3 "k8s.io/api/flowcontrol/v1beta3"
 	networkingv1alpha1 "k8s.io/api/networking/v1alpha1"
 	rbacv1beta1 "k8s.io/api/rbac/v1beta1"
-	resourcev1alpha1 "k8s.io/api/resource/v1alpha1"
+	resourcev1alpha2 "k8s.io/api/resource/v1alpha2"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -613,7 +613,7 @@ func AddHandlers(h printers.PrintHandler) {
 
 	resourceClassColumnDefinitions := []metav1.TableColumnDefinition{
 		{Name: "Name", Type: "string", Format: "name", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
-		{Name: "DriverName", Type: "string", Description: resourcev1alpha1.ResourceClass{}.SwaggerDoc()["driverName"]},
+		{Name: "DriverName", Type: "string", Description: resourcev1alpha2.ResourceClass{}.SwaggerDoc()["driverName"]},
 		{Name: "Age", Type: "string", Description: metav1.ObjectMeta{}.SwaggerDoc()["creationTimestamp"]},
 	}
 	_ = h.TableHandler(resourceClassColumnDefinitions, printResourceClass)
@@ -621,8 +621,8 @@ func AddHandlers(h printers.PrintHandler) {
 
 	resourceClaimColumnDefinitions := []metav1.TableColumnDefinition{
 		{Name: "Name", Type: "string", Format: "name", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
-		{Name: "ResourceClassName", Type: "string", Description: resourcev1alpha1.ResourceClaimSpec{}.SwaggerDoc()["resourceClassName"]},
-		{Name: "AllocationMode", Type: "string", Description: resourcev1alpha1.ResourceClaimSpec{}.SwaggerDoc()["allocationMode"]},
+		{Name: "ResourceClassName", Type: "string", Description: resourcev1alpha2.ResourceClaimSpec{}.SwaggerDoc()["resourceClassName"]},
+		{Name: "AllocationMode", Type: "string", Description: resourcev1alpha2.ResourceClaimSpec{}.SwaggerDoc()["allocationMode"]},
 		{Name: "State", Type: "string", Description: "A summary of the current state (allocated, pending, reserved, etc.)."},
 		{Name: "Age", Type: "string", Description: metav1.ObjectMeta{}.SwaggerDoc()["creationTimestamp"]},
 	}
@@ -631,20 +631,28 @@ func AddHandlers(h printers.PrintHandler) {
 
 	resourceClaimTemplateColumnDefinitions := []metav1.TableColumnDefinition{
 		{Name: "Name", Type: "string", Format: "name", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
-		{Name: "ResourceClassName", Type: "string", Description: resourcev1alpha1.ResourceClaimSpec{}.SwaggerDoc()["resourceClassName"]},
-		{Name: "AllocationMode", Type: "string", Description: resourcev1alpha1.ResourceClaimSpec{}.SwaggerDoc()["allocationMode"]},
+		{Name: "ResourceClassName", Type: "string", Description: resourcev1alpha2.ResourceClaimSpec{}.SwaggerDoc()["resourceClassName"]},
+		{Name: "AllocationMode", Type: "string", Description: resourcev1alpha2.ResourceClaimSpec{}.SwaggerDoc()["allocationMode"]},
 		{Name: "Age", Type: "string", Description: metav1.ObjectMeta{}.SwaggerDoc()["creationTimestamp"]},
 	}
 	_ = h.TableHandler(resourceClaimTemplateColumnDefinitions, printResourceClaimTemplate)
 	_ = h.TableHandler(resourceClaimTemplateColumnDefinitions, printResourceClaimTemplateList)
 
-	podSchedulingColumnDefinitions := []metav1.TableColumnDefinition{
+	podSchedulingCtxColumnDefinitions := []metav1.TableColumnDefinition{
 		{Name: "Name", Type: "string", Format: "name", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
-		{Name: "SelectedNode", Type: "string", Description: resourcev1alpha1.PodSchedulingSpec{}.SwaggerDoc()["selectedNode"]},
+		{Name: "SelectedNode", Type: "string", Description: resourcev1alpha2.PodSchedulingContextSpec{}.SwaggerDoc()["selectedNode"]},
 		{Name: "Age", Type: "string", Description: metav1.ObjectMeta{}.SwaggerDoc()["creationTimestamp"]},
 	}
-	_ = h.TableHandler(podSchedulingColumnDefinitions, printPodScheduling)
-	_ = h.TableHandler(podSchedulingColumnDefinitions, printPodSchedulingList)
+	_ = h.TableHandler(podSchedulingCtxColumnDefinitions, printPodSchedulingContext)
+	_ = h.TableHandler(podSchedulingCtxColumnDefinitions, printPodSchedulingContextList)
+
+	ipAddressColumnDefinitions := []metav1.TableColumnDefinition{
+		{Name: "Name", Type: "string", Format: "name", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
+		{Name: "ParentRef", Type: "string", Description: networkingv1alpha1.IPAddressSpec{}.SwaggerDoc()["parentRef"]},
+	}
+
+	h.TableHandler(ipAddressColumnDefinitions, printIPAddress)
+	h.TableHandler(ipAddressColumnDefinitions, printIPAddressList)
 }
 
 // Pass ports=nil for all ports.
@@ -2779,6 +2787,41 @@ func printClusterCIDRList(list *networking.ClusterCIDRList, options printers.Gen
 	return rows, nil
 }
 
+func printIPAddress(obj *networking.IPAddress, options printers.GenerateOptions) ([]metav1.TableRow, error) {
+	row := metav1.TableRow{
+		Object: runtime.RawExtension{Object: obj},
+	}
+
+	parentRefName := "<none>"
+	if obj.Spec.ParentRef != nil {
+		gr := schema.GroupResource{
+			Group:    obj.Spec.ParentRef.Group,
+			Resource: obj.Spec.ParentRef.Resource,
+		}
+		parentRefName = strings.ToLower(gr.String())
+		if obj.Spec.ParentRef.Namespace != "" {
+			parentRefName += "/" + obj.Spec.ParentRef.Namespace
+		}
+		parentRefName += "/" + obj.Spec.ParentRef.Name
+	}
+	age := translateTimestampSince(obj.CreationTimestamp)
+	row.Cells = append(row.Cells, obj.Name, parentRefName, age)
+
+	return []metav1.TableRow{row}, nil
+}
+
+func printIPAddressList(list *networking.IPAddressList, options printers.GenerateOptions) ([]metav1.TableRow, error) {
+	rows := make([]metav1.TableRow, 0, len(list.Items))
+	for i := range list.Items {
+		r, err := printIPAddress(&list.Items[i], options)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, r...)
+	}
+	return rows, nil
+}
+
 func printScale(obj *autoscaling.Scale, options printers.GenerateOptions) ([]metav1.TableRow, error) {
 	row := metav1.TableRow{
 		Object: runtime.RawExtension{Object: obj},
@@ -2870,7 +2913,7 @@ func printResourceClaimTemplateList(list *resource.ResourceClaimTemplateList, op
 	return rows, nil
 }
 
-func printPodScheduling(obj *resource.PodScheduling, options printers.GenerateOptions) ([]metav1.TableRow, error) {
+func printPodSchedulingContext(obj *resource.PodSchedulingContext, options printers.GenerateOptions) ([]metav1.TableRow, error) {
 	row := metav1.TableRow{
 		Object: runtime.RawExtension{Object: obj},
 	}
@@ -2879,10 +2922,10 @@ func printPodScheduling(obj *resource.PodScheduling, options printers.GenerateOp
 	return []metav1.TableRow{row}, nil
 }
 
-func printPodSchedulingList(list *resource.PodSchedulingList, options printers.GenerateOptions) ([]metav1.TableRow, error) {
+func printPodSchedulingContextList(list *resource.PodSchedulingContextList, options printers.GenerateOptions) ([]metav1.TableRow, error) {
 	rows := make([]metav1.TableRow, 0, len(list.Items))
 	for i := range list.Items {
-		r, err := printPodScheduling(&list.Items[i], options)
+		r, err := printPodSchedulingContext(&list.Items[i], options)
 		if err != nil {
 			return nil, err
 		}

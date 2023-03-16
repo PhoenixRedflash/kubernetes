@@ -74,8 +74,8 @@ type TestContainerInfo struct {
 	Name         string
 	Resources    *ContainerResources
 	Allocations  *ContainerAllocations
-	CPUPolicy    *v1.ResourceResizePolicy
-	MemPolicy    *v1.ResourceResizePolicy
+	CPUPolicy    *v1.ResourceResizeRestartPolicy
+	MemPolicy    *v1.ResourceResizeRestartPolicy
 	RestartCount int32
 }
 
@@ -146,18 +146,18 @@ func getTestResourceInfo(tcInfo TestContainerInfo) (v1.ResourceRequirements, v1.
 
 	}
 	if tcInfo.CPUPolicy != nil {
-		cpuPol := v1.ContainerResizePolicy{ResourceName: v1.ResourceCPU, Policy: *tcInfo.CPUPolicy}
+		cpuPol := v1.ContainerResizePolicy{ResourceName: v1.ResourceCPU, RestartPolicy: *tcInfo.CPUPolicy}
 		resizePol = append(resizePol, cpuPol)
 	}
 	if tcInfo.MemPolicy != nil {
-		memPol := v1.ContainerResizePolicy{ResourceName: v1.ResourceMemory, Policy: *tcInfo.MemPolicy}
+		memPol := v1.ContainerResizePolicy{ResourceName: v1.ResourceMemory, RestartPolicy: *tcInfo.MemPolicy}
 		resizePol = append(resizePol, memPol)
 	}
 	return res, alloc, resizePol
 }
 
 func initDefaultResizePolicy(containers []TestContainerInfo) {
-	noRestart := v1.RestartNotRequired
+	noRestart := v1.NotRequired
 	setDefaultPolicy := func(ci *TestContainerInfo) {
 		if ci.CPUPolicy == nil {
 			ci.CPUPolicy = &noRestart
@@ -200,7 +200,7 @@ func makeTestContainer(tcInfo TestContainerInfo) (v1.Container, v1.ContainerStat
 
 	tcStatus := v1.ContainerStatus{
 		Name:               tcInfo.Name,
-		ResourcesAllocated: alloc,
+		AllocatedResources: alloc,
 	}
 	return tc, tcStatus
 }
@@ -279,9 +279,9 @@ func verifyPodAllocations(pod *v1.Pod, tcInfo []TestContainerInfo, flagError boo
 
 		_, tcStatus := makeTestContainer(ci)
 		if flagError {
-			framework.ExpectEqual(tcStatus.ResourcesAllocated, cStatus.ResourcesAllocated)
+			framework.ExpectEqual(tcStatus.AllocatedResources, cStatus.AllocatedResources)
 		}
-		if diff.ObjectDiff(cStatus.ResourcesAllocated, tcStatus.ResourcesAllocated) != "" {
+		if diff.ObjectDiff(cStatus.AllocatedResources, tcStatus.AllocatedResources) != "" {
 			return false
 		}
 	}
@@ -500,8 +500,8 @@ func doPodResizeTests() {
 		expected    []TestContainerInfo
 	}
 
-	noRestart := v1.RestartNotRequired
-	doRestart := v1.RestartRequired
+	noRestart := v1.NotRequired
+	doRestart := v1.RestartContainer
 	tests := []testCase{
 		{
 			name: "Guaranteed QoS pod, one container - increase CPU & memory",
@@ -1010,7 +1010,7 @@ func doPodResizeTests() {
 			},
 		},
 		{
-			name: "Guaranteed QoS pod, one container - increase CPU (RestartNotRequired) & memory (RestartRequired)",
+			name: "Guaranteed QoS pod, one container - increase CPU (NotRequired) & memory (RestartContainer)",
 			containers: []TestContainerInfo{
 				{
 					Name:      "c1",
@@ -1033,7 +1033,7 @@ func doPodResizeTests() {
 			},
 		},
 		{
-			name: "Burstable QoS pod, one container - decrease CPU (RestartRequired) & memory (RestartNotRequired)",
+			name: "Burstable QoS pod, one container - decrease CPU (RestartContainer) & memory (NotRequired)",
 			containers: []TestContainerInfo{
 				{
 					Name:      "c1",
@@ -1487,8 +1487,12 @@ func doPodResizeSchedulerTests() {
 			nodeAllocatableMilliCPU := n.Status.Allocatable.Cpu().MilliValue()
 			gomega.Expect(n.Status.Allocatable != nil)
 			podAllocatedMilliCPU := int64(0)
-			listOptions := metav1.ListOptions{FieldSelector: "spec.nodeName=" + n.Name}
+
+			// Exclude pods that are in the Succeeded or Failed states
+			selector := fmt.Sprintf("spec.nodeName=%s,status.phase!=%v,status.phase!=%v", n.Name, v1.PodSucceeded, v1.PodFailed)
+			listOptions := metav1.ListOptions{FieldSelector: selector}
 			podList, err := f.ClientSet.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), listOptions)
+
 			framework.ExpectNoError(err, "failed to get running pods")
 			framework.Logf("Found %d pods on node '%s'", len(podList.Items), n.Name)
 			for _, pod := range podList.Items {
@@ -1560,7 +1564,7 @@ func doPodResizeSchedulerTests() {
 		framework.ExpectEqual(testPod2.Status.Phase, v1.PodPending)
 
 		ginkgo.By(fmt.Sprintf("TEST1: Resize pod '%s' to fit in node '%s'", testPod2.Name, node.Name))
-		testPod2, pErr := f.ClientSet.CoreV1().Pods(testPod2.Namespace).Patch(context.TODO(),
+		testPod2, pErr := f.ClientSet.CoreV1().Pods(testPod2.Namespace).Patch(ctx,
 			testPod2.Name, types.StrategicMergePatchType, []byte(patchTestpod2ToFitNode), metav1.PatchOptions{})
 		framework.ExpectNoError(pErr, "failed to patch pod for resize")
 
@@ -1629,7 +1633,7 @@ func doPodResizeSchedulerTests() {
 	})
 }
 
-var _ = SIGDescribe("[Serial] Pod InPlace Resize Container (scheduler-focussed) [Feature:InPlacePodVerticalScaling]", func() {
+var _ = SIGDescribe("[Serial] Pod InPlace Resize Container (scheduler-focused) [Feature:InPlacePodVerticalScaling]", func() {
 	doPodResizeSchedulerTests()
 })
 

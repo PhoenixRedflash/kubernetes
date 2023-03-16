@@ -17,6 +17,7 @@ limitations under the License.
 package apply
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,6 +39,7 @@ import (
 	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/util/csaupgrade"
+	"k8s.io/component-base/version"
 	"k8s.io/klog/v2"
 	"k8s.io/kubectl/pkg/cmd/delete"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
@@ -174,6 +176,8 @@ var (
 	warningMigrationReapplyFailed        = "Warning: failed to re-apply configuration after performing Server-Side Apply migration. This is non-fatal and will be retried next time you apply. Error: %[1]s\n"
 )
 
+var ApplySetToolVersion = version.Get().GitVersion
+
 // NewApplyFlags returns a default ApplyFlags
 func NewApplyFlags(streams genericclioptions.IOStreams) *ApplyFlags {
 	return &ApplyFlags{
@@ -300,14 +304,24 @@ func (flags *ApplyFlags) ToOptions(f cmdutil.Factory, cmd *cobra.Command, baseNa
 
 	var applySet *ApplySet
 	if flags.ApplySetRef != "" {
-		var applySetNs string
+		parent, err := ParseApplySetParentRef(flags.ApplySetRef, mapper)
+		if err != nil {
+			return nil, fmt.Errorf("invalid parent reference %q: %w", flags.ApplySetRef, err)
+		}
 		// ApplySet uses the namespace value from the flag, but not from the kubeconfig or defaults
-		if enforceNamespace {
-			applySetNs = namespace
+		// This means the namespace flag is required when using a namespaced parent.
+		if enforceNamespace && parent.IsNamespaced() {
+			parent.Namespace = namespace
 		}
-		if applySet, err = NewApplySet(flags.ApplySetRef, applySetNs, mapper); err != nil {
-			return nil, err
+		tooling := ApplySetTooling{Name: baseName, Version: ApplySetToolVersion}
+		restClient, err := f.UnstructuredClientForMapping(parent.RESTMapping)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize RESTClient for ApplySet: %w", err)
 		}
+		if restClient == nil {
+			return nil, fmt.Errorf("could not build RESTClient for ApplySet")
+		}
+		applySet = NewApplySet(parent, tooling, mapper, restClient)
 	}
 	if flags.Prune {
 		pruneAllowlist := slice.ToSet(flags.PruneAllowlist, flags.PruneWhitelist)
@@ -389,7 +403,7 @@ func (o *ApplyOptions) Validate() error {
 		if !o.Prune {
 			return fmt.Errorf("--applyset requires --prune")
 		}
-		if err := o.ApplySet.Validate(); err != nil {
+		if err := o.ApplySet.Validate(context.TODO(), o.DynamicClient); err != nil {
 			return err
 		}
 	}
@@ -407,9 +421,6 @@ func (o *ApplyOptions) Validate() error {
 				return fmt.Errorf("--selector is incompatible with --applyset")
 			} else if len(o.PruneResources) > 0 {
 				return fmt.Errorf("--prune-allowlist is incompatible with --applyset")
-			} else {
-				// TODO: remove this once ApplySet implementation is complete
-				return fmt.Errorf("--applyset is not yet supported")
 			}
 		} else {
 			if !o.All && o.Selector == "" {
@@ -456,7 +467,7 @@ func (o *ApplyOptions) GetObjects() ([]*resource.Info, error) {
 		o.objects, err = r.Infos()
 
 		if o.ApplySet != nil {
-			if err := o.ApplySet.addLabels(o.objects); err != nil {
+			if err := o.ApplySet.AddLabels(o.objects...); err != nil {
 				return nil, err
 			}
 		}
@@ -497,6 +508,13 @@ func (o *ApplyOptions) Run() error {
 	if len(infos) == 0 && len(errs) == 0 {
 		return fmt.Errorf("no objects passed to apply")
 	}
+
+	if o.ApplySet != nil {
+		if err := o.ApplySet.BeforeApply(infos, o.DryRunStrategy, o.ValidationDirective); err != nil {
+			return err
+		}
+	}
+
 	// Iterate through all objects, applying each one.
 	for _, info := range infos {
 		if err := o.applyOneObject(info); err != nil {
@@ -982,6 +1000,7 @@ func (o *ApplyOptions) MarkObjectVisited(info *resource.Info) error {
 		return err
 	}
 	o.VisitedUids.Insert(metadata.GetUID())
+
 	return nil
 }
 
@@ -993,14 +1012,19 @@ func (o *ApplyOptions) MarkObjectVisited(info *resource.Info) error {
 func (o *ApplyOptions) PrintAndPrunePostProcessor() func() error {
 
 	return func() error {
+		ctx := context.TODO()
 		if err := o.printObjects(); err != nil {
 			return err
 		}
 
 		if o.Prune {
 			if cmdutil.ApplySet.IsEnabled() && o.ApplySet != nil {
-				p := newApplySetPruner(o)
-				return p.pruneAll()
+				if err := o.ApplySet.Prune(ctx, o); err != nil {
+					// Do not update the ApplySet. If pruning failed, we want to keep the superset
+					// of the previous and current resources in the ApplySet, so that the pruning
+					// step of the next apply will be able to clean up the set correctly.
+					return err
+				}
 			} else {
 				p := newPruner(o)
 				return p.pruneAll(o)

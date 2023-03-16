@@ -44,6 +44,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/apiserver/pkg/apis/example"
 	examplev1 "k8s.io/apiserver/pkg/apis/example/v1"
+	example2v1 "k8s.io/apiserver/pkg/apis/example2/v1"
 	"k8s.io/apiserver/pkg/features"
 	"k8s.io/apiserver/pkg/storage"
 	"k8s.io/apiserver/pkg/storage/etcd3"
@@ -53,6 +54,7 @@ import (
 	utilflowcontrol "k8s.io/apiserver/pkg/util/flowcontrol"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	"k8s.io/utils/clock"
+	"k8s.io/utils/pointer"
 )
 
 type testVersioner struct{}
@@ -101,6 +103,7 @@ func init() {
 	metav1.AddToGroupVersion(scheme, metav1.SchemeGroupVersion)
 	utilruntime.Must(example.AddToScheme(scheme))
 	utilruntime.Must(examplev1.AddToScheme(scheme))
+	utilruntime.Must(example2v1.AddToScheme(scheme))
 }
 
 func newTestCacher(s storage.Interface) (*Cacher, storage.Versioner, error) {
@@ -125,6 +128,7 @@ type dummyStorage struct {
 	sync.RWMutex
 	err       error
 	getListFn func(_ context.Context, _ string, _ storage.ListOptions, listObj runtime.Object) error
+	watchFn   func(_ context.Context, _ string, _ storage.ListOptions) (watch.Interface, error)
 }
 
 type dummyWatch struct {
@@ -152,7 +156,10 @@ func (d *dummyStorage) Create(_ context.Context, _ string, _, _ runtime.Object, 
 func (d *dummyStorage) Delete(_ context.Context, _ string, _ runtime.Object, _ *storage.Preconditions, _ storage.ValidateObjectFunc, _ runtime.Object) error {
 	return fmt.Errorf("unimplemented")
 }
-func (d *dummyStorage) Watch(_ context.Context, _ string, _ storage.ListOptions) (watch.Interface, error) {
+func (d *dummyStorage) Watch(ctx context.Context, key string, opts storage.ListOptions) (watch.Interface, error) {
+	if d.watchFn != nil {
+		return d.watchFn(ctx, key, opts)
+	}
 	d.RLock()
 	defer d.RUnlock()
 
@@ -444,7 +451,7 @@ func TestWatcherNotGoingBackInTime(t *testing.T) {
 	}
 }
 
-func TestCacheDontAcceptRequestsStopped(t *testing.T) {
+func TestCacherDontAcceptRequestsStopped(t *testing.T) {
 	backingStorage := &dummyStorage{}
 	cacher, _, err := newTestCacher(backingStorage)
 	if err != nil {
@@ -503,6 +510,117 @@ func TestCacheDontAcceptRequestsStopped(t *testing.T) {
 	case <-watchClosed:
 	case <-time.After(wait.ForeverTestTimeout):
 		t.Errorf("timed out waiting for watch to close")
+	}
+}
+
+func TestCacherDontMissEventsOnReinitialization(t *testing.T) {
+	makePod := func(i int) *example.Pod {
+		return &example.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            fmt.Sprintf("pod-%d", i),
+				Namespace:       "ns",
+				ResourceVersion: fmt.Sprintf("%d", i),
+			},
+		}
+	}
+
+	listCalls, watchCalls := 0, 0
+	backingStorage := &dummyStorage{
+		getListFn: func(_ context.Context, _ string, _ storage.ListOptions, listObj runtime.Object) error {
+			podList := listObj.(*example.PodList)
+			var err error
+			switch listCalls {
+			case 0:
+				podList.ListMeta = metav1.ListMeta{ResourceVersion: "1"}
+			case 1:
+				podList.ListMeta = metav1.ListMeta{ResourceVersion: "10"}
+			default:
+				err = fmt.Errorf("unexpected list call")
+			}
+			listCalls++
+			return err
+		},
+		watchFn: func(_ context.Context, _ string, _ storage.ListOptions) (watch.Interface, error) {
+			var w *watch.FakeWatcher
+			var err error
+			switch watchCalls {
+			case 0:
+				w = watch.NewFakeWithChanSize(10, false)
+				for i := 2; i < 8; i++ {
+					w.Add(makePod(i))
+				}
+				// Emit an error to force relisting.
+				w.Error(nil)
+				w.Stop()
+			case 1:
+				w = watch.NewFakeWithChanSize(10, false)
+				for i := 12; i < 18; i++ {
+					w.Add(makePod(i))
+				}
+				w.Stop()
+			default:
+				err = fmt.Errorf("unexpected watch call")
+			}
+			watchCalls++
+			return w, err
+		},
+	}
+	cacher, _, err := newTestCacher(backingStorage)
+	if err != nil {
+		t.Fatalf("Couldn't create cacher: %v", err)
+	}
+	defer cacher.Stop()
+
+	concurrency := 1000
+	wg := sync.WaitGroup{}
+	wg.Add(concurrency)
+
+	// Ensure that test doesn't deadlock if cacher already processed everything
+	// and get back into Pending state before some watches get called.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, concurrency)
+	for i := 0; i < concurrency; i++ {
+		go func() {
+			defer wg.Done()
+			w, err := cacher.Watch(ctx, "pods", storage.ListOptions{ResourceVersion: "1", Predicate: storage.Everything})
+			if err != nil {
+				// Watch failed to initialize (this most probably means that cacher
+				// already moved back to Pending state before watch initialized.
+				// Ignore this case.
+				return
+			}
+			defer w.Stop()
+
+			prevRV := -1
+			for event := range w.ResultChan() {
+				if event.Type == watch.Error {
+					break
+				}
+				object := event.Object
+				if co, ok := object.(runtime.CacheableObject); ok {
+					object = co.GetObject()
+				}
+				rv, err := strconv.Atoi(object.(*example.Pod).ResourceVersion)
+				if err != nil {
+					errCh <- fmt.Errorf("incorrect resource version: %v", err)
+					return
+				}
+				if prevRV != -1 && prevRV+1 != rv {
+					errCh <- fmt.Errorf("unexpected event received, prevRV=%d, rv=%d", prevRV, rv)
+					return
+				}
+				prevRV = rv
+			}
+
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Error(err)
 	}
 }
 
@@ -1495,7 +1613,7 @@ func TestCacherWatchSemantics(t *testing.T) {
 			resourceVersion:                    "101",
 			storageResourceVersion:             "105",
 			initialPods:                        []*example.Pod{makePod(101), makePod(102)},
-			expectedInitialEventsInRandomOrder: []watch.Event{{Type: watch.Added, Object: makePod(102)}},
+			expectedInitialEventsInRandomOrder: []watch.Event{{Type: watch.Added, Object: makePod(101)}, {Type: watch.Added, Object: makePod(102)}},
 			expectedInitialEventsInStrictOrder: []watch.Event{
 				{Type: watch.Bookmark, Object: &example.Pod{
 					ObjectMeta: metav1.ObjectMeta{
@@ -1531,7 +1649,7 @@ func TestCacherWatchSemantics(t *testing.T) {
 			storageResourceVersion: "105",
 			initialPods:            []*example.Pod{makePod(101), makePod(102)},
 			// make sure we only get initial events that are > initial RV (101)
-			expectedInitialEventsInRandomOrder: []watch.Event{{Type: watch.Added, Object: makePod(102)}},
+			expectedInitialEventsInRandomOrder: []watch.Event{{Type: watch.Added, Object: makePod(101)}, {Type: watch.Added, Object: makePod(102)}},
 		},
 		{
 			name:                                 "sendInitialEvents=false, RV=unset, storageRV=103",
@@ -1626,7 +1744,7 @@ func TestGetCurrentResourceVersionFromStorage(t *testing.T) {
 	// test data
 	newEtcdTestStorage := func(t *testing.T, prefix string) (*etcd3testing.EtcdTestServer, storage.Interface) {
 		server, _ := etcd3testing.NewUnsecuredEtcd3TestClientServer(t)
-		storage := etcd3.New(server.V3Client, apitesting.TestCodec(codecs, example.SchemeGroupVersion), func() runtime.Object { return &example.Pod{} }, prefix, schema.GroupResource{Resource: "pods"}, identity.NewEncryptCheckTransformer(), true, etcd3.NewDefaultLeaseManagerConfig())
+		storage := etcd3.New(server.V3Client, apitesting.TestCodec(codecs, examplev1.SchemeGroupVersion, example2v1.SchemeGroupVersion), func() runtime.Object { return &example.Pod{} }, prefix, schema.GroupResource{Resource: "pods"}, identity.NewEncryptCheckTransformer(), true, etcd3.NewDefaultLeaseManagerConfig())
 		return server, storage
 	}
 	server, etcdStorage := newEtcdTestStorage(t, "")
@@ -1656,14 +1774,14 @@ func TestGetCurrentResourceVersionFromStorage(t *testing.T) {
 		require.NoError(t, err)
 		return out
 	}
-	makeReplicaSet := func(name string) *example.ReplicaSet {
-		return &example.ReplicaSet{
+	makeReplicaSet := func(name string) *example2v1.ReplicaSet {
+		return &example2v1.ReplicaSet{
 			ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: name},
 		}
 	}
-	createReplicaSet := func(obj *example.ReplicaSet) *example.ReplicaSet {
+	createReplicaSet := func(obj *example2v1.ReplicaSet) *example2v1.ReplicaSet {
 		key := "replicasets/" + obj.Namespace + "/" + obj.Name
-		out := &example.ReplicaSet{}
+		out := &example2v1.ReplicaSet{}
 		err := etcdStorage.Create(context.TODO(), key, obj, out, 0)
 		require.NoError(t, err)
 		return out
@@ -1690,4 +1808,25 @@ func TestGetCurrentResourceVersionFromStorage(t *testing.T) {
 	currentPodRV, err := versioner.ParseResourceVersion(currentPod.ResourceVersion)
 	require.NoError(t, err)
 	require.Equal(t, currentPodRV, podRV, "didn't expect to see the pod's RV changed")
+}
+
+func TestWaitUntilWatchCacheFreshAndForceAllEvents(t *testing.T) {
+	backingStorage := &dummyStorage{}
+	cacher, _, err := newTestCacher(backingStorage)
+	if err != nil {
+		t.Fatalf("Couldn't create cacher: %v", err)
+	}
+	defer cacher.Stop()
+
+	forceAllEvents, err := cacher.waitUntilWatchCacheFreshAndForceAllEvents(context.TODO(), 105, storage.ListOptions{SendInitialEvents: pointer.Bool(true)})
+	require.NotNil(t, err, "the target method should return non nil error")
+	require.Equal(t, err.Error(), "Timeout: Too large resource version: 105, current: 100")
+	require.False(t, forceAllEvents, "the target method after returning an error should NOT instruct the caller to ask for all events in the cache (full state)")
+
+	go func() {
+		cacher.watchCache.Add(makeTestPodDetails("pod1", 105, "node1", map[string]string{"label": "value1"}))
+	}()
+	forceAllEvents, err = cacher.waitUntilWatchCacheFreshAndForceAllEvents(context.TODO(), 105, storage.ListOptions{SendInitialEvents: pointer.Bool(true)})
+	require.NoError(t, err)
+	require.True(t, forceAllEvents, "the target method should instruct the caller to ask for all events in the cache (full state)")
 }
