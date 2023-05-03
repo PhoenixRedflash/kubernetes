@@ -157,7 +157,10 @@ func (m *imageManager) EnsureImageExists(ctx context.Context, pod *v1.Pod, conta
 	if imagePullResult.err != nil {
 		m.logIt(ref, v1.EventTypeWarning, events.FailedToPullImage, logPrefix, fmt.Sprintf("Failed to pull image %q: %v", container.Image, imagePullResult.err), klog.Warning)
 		m.backOff.Next(backOffKey, m.backOff.Clock.Now())
-		if imagePullResult.err == ErrRegistryUnavailable {
+
+		// Error assertions via errors.Is is not supported by gRPC (remote runtime) errors right now.
+		// See https://github.com/grpc/grpc-go/issues/3616
+		if imagePullResult.err.Error() == ErrRegistryUnavailable.Error() {
 			msg := fmt.Sprintf("image pull failed for %s because the registry is unavailable.", container.Image)
 			return "", msg, imagePullResult.err
 		}
@@ -165,7 +168,8 @@ func (m *imageManager) EnsureImageExists(ctx context.Context, pod *v1.Pod, conta
 		return "", imagePullResult.err.Error(), ErrImagePull
 	}
 	m.podPullingTimeRecorder.RecordImageFinishedPulling(pod.UID)
-	m.logIt(ref, v1.EventTypeNormal, events.PulledImage, logPrefix, fmt.Sprintf("Successfully pulled image %q in %v (%v including waiting)", container.Image, imagePullResult.pullDuration, time.Since(startTime)), klog.Info)
+	m.logIt(ref, v1.EventTypeNormal, events.PulledImage, logPrefix, fmt.Sprintf("Successfully pulled image %q in %v (%v including waiting)",
+		container.Image, imagePullResult.pullDuration.Truncate(time.Millisecond), time.Since(startTime).Truncate(time.Millisecond)), klog.Info)
 	m.backOff.GC()
 	return imagePullResult.imageRef, "", nil
 }

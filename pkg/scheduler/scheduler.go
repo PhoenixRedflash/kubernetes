@@ -282,7 +282,7 @@ func New(client clientset.Interface,
 	nodeLister := informerFactory.Core().V1().Nodes().Lister()
 
 	snapshot := internalcache.NewEmptySnapshot()
-	clusterEventMap := make(map[framework.ClusterEvent]sets.String)
+	clusterEventMap := make(map[framework.ClusterEvent]sets.Set[string])
 	metricsRecorder := metrics.NewMetricsAsyncRecorder(1000, time.Second, stopCh)
 
 	profiles, err := profile.NewMap(options.profiles, registry, recorderFactory, stopCh,
@@ -292,7 +292,6 @@ func New(client clientset.Interface,
 		frameworkruntime.WithInformerFactory(informerFactory),
 		frameworkruntime.WithSnapshotSharedLister(snapshot),
 		frameworkruntime.WithCaptureProfile(frameworkruntime.CaptureProfile(options.frameworkCapturer)),
-		frameworkruntime.WithClusterEventMap(clusterEventMap),
 		frameworkruntime.WithClusterEventMap(clusterEventMap),
 		frameworkruntime.WithParallelism(int(options.parallelism)),
 		frameworkruntime.WithExtenders(extenders),
@@ -435,7 +434,7 @@ func buildExtenders(extenders []schedulerapi.Extender, profiles []schedulerapi.K
 
 type FailureHandlerFn func(ctx context.Context, fwk framework.Framework, podInfo *framework.QueuedPodInfo, status *framework.Status, nominatingInfo *framework.NominatingInfo, start time.Time)
 
-func unionedGVKs(m map[framework.ClusterEvent]sets.String) map[framework.GVK]framework.ActionType {
+func unionedGVKs(m map[framework.ClusterEvent]sets.Set[string]) map[framework.GVK]framework.ActionType {
 	gvkMap := make(map[framework.GVK]framework.ActionType)
 	for evt := range m {
 		if _, ok := gvkMap[evt.Resource]; ok {

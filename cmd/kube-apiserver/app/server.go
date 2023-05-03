@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"k8s.io/client-go/dynamic"
 
 	oteltrace "go.opentelemetry.io/otel/trace"
 
@@ -377,9 +378,10 @@ func buildGenericConfig(
 	}
 	// wrap the definitions to revert any changes from disabled features
 	getOpenAPIDefinitions := openapi.GetOpenAPIDefinitionsWithoutDisabledFeatures(generatedopenapi.GetOpenAPIDefinitions)
-	genericConfig.OpenAPIConfig = genericapiserver.DefaultOpenAPIConfig(getOpenAPIDefinitions, openapinamer.NewDefinitionNamer(legacyscheme.Scheme, extensionsapiserver.Scheme, aggregatorscheme.Scheme))
+	namer := openapinamer.NewDefinitionNamer(legacyscheme.Scheme, extensionsapiserver.Scheme, aggregatorscheme.Scheme)
+	genericConfig.OpenAPIConfig = genericapiserver.DefaultOpenAPIConfig(getOpenAPIDefinitions, namer)
 	genericConfig.OpenAPIConfig.Info.Title = "Kubernetes"
-	genericConfig.OpenAPIV3Config = genericapiserver.DefaultOpenAPIV3Config(getOpenAPIDefinitions, openapinamer.NewDefinitionNamer(legacyscheme.Scheme, extensionsapiserver.Scheme, aggregatorscheme.Scheme))
+	genericConfig.OpenAPIV3Config = genericapiserver.DefaultOpenAPIV3Config(getOpenAPIDefinitions, namer)
 	genericConfig.OpenAPIV3Config.Info.Title = "Kubernetes"
 
 	genericConfig.LongRunningFunc = filters.BasicLongRunningRequestCheck(
@@ -461,10 +463,17 @@ func buildGenericConfig(
 		return
 	}
 
+	dynamicExternalClient, err := dynamic.NewForConfig(kubeClientConfig)
+	if err != nil {
+		lastErr = fmt.Errorf("failed to create real dynamic external client: %w", err)
+		return
+	}
+
 	err = s.Admission.ApplyTo(
 		genericConfig,
 		versionedInformers,
-		kubeClientConfig,
+		clientgoExternalClient,
+		dynamicExternalClient,
 		utilfeature.DefaultFeatureGate,
 		pluginInitializers...)
 	if err != nil {

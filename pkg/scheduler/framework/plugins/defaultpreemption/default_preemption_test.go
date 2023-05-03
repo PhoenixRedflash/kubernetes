@@ -36,6 +36,7 @@ import (
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/events"
+	"k8s.io/klog/v2/ktesting"
 	kubeschedulerconfigv1beta2 "k8s.io/kube-scheduler/config/v1beta2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 	"k8s.io/kubernetes/pkg/scheduler/apis/config"
@@ -1337,7 +1338,8 @@ func TestSelectBestCandidate(t *testing.T) {
 			cs := clientsetfake.NewSimpleClientset(objs...)
 			informerFactory := informers.NewSharedInformerFactory(cs, 0)
 			snapshot := internalcache.NewSnapshot(tt.pods, nodes)
-			ctx, cancel := context.WithCancel(context.Background())
+			logger, ctx := ktesting.NewTestContext(t)
+			ctx, cancel := context.WithCancel(ctx)
 			defer cancel()
 			fwk, err := st.NewFramework(
 				[]st.RegisterPluginFunc{
@@ -1380,7 +1382,7 @@ func TestSelectBestCandidate(t *testing.T) {
 			}
 			offset, numCandidates := pl.GetOffsetAndNumCandidates(int32(len(nodeInfos)))
 			candidates, _, _ := pe.DryRunPreemption(ctx, tt.pod, nodeInfos, nil, offset, numCandidates)
-			s := pe.SelectCandidate(candidates)
+			s := pe.SelectCandidate(logger, candidates)
 			if s == nil || len(s.Name()) == 0 {
 				return
 			}
@@ -1676,8 +1678,8 @@ func TestPreempt(t *testing.T) {
 				podInformer.GetStore().Add(test.pods[i])
 			}
 
-			deletedPodNames := make(sets.String)
-			patchedPodNames := make(sets.String)
+			deletedPodNames := sets.New[string]()
+			patchedPodNames := sets.New[string]()
 			client.PrependReactor("patch", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
 				patchedPodNames.Insert(action.(clienttesting.PatchAction).GetName())
 				return true, nil, nil
@@ -1769,7 +1771,7 @@ func TestPreempt(t *testing.T) {
 			if len(deletedPodNames) != len(test.expectedPods) {
 				t.Errorf("expected %v pods, got %v.", len(test.expectedPods), len(deletedPodNames))
 			}
-			if diff := cmp.Diff(patchedPodNames.List(), deletedPodNames.List()); diff != "" {
+			if diff := cmp.Diff(sets.List(patchedPodNames), sets.List(deletedPodNames)); diff != "" {
 				t.Errorf("unexpected difference in the set of patched and deleted pods: %s", diff)
 			}
 			for victimName := range deletedPodNames {

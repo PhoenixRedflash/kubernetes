@@ -39,6 +39,10 @@ func getDefaultPlugins() *v1beta2.Plugins {
 				{Name: names.NodeResourcesFit},
 				{Name: names.NodePorts},
 				{Name: names.VolumeRestrictions},
+				{Name: names.EBSLimits},
+				{Name: names.GCEPDLimits},
+				{Name: names.NodeVolumeLimits},
+				{Name: names.AzureDiskLimits},
 				{Name: names.PodTopologySpread},
 				{Name: names.InterPodAffinity},
 				{Name: names.VolumeBinding},
@@ -150,7 +154,7 @@ type pluginIndex struct {
 }
 
 func mergePluginSet(defaultPluginSet, customPluginSet v1beta2.PluginSet) v1beta2.PluginSet {
-	disabledPlugins := sets.NewString()
+	disabledPlugins := sets.New[string]()
 	enabledCustomPlugins := make(map[string]pluginIndex)
 	// replacedPluginIndex is a set of index of plugins, which have replaced the default plugins.
 	replacedPluginIndex := sets.NewInt()

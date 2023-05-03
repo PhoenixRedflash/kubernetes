@@ -18,13 +18,14 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"sync"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -39,6 +40,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 	cloudprovider "k8s.io/cloud-provider"
+	"k8s.io/cloud-provider/api"
 	servicehelper "k8s.io/cloud-provider/service/helpers"
 	"k8s.io/component-base/featuregate"
 	controllersmetrics "k8s.io/component-base/metrics/prometheus/controllers"
@@ -288,8 +290,15 @@ func (c *Controller) processNextServiceItem(ctx context.Context) bool {
 		return true
 	}
 
-	runtime.HandleError(fmt.Errorf("error processing service %v (will retry): %v", key, err))
-	c.serviceQueue.AddRateLimited(key)
+	var re *api.RetryError
+	if errors.As(err, &re) {
+		klog.Warningf("error processing service %v (retrying in %s): %v", key, re.RetryAfter(), err)
+		c.serviceQueue.AddAfter(key, re.RetryAfter())
+	} else {
+		runtime.HandleError(fmt.Errorf("error processing service %v (retrying with exponential backoff): %v", key, err))
+		c.serviceQueue.AddRateLimited(key)
+	}
+
 	return true
 }
 
@@ -401,7 +410,8 @@ func (c *Controller) syncLoadBalancerIfNeeded(ctx context.Context, service *v1.S
 				klog.V(4).Infof("LoadBalancer for service %s implemented by a different controller %s, Ignoring error", key, c.cloud.ProviderName())
 				return op, nil
 			}
-			return op, fmt.Errorf("failed to ensure load balancer: %v", err)
+			// Use %w deliberately so that a returned RetryError can be handled.
+			return op, fmt.Errorf("failed to ensure load balancer: %w", err)
 		}
 		if newStatus == nil {
 			return op, fmt.Errorf("service status returned by EnsureLoadBalancer is nil")
@@ -415,7 +425,7 @@ func (c *Controller) syncLoadBalancerIfNeeded(ctx context.Context, service *v1.S
 		// - Not found error mostly happens when service disappears right after
 		//   we remove the finalizer.
 		// - We can't patch status on non-exist service anyway.
-		if !errors.IsNotFound(err) {
+		if !apierrors.IsNotFound(err) {
 			return op, fmt.Errorf("failed to update load balancer status: %v", err)
 		}
 	}
@@ -582,6 +592,15 @@ func (c *Controller) needsUpdate(oldService *v1.Service, newService *v1.Service)
 		return true
 	}
 
+	// User can upgrade (add another clusterIP or ipFamily) or can downgrade (remove secondary clusterIP or ipFamily),
+	// but CAN NOT change primary/secondary clusterIP || ipFamily UNLESS they are changing from/to/ON ExternalName
+	// so not care about order, only need check the length.
+	if len(oldService.Spec.IPFamilies) != len(newService.Spec.IPFamilies) {
+		c.eventRecorder.Eventf(newService, v1.EventTypeNormal, "IPFamilies", "Count: %v -> %v",
+			len(oldService.Spec.IPFamilies), len(newService.Spec.IPFamilies))
+		return true
+	}
+
 	return false
 }
 
@@ -660,15 +679,10 @@ func nodeNames(nodes []*v1.Node) sets.String {
 }
 
 func shouldSyncUpdatedNode(oldNode, newNode *v1.Node) bool {
-	if utilfeature.DefaultFeatureGate.Enabled(features.StableLoadBalancerNodeSet) {
-		// Only Nodes with changes to the label
-		// "node.kubernetes.io/exclude-from-external-load-balancers" will
-		// trigger a load balancer re-sync.
-		return respectsPredicates(oldNode, nodeIncludedPredicate) != respectsPredicates(newNode, nodeIncludedPredicate)
-	}
 	// Evaluate the individual node exclusion predicate before evaluating the
-	// compounded result of all predicates. We don't sync ETP=local services
-	// for changes on the readiness condition, hence if a node remains NotReady
+	// compounded result of all predicates. We don't sync changes on the
+	// readiness condition for eTP:Local services or when
+	// StableLoadBalancerNodeSet is enabled, hence if a node remains NotReady
 	// and a user adds the exclusion label we will need to sync as to make sure
 	// this change is reflected correctly on ETP=local services. The sync
 	// function compares lastSyncedNodes with the new (existing) set of nodes
@@ -679,7 +693,14 @@ func shouldSyncUpdatedNode(oldNode, newNode *v1.Node) bool {
 	if respectsPredicates(oldNode, nodeIncludedPredicate) != respectsPredicates(newNode, nodeIncludedPredicate) {
 		return true
 	}
-	return respectsPredicates(oldNode, allNodePredicates...) != respectsPredicates(newNode, allNodePredicates...)
+	// For the same reason as above, also check for changes to the providerID
+	if respectsPredicates(oldNode, nodeHasProviderIDPredicate) != respectsPredicates(newNode, nodeHasProviderIDPredicate) {
+		return true
+	}
+	if !utilfeature.DefaultFeatureGate.Enabled(features.StableLoadBalancerNodeSet) {
+		return respectsPredicates(oldNode, allNodePredicates...) != respectsPredicates(newNode, allNodePredicates...)
+	}
+	return false
 }
 
 // syncNodes handles updating the hosts pointed to by all load
@@ -826,7 +847,7 @@ func (c *Controller) syncService(ctx context.Context, key string) error {
 	// service holds the latest service info from apiserver
 	service, err := c.serviceLister.Services(namespace).Get(name)
 	switch {
-	case errors.IsNotFound(err):
+	case apierrors.IsNotFound(err):
 		// service absence in store means watcher caught the deletion, ensure LB info is cleaned
 		err = c.processServiceDeletion(ctx, key)
 	case err != nil:
@@ -937,14 +958,17 @@ var (
 		nodeIncludedPredicate,
 		nodeUnTaintedPredicate,
 		nodeReadyPredicate,
+		nodeHasProviderIDPredicate,
 	}
 	etpLocalNodePredicates []NodeConditionPredicate = []NodeConditionPredicate{
 		nodeIncludedPredicate,
 		nodeUnTaintedPredicate,
+		nodeHasProviderIDPredicate,
 	}
 	stableNodeSetPredicates []NodeConditionPredicate = []NodeConditionPredicate{
 		nodeNotDeletedPredicate,
 		nodeIncludedPredicate,
+		nodeHasProviderIDPredicate,
 		// This is not perfect, but probably good enough. We won't update the
 		// LBs just because the taint was added (see shouldSyncUpdatedNode) but
 		// if any other situation causes an LB sync, tainted nodes will be
@@ -968,6 +992,10 @@ func getNodePredicatesForService(service *v1.Service) []NodeConditionPredicate {
 func nodeIncludedPredicate(node *v1.Node) bool {
 	_, hasExcludeBalancerLabel := node.Labels[v1.LabelNodeExcludeBalancers]
 	return !hasExcludeBalancerLabel
+}
+
+func nodeHasProviderIDPredicate(node *v1.Node) bool {
+	return node.Spec.ProviderID != ""
 }
 
 // We consider the node for load balancing only when its not tainted for deletion by the cluster autoscaler.

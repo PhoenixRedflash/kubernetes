@@ -44,6 +44,7 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/proxy"
+	"k8s.io/kubernetes/pkg/proxy/conntrack"
 	"k8s.io/kubernetes/pkg/proxy/metrics"
 
 	"k8s.io/kubernetes/pkg/proxy/healthcheck"
@@ -51,7 +52,6 @@ import (
 	proxyutiliptables "k8s.io/kubernetes/pkg/proxy/util/iptables"
 	utilproxytest "k8s.io/kubernetes/pkg/proxy/util/testing"
 	"k8s.io/kubernetes/pkg/util/async"
-	"k8s.io/kubernetes/pkg/util/conntrack"
 	utiliptables "k8s.io/kubernetes/pkg/util/iptables"
 	iptablestest "k8s.io/kubernetes/pkg/util/iptables/testing"
 	"k8s.io/utils/exec"
@@ -1763,7 +1763,7 @@ func TestOverallIPTablesRulesWithMultipleServices(t *testing.T) {
 				Name:       "p80",
 				Port:       80,
 				Protocol:   v1.ProtocolTCP,
-				TargetPort: intstr.FromInt(80),
+				TargetPort: intstr.FromInt32(80),
 			}}
 		}),
 		// create LoadBalancer service with Cluster traffic policy and source ranges
@@ -1793,7 +1793,7 @@ func TestOverallIPTablesRulesWithMultipleServices(t *testing.T) {
 				Name:       "p80",
 				Port:       80,
 				Protocol:   v1.ProtocolTCP,
-				TargetPort: intstr.FromInt(80),
+				TargetPort: intstr.FromInt32(80),
 			}}
 		}),
 	)
@@ -5138,7 +5138,7 @@ func TestEndpointSliceE2E(t *testing.T) {
 		Spec: v1.ServiceSpec{
 			ClusterIP: "172.30.1.1",
 			Selector:  map[string]string{"foo": "bar"},
-			Ports:     []v1.ServicePort{{Name: "", TargetPort: intstr.FromInt(80), Protocol: v1.ProtocolTCP}},
+			Ports:     []v1.ServicePort{{Name: "", TargetPort: intstr.FromInt32(80), Protocol: v1.ProtocolTCP}},
 		},
 	})
 
@@ -5198,7 +5198,7 @@ func TestHealthCheckNodePortWhenTerminating(t *testing.T) {
 		Spec: v1.ServiceSpec{
 			ClusterIP: "172.30.1.1",
 			Selector:  map[string]string{"foo": "bar"},
-			Ports:     []v1.ServicePort{{Name: "", TargetPort: intstr.FromInt(80), Protocol: v1.ProtocolTCP}},
+			Ports:     []v1.ServicePort{{Name: "", TargetPort: intstr.FromInt32(80), Protocol: v1.ProtocolTCP}},
 		},
 	})
 
@@ -5801,7 +5801,7 @@ func TestEndpointSliceWithTerminatingEndpointsTrafficPolicyLocal(t *testing.T) {
 			Ports: []v1.ServicePort{
 				{
 					Name:       "",
-					TargetPort: intstr.FromInt(80),
+					TargetPort: intstr.FromInt32(80),
 					Port:       80,
 					Protocol:   v1.ProtocolTCP,
 				},
@@ -6598,7 +6598,7 @@ func TestEndpointSliceWithTerminatingEndpointsTrafficPolicyCluster(t *testing.T)
 			Ports: []v1.ServicePort{
 				{
 					Name:       "",
-					TargetPort: intstr.FromInt(80),
+					TargetPort: intstr.FromInt32(80),
 					Port:       80,
 					Protocol:   v1.ProtocolTCP,
 				},

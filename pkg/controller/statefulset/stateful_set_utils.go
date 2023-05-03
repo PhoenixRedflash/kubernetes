@@ -17,7 +17,6 @@ limitations under the License.
 package statefulset
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -481,18 +480,6 @@ func newVersionedStatefulSetPod(currentSet, updateSet *apps.StatefulSet, current
 	return pod
 }
 
-// Match check if the given StatefulSet's template matches the template stored in the given history.
-func Match(ss *apps.StatefulSet, history *apps.ControllerRevision) (bool, error) {
-	// Encoding the set for the patch may update its GVK metadata, which causes data races if this
-	// set is in an informer cache.
-	clone := ss.DeepCopy()
-	patch, err := getPatch(clone)
-	if err != nil {
-		return false, err
-	}
-	return bytes.Equal(patch, history.Data.Raw), nil
-}
-
 // getPatch returns a strategic merge patch that can be applied to restore a StatefulSet to a
 // previous version. If the returned error is nil the patch is valid. The current state that we save is just the
 // PodSpecTemplate. We can modify this later to encompass more state (or less) and remain compatible with previously
@@ -621,7 +608,7 @@ func (ao ascendingOrdinal) Less(i, j int) bool {
 // Note that API validation has already guaranteed the maxUnavailable field to be >1 if it is an integer
 // or 0% < value <= 100% if it is a percentage, so we don't have to consider other cases.
 func getStatefulSetMaxUnavailable(maxUnavailable *intstr.IntOrString, replicaCount int) (int, error) {
-	maxUnavailableNum, err := intstr.GetScaledValueFromIntOrPercent(intstr.ValueOrDefault(maxUnavailable, intstr.FromInt(1)), replicaCount, false)
+	maxUnavailableNum, err := intstr.GetScaledValueFromIntOrPercent(intstr.ValueOrDefault(maxUnavailable, intstr.FromInt32(1)), replicaCount, false)
 	if err != nil {
 		return 0, err
 	}

@@ -23,16 +23,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/diff"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	corev1 "k8s.io/kubernetes/pkg/apis/core/v1"
+	"k8s.io/kubernetes/pkg/features"
 	utilpointer "k8s.io/utils/pointer"
 
 	// ensure types are installed
@@ -179,7 +180,7 @@ func testWorkloadDefaults(t *testing.T, featuresEnabled bool) {
 	defaults := detectDefaults(t, rc, reflect.ValueOf(template))
 	if !reflect.DeepEqual(expectedDefaults, defaults) {
 		t.Errorf("Defaults for PodTemplateSpec changed. This can cause spurious rollouts of workloads on API server upgrade.")
-		t.Logf(diff.ObjectReflectDiff(expectedDefaults, defaults))
+		t.Logf(cmp.Diff(expectedDefaults, defaults))
 	}
 }
 
@@ -325,7 +326,7 @@ func testPodDefaults(t *testing.T, featuresEnabled bool) {
 	defaults := detectDefaults(t, pod, reflect.ValueOf(pod))
 	if !reflect.DeepEqual(expectedDefaults, defaults) {
 		t.Errorf("Defaults for PodSpec changed. This can cause spurious restarts of containers on API server upgrade.")
-		t.Logf(diff.ObjectReflectDiff(expectedDefaults, defaults))
+		t.Logf(cmp.Diff(expectedDefaults, defaults))
 	}
 }
 
@@ -1364,14 +1365,14 @@ func TestSetDefaultServiceTargetPort(t *testing.T) {
 	in := &v1.Service{Spec: v1.ServiceSpec{Ports: []v1.ServicePort{{Port: 1234}}}}
 	obj := roundTrip(t, runtime.Object(in))
 	out := obj.(*v1.Service)
-	if out.Spec.Ports[0].TargetPort != intstr.FromInt(1234) {
+	if out.Spec.Ports[0].TargetPort != intstr.FromInt32(1234) {
 		t.Errorf("Expected TargetPort to be defaulted, got %v", out.Spec.Ports[0].TargetPort)
 	}
 
-	in = &v1.Service{Spec: v1.ServiceSpec{Ports: []v1.ServicePort{{Port: 1234, TargetPort: intstr.FromInt(5678)}}}}
+	in = &v1.Service{Spec: v1.ServiceSpec{Ports: []v1.ServicePort{{Port: 1234, TargetPort: intstr.FromInt32(5678)}}}}
 	obj = roundTrip(t, runtime.Object(in))
 	out = obj.(*v1.Service)
-	if out.Spec.Ports[0].TargetPort != intstr.FromInt(5678) {
+	if out.Spec.Ports[0].TargetPort != intstr.FromInt32(5678) {
 		t.Errorf("Expected TargetPort to be unchanged, got %v", out.Spec.Ports[0].TargetPort)
 	}
 }
@@ -1381,7 +1382,7 @@ func TestSetDefaultServicePort(t *testing.T) {
 	in := &v1.Service{Spec: v1.ServiceSpec{
 		Ports: []v1.ServicePort{
 			{Protocol: "UDP", Port: 9376, TargetPort: intstr.FromString("p")},
-			{Protocol: "UDP", Port: 8675, TargetPort: intstr.FromInt(309)},
+			{Protocol: "UDP", Port: 8675, TargetPort: intstr.FromInt32(309)},
 		},
 	}}
 	out := roundTrip(t, runtime.Object(in)).(*v1.Service)
@@ -1394,7 +1395,7 @@ func TestSetDefaultServicePort(t *testing.T) {
 	if out.Spec.Ports[1].Protocol != v1.ProtocolUDP {
 		t.Errorf("Expected protocol %s, got %s", v1.ProtocolUDP, out.Spec.Ports[1].Protocol)
 	}
-	if out.Spec.Ports[1].TargetPort != intstr.FromInt(309) {
+	if out.Spec.Ports[1].TargetPort != intstr.FromInt32(309) {
 		t.Errorf("Expected port %v, got %v", in.Spec.Ports[1].Port, out.Spec.Ports[1].TargetPort)
 	}
 
@@ -1402,20 +1403,20 @@ func TestSetDefaultServicePort(t *testing.T) {
 	in = &v1.Service{Spec: v1.ServiceSpec{
 		Ports: []v1.ServicePort{
 			{Protocol: "", Port: 9376, TargetPort: intstr.FromString("")},
-			{Protocol: "", Port: 8675, TargetPort: intstr.FromInt(0)},
+			{Protocol: "", Port: 8675, TargetPort: intstr.FromInt32(0)},
 		},
 	}}
 	out = roundTrip(t, runtime.Object(in)).(*v1.Service)
 	if out.Spec.Ports[0].Protocol != v1.ProtocolTCP {
 		t.Errorf("Expected protocol %s, got %s", v1.ProtocolTCP, out.Spec.Ports[0].Protocol)
 	}
-	if out.Spec.Ports[0].TargetPort != intstr.FromInt(int(in.Spec.Ports[0].Port)) {
+	if out.Spec.Ports[0].TargetPort != intstr.FromInt32(in.Spec.Ports[0].Port) {
 		t.Errorf("Expected port %v, got %v", in.Spec.Ports[0].Port, out.Spec.Ports[0].TargetPort)
 	}
 	if out.Spec.Ports[1].Protocol != v1.ProtocolTCP {
 		t.Errorf("Expected protocol %s, got %s", v1.ProtocolTCP, out.Spec.Ports[1].Protocol)
 	}
-	if out.Spec.Ports[1].TargetPort != intstr.FromInt(int(in.Spec.Ports[1].Port)) {
+	if out.Spec.Ports[1].TargetPort != intstr.FromInt32(in.Spec.Ports[1].Port) {
 		t.Errorf("Expected port %v, got %v", in.Spec.Ports[1].Port, out.Spec.Ports[1].TargetPort)
 	}
 }
@@ -1902,6 +1903,218 @@ func TestSetDefaultServiceInternalTrafficPolicy(t *testing.T) {
 
 			if !reflect.DeepEqual(svc.Spec.InternalTrafficPolicy, test.expectedInternalTrafficPolicy) {
 				t.Errorf("expected .spec.internalTrafficPolicy: %v got %v", test.expectedInternalTrafficPolicy, svc.Spec.InternalTrafficPolicy)
+			}
+		})
+	}
+}
+
+func TestSetDefaultResizePolicy(t *testing.T) {
+	// verify we default to NotRequired restart policy for resize when resources are specified
+	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.InPlacePodVerticalScaling, true)()
+
+	for desc, tc := range map[string]struct {
+		testContainer        v1.Container
+		expectedResizePolicy []v1.ContainerResizePolicy
+	}{
+		"CPU and memory limits are specified": {
+			testContainer: v1.Container{
+				Resources: v1.ResourceRequirements{
+					Limits: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("100m"),
+						v1.ResourceMemory: resource.MustParse("200Mi"),
+					},
+				},
+			},
+			expectedResizePolicy: []v1.ContainerResizePolicy{
+				{
+					ResourceName:  v1.ResourceCPU,
+					RestartPolicy: v1.NotRequired,
+				},
+				{
+					ResourceName:  v1.ResourceMemory,
+					RestartPolicy: v1.NotRequired,
+				},
+			},
+		},
+		"CPU requests are specified": {
+			testContainer: v1.Container{
+				Resources: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("100m"),
+					},
+				},
+			},
+			expectedResizePolicy: []v1.ContainerResizePolicy{
+				{
+					ResourceName:  v1.ResourceCPU,
+					RestartPolicy: v1.NotRequired,
+				},
+			},
+		},
+		"Memory limits are specified": {
+			testContainer: v1.Container{
+				Resources: v1.ResourceRequirements{
+					Limits: v1.ResourceList{
+						v1.ResourceMemory: resource.MustParse("200Mi"),
+					},
+				},
+			},
+			expectedResizePolicy: []v1.ContainerResizePolicy{
+				{
+					ResourceName:  v1.ResourceMemory,
+					RestartPolicy: v1.NotRequired,
+				},
+			},
+		},
+		"No resources are specified": {
+			testContainer:        v1.Container{Name: "besteffort"},
+			expectedResizePolicy: nil,
+		},
+		"CPU and memory limits are specified with restartContainer resize policy for memory": {
+			testContainer: v1.Container{
+				Resources: v1.ResourceRequirements{
+					Limits: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("100m"),
+						v1.ResourceMemory: resource.MustParse("200Mi"),
+					},
+				},
+				ResizePolicy: []v1.ContainerResizePolicy{
+					{
+						ResourceName:  v1.ResourceMemory,
+						RestartPolicy: v1.RestartContainer,
+					},
+				},
+			},
+			expectedResizePolicy: []v1.ContainerResizePolicy{
+				{
+					ResourceName:  v1.ResourceMemory,
+					RestartPolicy: v1.RestartContainer,
+				},
+				{
+					ResourceName:  v1.ResourceCPU,
+					RestartPolicy: v1.NotRequired,
+				},
+			},
+		},
+		"CPU requests and memory limits are specified with restartContainer resize policy for CPU": {
+			testContainer: v1.Container{
+				Resources: v1.ResourceRequirements{
+					Limits: v1.ResourceList{
+						v1.ResourceMemory: resource.MustParse("200Mi"),
+					},
+					Requests: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("100m"),
+					},
+				},
+				ResizePolicy: []v1.ContainerResizePolicy{
+					{
+						ResourceName:  v1.ResourceCPU,
+						RestartPolicy: v1.RestartContainer,
+					},
+				},
+			},
+			expectedResizePolicy: []v1.ContainerResizePolicy{
+				{
+					ResourceName:  v1.ResourceCPU,
+					RestartPolicy: v1.RestartContainer,
+				},
+				{
+					ResourceName:  v1.ResourceMemory,
+					RestartPolicy: v1.NotRequired,
+				},
+			},
+		},
+		"CPU and memory requests are specified with restartContainer resize policy for both": {
+			testContainer: v1.Container{
+				Resources: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("100m"),
+						v1.ResourceMemory: resource.MustParse("200Mi"),
+					},
+				},
+				ResizePolicy: []v1.ContainerResizePolicy{
+					{
+						ResourceName:  v1.ResourceCPU,
+						RestartPolicy: v1.RestartContainer,
+					},
+					{
+						ResourceName:  v1.ResourceMemory,
+						RestartPolicy: v1.RestartContainer,
+					},
+				},
+			},
+			expectedResizePolicy: []v1.ContainerResizePolicy{
+				{
+					ResourceName:  v1.ResourceCPU,
+					RestartPolicy: v1.RestartContainer,
+				},
+				{
+					ResourceName:  v1.ResourceMemory,
+					RestartPolicy: v1.RestartContainer,
+				},
+			},
+		},
+		"Ephemeral storage limits are specified": {
+			testContainer: v1.Container{
+				Resources: v1.ResourceRequirements{
+					Limits: v1.ResourceList{
+						v1.ResourceEphemeralStorage: resource.MustParse("500Mi"),
+					},
+				},
+			},
+			expectedResizePolicy: nil,
+		},
+		"Ephemeral storage requests and CPU limits are specified": {
+			testContainer: v1.Container{
+				Resources: v1.ResourceRequirements{
+					Limits: v1.ResourceList{
+						v1.ResourceCPU: resource.MustParse("100m"),
+					},
+					Requests: v1.ResourceList{
+						v1.ResourceEphemeralStorage: resource.MustParse("500Mi"),
+					},
+				},
+			},
+			expectedResizePolicy: []v1.ContainerResizePolicy{
+				{
+					ResourceName:  v1.ResourceCPU,
+					RestartPolicy: v1.NotRequired,
+				},
+			},
+		},
+		"Ephemeral storage requests and limits, memory requests with restartContainer policy are specified": {
+			testContainer: v1.Container{
+				Resources: v1.ResourceRequirements{
+					Limits: v1.ResourceList{
+						v1.ResourceEphemeralStorage: resource.MustParse("500Mi"),
+					},
+					Requests: v1.ResourceList{
+						v1.ResourceEphemeralStorage: resource.MustParse("500Mi"),
+						v1.ResourceMemory:           resource.MustParse("200Mi"),
+					},
+				},
+				ResizePolicy: []v1.ContainerResizePolicy{
+					{
+						ResourceName:  v1.ResourceMemory,
+						RestartPolicy: v1.RestartContainer,
+					},
+				},
+			},
+			expectedResizePolicy: []v1.ContainerResizePolicy{
+				{
+					ResourceName:  v1.ResourceMemory,
+					RestartPolicy: v1.RestartContainer,
+				},
+			},
+		},
+	} {
+		t.Run(desc, func(t *testing.T) {
+			testPod := v1.Pod{}
+			testPod.Spec.Containers = append(testPod.Spec.Containers, tc.testContainer)
+			output := roundTrip(t, runtime.Object(&testPod))
+			pod2 := output.(*v1.Pod)
+			if !cmp.Equal(pod2.Spec.Containers[0].ResizePolicy, tc.expectedResizePolicy) {
+				t.Errorf("expected resize policy %+v, but got %+v", tc.expectedResizePolicy, pod2.Spec.Containers[0].ResizePolicy)
 			}
 		})
 	}

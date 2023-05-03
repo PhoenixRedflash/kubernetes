@@ -83,10 +83,8 @@
         "sigs.k8s.io/structured-merge-diff/v4"
       ],
       "github.com/pkg/errors": [
-        "github.com/Microsoft/go-winio",
         "github.com/Microsoft/hcsshim",
         "github.com/aws/aws-sdk-go",
-        "github.com/containerd/cgroups",
         "github.com/containerd/continuity",
         "github.com/containerd/fifo",
         "github.com/containerd/go-runc",
