@@ -76,6 +76,7 @@ type ephemeralController struct {
 
 // NewController creates an ephemeral volume controller.
 func NewController(
+	ctx context.Context,
 	kubeClient clientset.Interface,
 	podInformer coreinformers.PodInformer,
 	pvcInformer coreinformers.PersistentVolumeClaimInformer) (Controller, error) {
@@ -92,7 +93,7 @@ func NewController(
 
 	ephemeralvolumemetrics.RegisterMetrics()
 
-	eventBroadcaster := record.NewBroadcaster()
+	eventBroadcaster := record.NewBroadcaster(record.WithContext(ctx))
 	eventBroadcaster.StartLogging(klog.Infof)
 	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: kubeClient.CoreV1().Events("")})
 	ec.recorder = eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "ephemeral_volume"})
@@ -109,7 +110,7 @@ func NewController(
 		DeleteFunc: ec.onPVCDelete,
 	})
 	if err := common.AddPodPVCIndexerIfNotPresent(ec.podIndexer); err != nil {
-		return nil, fmt.Errorf("could not initialize pvc protection controller: %w", err)
+		return nil, fmt.Errorf("could not initialize ephemeral volume controller: %w", err)
 	}
 
 	return ec, nil

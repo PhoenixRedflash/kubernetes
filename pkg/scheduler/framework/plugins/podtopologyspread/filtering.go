@@ -51,17 +51,13 @@ type preFilterState struct {
 }
 
 // minMatchNum returns the global minimum for the calculation of skew while taking MinDomains into account.
-func (s *preFilterState) minMatchNum(tpKey string, minDomains int32, enableMinDomainsInPodTopologySpread bool) (int, error) {
+func (s *preFilterState) minMatchNum(tpKey string, minDomains int32) (int, error) {
 	paths, ok := s.TpKeyToCriticalPaths[tpKey]
 	if !ok {
 		return 0, fmt.Errorf("failed to retrieve path by topology key")
 	}
 
 	minMatchNum := paths[0].MatchNum
-	if !enableMinDomainsInPodTopologySpread {
-		return minMatchNum, nil
-	}
-
 	domainsNum, ok := s.TpKeyToDomainsNum[tpKey]
 	if !ok {
 		return 0, fmt.Errorf("failed to retrieve the number of domains by topology key")
@@ -93,8 +89,7 @@ func (s *preFilterState) Clone() framework.StateData {
 		copy.TpKeyToCriticalPaths[tpKey] = &criticalPaths{paths[0], paths[1]}
 	}
 	for tpPair, matchNum := range s.TpPairToMatchNum {
-		copyPair := topologyPair{key: tpPair.key, value: tpPair.value}
-		copy.TpPairToMatchNum[copyPair] = matchNum
+		copy.TpPairToMatchNum[tpPair] = matchNum
 	}
 	return &copy
 }
@@ -239,24 +234,9 @@ func getPreFilterState(cycleState *framework.CycleState) (*preFilterState, error
 
 // calPreFilterState computes preFilterState describing how pods are spread on topologies.
 func (pl *PodTopologySpread) calPreFilterState(ctx context.Context, pod *v1.Pod) (*preFilterState, error) {
-	var constraints []topologySpreadConstraint
-	var err error
-	if len(pod.Spec.TopologySpreadConstraints) > 0 {
-		// We have feature gating in APIServer to strip the spec
-		// so don't need to re-check feature gate, just check length of Constraints.
-		constraints, err = pl.filterTopologySpreadConstraints(
-			pod.Spec.TopologySpreadConstraints,
-			pod.Labels,
-			v1.DoNotSchedule,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("obtaining pod's hard topology spread constraints: %w", err)
-		}
-	} else {
-		constraints, err = pl.buildDefaultConstraints(pod, v1.DoNotSchedule)
-		if err != nil {
-			return nil, fmt.Errorf("setting default hard topology spread constraints: %w", err)
-		}
+	constraints, err := pl.getConstraints(pod)
+	if err != nil {
+		return nil, fmt.Errorf("get constraints from pod: %w", err)
 	}
 	if len(constraints) == 0 {
 		return &preFilterState{}, nil
@@ -275,14 +255,9 @@ func (pl *PodTopologySpread) calPreFilterState(ctx context.Context, pod *v1.Pod)
 
 	tpCountsByNode := make([]map[topologyPair]int, len(allNodes))
 	requiredNodeAffinity := nodeaffinity.GetRequiredNodeAffinity(pod)
-	logger := klog.FromContext(ctx)
 	processNode := func(i int) {
 		nodeInfo := allNodes[i]
 		node := nodeInfo.Node()
-		if node == nil {
-			logger.Error(nil, "Node not found")
-			return
-		}
 
 		if !pl.enableNodeInclusionPolicyInPodTopologySpread {
 			// spreading is applied to nodes that pass those filters.
@@ -317,11 +292,9 @@ func (pl *PodTopologySpread) calPreFilterState(ctx context.Context, pod *v1.Pod)
 			s.TpPairToMatchNum[tp] += count
 		}
 	}
-	if pl.enableMinDomainsInPodTopologySpread {
-		s.TpKeyToDomainsNum = make(map[string]int, len(constraints))
-		for tp := range s.TpPairToMatchNum {
-			s.TpKeyToDomainsNum[tp.key]++
-		}
+	s.TpKeyToDomainsNum = make(map[string]int, len(constraints))
+	for tp := range s.TpPairToMatchNum {
+		s.TpKeyToDomainsNum[tp.key]++
 	}
 
 	// calculate min match for each topology pair
@@ -339,9 +312,6 @@ func (pl *PodTopologySpread) calPreFilterState(ctx context.Context, pod *v1.Pod)
 // Filter invoked at the filter extension point.
 func (pl *PodTopologySpread) Filter(ctx context.Context, cycleState *framework.CycleState, pod *v1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
 	node := nodeInfo.Node()
-	if node == nil {
-		return framework.AsStatus(fmt.Errorf("node not found"))
-	}
 
 	s, err := getPreFilterState(cycleState)
 	if err != nil {
@@ -365,7 +335,7 @@ func (pl *PodTopologySpread) Filter(ctx context.Context, cycleState *framework.C
 
 		// judging criteria:
 		// 'existing matching num' + 'if self-match (1 or 0)' - 'global minimum' <= 'maxSkew'
-		minMatchNum, err := s.minMatchNum(tpKey, c.MinDomains, pl.enableMinDomainsInPodTopologySpread)
+		minMatchNum, err := s.minMatchNum(tpKey, c.MinDomains)
 		if err != nil {
 			logger.Error(err, "Internal error occurred while retrieving value precalculated in PreFilter", "topologyKey", tpKey, "paths", s.TpKeyToCriticalPaths)
 			continue

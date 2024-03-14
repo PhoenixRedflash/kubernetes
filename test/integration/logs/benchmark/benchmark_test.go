@@ -18,7 +18,6 @@ package benchmark
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -75,14 +74,21 @@ func BenchmarkEncoding(b *testing.B) {
 				state := klog.CaptureState()
 				defer state.Restore()
 
-				var output bytesWritten
+				// To make the tests a bit more realistic, at
+				// least do system calls during each write.
+				output := newBytesWritten(b, "/dev/null")
 				c := logsapi.NewLoggingConfiguration()
 				c.Format = format
 				o := logsapi.LoggingOptions{
-					ErrorStream: &output,
-					InfoStream:  &output,
+					ErrorStream: output,
+					InfoStream:  output,
 				}
-				klog.SetOutput(&output)
+				klog.SetOutput(output)
+				defer func() {
+					if err := logsapi.ResetForTest(nil); err != nil {
+						b.Errorf("error resetting logsapi: %v", err)
+					}
+				}()
 				if err := logsapi.ValidateAndApplyWithOptions(c, &o, nil); err != nil {
 					b.Fatalf("Unexpected error configuring logging: %v", err)
 				}
@@ -104,7 +110,7 @@ func BenchmarkEncoding(b *testing.B) {
 				// Report messages/s instead of ns/op because "op" varies.
 				b.ReportMetric(0, "ns/op")
 				b.ReportMetric(float64(total)/duration.Seconds(), "msgs/s")
-				fileSizes[filepath.Base(b.Name())] = int(output)
+				fileSizes[filepath.Base(b.Name())] = int(output.bytesWritten)
 			}
 
 			b.Run("printf", func(b *testing.B) {
@@ -119,7 +125,7 @@ func BenchmarkEncoding(b *testing.B) {
 				test(b, "json", prints)
 			})
 
-			b.Log(fmt.Sprintf("%s: file sizes: %v\n", path, fileSizes))
+			b.Logf("%s: file sizes: %v\n", path, fileSizes)
 		})
 		return nil
 	}); err != nil {
@@ -209,6 +215,10 @@ func benchmarkOutputFormatStream(b *testing.B, config loadGeneratorConfig, disca
 		if err := c.Options.JSON.InfoBufferSize.Set("64Ki"); err != nil {
 			b.Fatalf("Error setting buffer size: %v", err)
 		}
+		c.Options.Text.SplitStream = true
+		if err := c.Options.Text.InfoBufferSize.Set("64Ki"); err != nil {
+			b.Fatalf("Error setting buffer size: %v", err)
+		}
 	}
 	var files []*os.File
 	if discard {
@@ -238,6 +248,11 @@ func benchmarkOutputFormatStream(b *testing.B, config loadGeneratorConfig, disca
 	}
 
 	klog.SetOutput(o.ErrorStream)
+	defer func() {
+		if err := logsapi.ResetForTest(nil); err != nil {
+			b.Errorf("error resetting logsapi: %v", err)
+		}
+	}()
 	if err := logsapi.ValidateAndApplyWithOptions(c, &o, featureGate); err != nil {
 		b.Fatalf("Unexpected error configuring logging: %v", err)
 	}
@@ -287,11 +302,11 @@ func generateOutput(b *testing.B, config loadGeneratorConfig, files ...*os.File)
 	b.Logf("Wrote %d log entries in %s -> %.1f/s", total, duration, float64(total)/duration.Seconds())
 	for i, file := range files {
 		if file != nil {
-			pos, err := file.Seek(0, os.SEEK_END)
+			pos, err := file.Seek(0, io.SeekEnd)
 			if err != nil {
 				b.Fatal(err)
 			}
-			if _, err := file.Seek(0, os.SEEK_SET); err != nil {
+			if _, err := file.Seek(0, io.SeekStart); err != nil {
 				b.Fatal(err)
 			}
 			max := 50

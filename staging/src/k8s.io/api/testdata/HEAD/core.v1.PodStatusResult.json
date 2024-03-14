@@ -59,6 +59,11 @@
     "reason": "reasonValue",
     "nominatedNodeName": "nominatedNodeNameValue",
     "hostIP": "hostIPValue",
+    "hostIPs": [
+      {
+        "ip": "ipValue"
+      }
+    ],
     "podIP": "podIPValue",
     "podIPs": [
       {
@@ -126,7 +131,15 @@
               "name": "nameValue"
             }
           ]
-        }
+        },
+        "volumeMounts": [
+          {
+            "name": "nameValue",
+            "mountPath": "mountPathValue",
+            "readOnly": true,
+            "recursiveReadOnly": "recursiveReadOnlyValue"
+          }
+        ]
       }
     ],
     "containerStatuses": [
@@ -189,7 +202,15 @@
               "name": "nameValue"
             }
           ]
-        }
+        },
+        "volumeMounts": [
+          {
+            "name": "nameValue",
+            "mountPath": "mountPathValue",
+            "readOnly": true,
+            "recursiveReadOnly": "recursiveReadOnlyValue"
+          }
+        ]
       }
     ],
     "qosClass": "qosClassValue",
@@ -253,9 +274,23 @@
               "name": "nameValue"
             }
           ]
-        }
+        },
+        "volumeMounts": [
+          {
+            "name": "nameValue",
+            "mountPath": "mountPathValue",
+            "readOnly": true,
+            "recursiveReadOnly": "recursiveReadOnlyValue"
+          }
+        ]
       }
     ],
-    "resize": "resizeValue"
+    "resize": "resizeValue",
+    "resourceClaimStatuses": [
+      {
+        "name": "nameValue",
+        "resourceClaimName": "resourceClaimNameValue"
+      }
+    ]
   }
 }

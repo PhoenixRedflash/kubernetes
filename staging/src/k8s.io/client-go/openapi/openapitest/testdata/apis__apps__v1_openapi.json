@@ -3677,7 +3677,7 @@
             "description": "SecurityContext holds pod-level security attributes and common container settings. Optional: Defaults to empty.  See type description for default values of each field."
           },
           "serviceAccount": {
-            "description": "DeprecatedServiceAccount is a depreciated alias for ServiceAccountName. Deprecated: Use serviceAccountName instead.",
+            "description": "DeprecatedServiceAccount is a deprecated alias for ServiceAccountName. Deprecated: Use serviceAccountName instead.",
             "type": "string"
           },
           "serviceAccountName": {
@@ -3845,7 +3845,7 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.GRPCAction"
               }
             ],
-            "description": "GRPC specifies an action involving a GRPC port. This is a beta field and requires enabling GRPCContainerProbe feature gate."
+            "description": "GRPC specifies an action involving a GRPC port."
           },
           "httpGet": {
             "allOf": [

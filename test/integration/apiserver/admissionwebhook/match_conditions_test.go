@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -35,10 +36,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
-	genericfeatures "k8s.io/apiserver/pkg/features"
-	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	clientset "k8s.io/client-go/kubernetes"
-	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	apiservertesting "k8s.io/kubernetes/cmd/kube-apiserver/app/testing"
 	"k8s.io/kubernetes/test/integration/framework"
 )
@@ -109,7 +107,6 @@ func newMatchConditionHandler(recorder *admissionRecorder) http.Handler {
 
 // TestMatchConditions tests ValidatingWebhookConfigurations and MutatingWebhookConfigurations that validates different cases of matchCondition fields
 func TestMatchConditions(t *testing.T) {
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, genericfeatures.AdmissionWebhookMatchConditions, true)()
 
 	fail := admissionregistrationv1.Fail
 	ignore := admissionregistrationv1.Ignore
@@ -431,9 +428,9 @@ func TestMatchConditions(t *testing.T) {
 
 			for _, pod := range testcase.pods {
 				_, err := client.CoreV1().Pods(pod.Namespace).Create(context.TODO(), pod, dryRunCreate)
-				if testcase.expectErrorPod == false && err != nil {
+				if !testcase.expectErrorPod && err != nil {
 					t.Fatalf("unexpected error creating test pod: %v", err)
-				} else if testcase.expectErrorPod == true && err == nil {
+				} else if testcase.expectErrorPod && err == nil {
 					t.Fatal("expected error creating pods")
 				}
 			}
@@ -566,7 +563,6 @@ func TestMatchConditions(t *testing.T) {
 }
 
 func TestMatchConditions_validation(t *testing.T) {
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, genericfeatures.AdmissionWebhookMatchConditions, true)()
 
 	server := apiservertesting.StartTestServerOrDie(t, nil, []string{
 		"--disable-admission-plugins=ServiceAccount",
@@ -649,7 +645,16 @@ func TestMatchConditions_validation(t *testing.T) {
 			Expression: "oldObject == null",
 		}},
 		expectError: true,
-	}}
+	}, {
+		name:            "less than 65 match conditions should pass",
+		matchConditions: repeatedMatchConditions(64),
+		expectError:     false,
+	}, {
+		name:            "more than 64 match conditions should error",
+		matchConditions: repeatedMatchConditions(65),
+		expectError:     true,
+	},
+	}
 
 	dryRunCreate := metav1.CreateOptions{
 		DryRun: []string{metav1.DryRunAll},
@@ -760,4 +765,15 @@ func newMarkerPod(namespace string) *corev1.Pod {
 			}},
 		},
 	}
+}
+
+func repeatedMatchConditions(size int) []admissionregistrationv1.MatchCondition {
+	matchConditions := make([]admissionregistrationv1.MatchCondition, 0, size)
+	for i := 0; i < size; i++ {
+		matchConditions = append(matchConditions, admissionregistrationv1.MatchCondition{
+			Name:       "repeated-" + strconv.Itoa(i),
+			Expression: "true",
+		})
+	}
+	return matchConditions
 }

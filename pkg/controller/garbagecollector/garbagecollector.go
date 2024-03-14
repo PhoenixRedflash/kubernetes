@@ -20,11 +20,11 @@ import (
 	"context"
 	goerrors "errors"
 	"fmt"
+	"k8s.io/controller-manager/pkg/informerfactory"
 	"reflect"
 	"sync"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,10 +42,8 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/controller-manager/controller"
-	"k8s.io/controller-manager/pkg/informerfactory"
 	"k8s.io/klog/v2"
 	c "k8s.io/kubernetes/pkg/controller"
-	"k8s.io/kubernetes/pkg/controller/apis/config/scheme"
 	"k8s.io/kubernetes/pkg/controller/garbagecollector/metrics"
 )
 
@@ -85,6 +83,7 @@ var _ controller.Debuggable = (*GarbageCollector)(nil)
 
 // NewGarbageCollector creates a new GarbageCollector.
 func NewGarbageCollector(
+	ctx context.Context,
 	kubeClient clientset.Interface,
 	metadataClient metadata.Interface,
 	mapper meta.ResettableRESTMapper,
@@ -92,36 +91,28 @@ func NewGarbageCollector(
 	sharedInformers informerfactory.InformerFactory,
 	informersStarted <-chan struct{},
 ) (*GarbageCollector, error) {
+	graphBuilder := NewDependencyGraphBuilder(ctx, metadataClient, mapper, ignoredResources, sharedInformers, informersStarted)
+	return NewComposedGarbageCollector(ctx, kubeClient, metadataClient, mapper, graphBuilder)
+}
 
-	eventBroadcaster := record.NewBroadcaster()
-	eventRecorder := eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "garbage-collector-controller"})
+func NewComposedGarbageCollector(
+	ctx context.Context,
+	kubeClient clientset.Interface,
+	metadataClient metadata.Interface,
+	mapper meta.ResettableRESTMapper,
+	graphBuilder *GraphBuilder,
+) (*GarbageCollector, error) {
+	attemptToDelete, attemptToOrphan, absentOwnerCache := graphBuilder.GetGraphResources()
 
-	attemptToDelete := workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "garbage_collector_attempt_to_delete")
-	attemptToOrphan := workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "garbage_collector_attempt_to_orphan")
-	absentOwnerCache := NewReferenceCache(500)
 	gc := &GarbageCollector{
-		metadataClient:   metadataClient,
-		restMapper:       mapper,
-		attemptToDelete:  attemptToDelete,
-		attemptToOrphan:  attemptToOrphan,
-		absentOwnerCache: absentOwnerCache,
-		kubeClient:       kubeClient,
-		eventBroadcaster: eventBroadcaster,
-	}
-	gc.dependencyGraphBuilder = &GraphBuilder{
-		eventRecorder:    eventRecorder,
-		metadataClient:   metadataClient,
-		informersStarted: informersStarted,
-		restMapper:       mapper,
-		graphChanges:     workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "garbage_collector_graph_changes"),
-		uidToNode: &concurrentUIDToNode{
-			uidToNode: make(map[types.UID]*node),
-		},
-		attemptToDelete:  attemptToDelete,
-		attemptToOrphan:  attemptToOrphan,
-		absentOwnerCache: absentOwnerCache,
-		sharedInformers:  sharedInformers,
-		ignoredResources: ignoredResources,
+		metadataClient:         metadataClient,
+		restMapper:             mapper,
+		attemptToDelete:        attemptToDelete,
+		attemptToOrphan:        attemptToOrphan,
+		absentOwnerCache:       absentOwnerCache,
+		kubeClient:             kubeClient,
+		eventBroadcaster:       graphBuilder.eventBroadcaster,
+		dependencyGraphBuilder: graphBuilder,
 	}
 
 	metrics.Register()
@@ -147,7 +138,7 @@ func (gc *GarbageCollector) Run(ctx context.Context, workers int) {
 	defer gc.dependencyGraphBuilder.graphChanges.ShutDown()
 
 	// Start events processing pipeline.
-	gc.eventBroadcaster.StartStructuredLogging(0)
+	gc.eventBroadcaster.StartStructuredLogging(3)
 	gc.eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: gc.kubeClient.CoreV1().Events("")})
 	defer gc.eventBroadcaster.Shutdown()
 
@@ -187,13 +178,20 @@ func (gc *GarbageCollector) Sync(ctx context.Context, discoveryClient discovery.
 		logger := klog.FromContext(ctx)
 
 		// Get the current resource list from discovery.
-		newResources := GetDeletableResources(discoveryClient)
+		newResources, err := GetDeletableResources(logger, discoveryClient)
 
-		// This can occur if there is an internal error in GetDeletableResources.
 		if len(newResources) == 0 {
 			logger.V(2).Info("no resources reported by discovery, skipping garbage collector sync")
 			metrics.GarbageCollectorResourcesSyncError.Inc()
 			return
+		}
+		if groupLookupFailures, isLookupFailure := discovery.GroupDiscoveryFailedErrorGroups(err); isLookupFailure {
+			// In partial discovery cases, preserve existing synced informers for resources in the failed groups, so resyncMonitors will only add informers for newly seen resources
+			for k, v := range oldResources {
+				if _, failed := groupLookupFailures[k.GroupVersion()]; failed && gc.dependencyGraphBuilder.IsResourceSynced(k) {
+					newResources[k] = v
+				}
+			}
 		}
 
 		// Decide whether discovery has reported a change.
@@ -214,11 +212,20 @@ func (gc *GarbageCollector) Sync(ctx context.Context, discoveryClient discovery.
 
 			// On a reattempt, check if available resources have changed
 			if attempt > 1 {
-				newResources = GetDeletableResources(discoveryClient)
+				newResources, err = GetDeletableResources(logger, discoveryClient)
+
 				if len(newResources) == 0 {
 					logger.V(2).Info("no resources reported by discovery", "attempt", attempt)
 					metrics.GarbageCollectorResourcesSyncError.Inc()
 					return false, nil
+				}
+				if groupLookupFailures, isLookupFailure := discovery.GroupDiscoveryFailedErrorGroups(err); isLookupFailure {
+					// In partial discovery cases, preserve existing synced informers for resources in the failed groups, so resyncMonitors will only add informers for newly seen resources
+					for k, v := range oldResources {
+						if _, failed := groupLookupFailures[k.GroupVersion()]; failed && gc.dependencyGraphBuilder.IsResourceSynced(k) {
+							newResources[k] = v
+						}
+					}
 				}
 			}
 
@@ -806,20 +813,23 @@ func (gc *GarbageCollector) GraphHasUID(u types.UID) bool {
 // garbage collector should recognize and work with. More specifically, all
 // preferred resources which support the 'delete', 'list', and 'watch' verbs.
 //
+// If an error was encountered fetching resources from the server,
+// it is included as well, along with any resources that were successfully resolved.
+//
 // All discovery errors are considered temporary. Upon encountering any error,
 // GetDeletableResources will log and return any discovered resources it was
 // able to process (which may be none).
-func GetDeletableResources(discoveryClient discovery.ServerResourcesInterface) map[schema.GroupVersionResource]struct{} {
-	preferredResources, err := discoveryClient.ServerPreferredResources()
-	if err != nil {
-		if discovery.IsGroupDiscoveryFailedError(err) {
-			klog.Warningf("failed to discover some groups: %v", err.(*discovery.ErrGroupDiscoveryFailed).Groups)
+func GetDeletableResources(logger klog.Logger, discoveryClient discovery.ServerResourcesInterface) (map[schema.GroupVersionResource]struct{}, error) {
+	preferredResources, lookupErr := discoveryClient.ServerPreferredResources()
+	if lookupErr != nil {
+		if groupLookupFailures, isLookupFailure := discovery.GroupDiscoveryFailedErrorGroups(lookupErr); isLookupFailure {
+			logger.Info("failed to discover some groups", "groups", groupLookupFailures)
 		} else {
-			klog.Warningf("failed to discover preferred resources: %v", err)
+			logger.Info("failed to discover preferred resources", "error", lookupErr)
 		}
 	}
 	if preferredResources == nil {
-		return map[schema.GroupVersionResource]struct{}{}
+		return map[schema.GroupVersionResource]struct{}{}, lookupErr
 	}
 
 	// This is extracted from discovery.GroupVersionResources to allow tolerating
@@ -829,7 +839,7 @@ func GetDeletableResources(discoveryClient discovery.ServerResourcesInterface) m
 	for _, rl := range deletableResources {
 		gv, err := schema.ParseGroupVersion(rl.GroupVersion)
 		if err != nil {
-			klog.Warningf("ignoring invalid discovered resource %q: %v", rl.GroupVersion, err)
+			logger.Info("ignoring invalid discovered resource", "groupversion", rl.GroupVersion, "error", err)
 			continue
 		}
 		for i := range rl.APIResources {
@@ -837,9 +847,14 @@ func GetDeletableResources(discoveryClient discovery.ServerResourcesInterface) m
 		}
 	}
 
-	return deletableGroupVersionResources
+	return deletableGroupVersionResources, lookupErr
 }
 
 func (gc *GarbageCollector) Name() string {
 	return "garbagecollector"
+}
+
+// GetDependencyGraphBuilder return graph builder which is particularly helpful for testing where controllerContext is not available
+func (gc *GarbageCollector) GetDependencyGraphBuilder() *GraphBuilder {
+	return gc.dependencyGraphBuilder
 }

@@ -1402,6 +1402,9 @@ func TestCSINodeUpdateValidation(t *testing.T) {
 }
 
 func TestCSIDriverValidation(t *testing.T) {
+	// assume this feature is on for this test, detailed enabled/disabled tests in TestCSIDriverValidationSELinuxMountEnabledDisabled
+	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.SELinuxMountReadWriteOncePod, true)()
+
 	driverName := "test-driver"
 	longName := "my-a-b-c-d-c-f-g-h-i-j-k-l-m-n-o-p-q-r-s-t-u-v-w-x-y-z-ABCDEFGHIJKLMNOPQRSTUVWXYZ-driver"
 	invalidName := "-invalid-@#$%^&*()-"
@@ -1653,6 +1656,9 @@ func TestCSIDriverValidation(t *testing.T) {
 }
 
 func TestCSIDriverValidationUpdate(t *testing.T) {
+	// assume this feature is on for this test, detailed enabled/disabled tests in TestCSIDriverValidationSELinuxMountEnabledDisabled
+	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.SELinuxMountReadWriteOncePod, true)()
+
 	driverName := "test-driver"
 	longName := "my-a-b-c-d-c-f-g-h-i-j-k-l-m-n-o-p-q-r-s-t-u-v-w-x-y-z-ABCDEFGHIJKLMNOPQRSTUVWXYZ-driver"
 	invalidName := "-invalid-@#$%^&*()-"
@@ -1709,6 +1715,17 @@ func TestCSIDriverValidationUpdate(t *testing.T) {
 		modify: func(new *storage.CSIDriver) {
 			new.Spec.SELinuxMount = &notSELinuxMount
 		},
+	}, {
+		name: "change PodInfoOnMount",
+		modify: func(new *storage.CSIDriver) {
+			new.Spec.PodInfoOnMount = &podInfoOnMount
+		},
+	}, {
+		name: "change FSGroupPolicy",
+		modify: func(new *storage.CSIDriver) {
+			fileFSGroupPolicy := storage.FileFSGroupPolicy
+			new.Spec.FSGroupPolicy = &fileFSGroupPolicy
+		},
 	}}
 	for _, test := range successCases {
 		t.Run(test.name, func(t *testing.T) {
@@ -1750,11 +1767,6 @@ func TestCSIDriverValidationUpdate(t *testing.T) {
 			new.Spec.PodInfoOnMount = nil
 		},
 	}, {
-		name: "PodInfoOnMount changed",
-		modify: func(new *storage.CSIDriver) {
-			new.Spec.PodInfoOnMount = &podInfoOnMount
-		},
-	}, {
 		name: "invalid volume lifecycle mode",
 		modify: func(new *storage.CSIDriver) {
 			new.Spec.VolumeLifecycleModes = []storage.VolumeLifecycleMode{
@@ -1785,12 +1797,6 @@ func TestCSIDriverValidationUpdate(t *testing.T) {
 		modify: func(new *storage.CSIDriver) {
 			invalidFSGroupPolicy := storage.FSGroupPolicy("invalid")
 			new.Spec.FSGroupPolicy = &invalidFSGroupPolicy
-		},
-	}, {
-		name: "FSGroupPolicy changed",
-		modify: func(new *storage.CSIDriver) {
-			fileFSGroupPolicy := storage.FileFSGroupPolicy
-			new.Spec.FSGroupPolicy = &fileFSGroupPolicy
 		},
 	}, {
 		name: "TokenRequests invalidated",
@@ -2027,7 +2033,7 @@ func TestCSIServiceAccountToken(t *testing.T) {
 	}
 }
 
-func TestCSIDriverValidationSELinuxMountAlpha(t *testing.T) {
+func TestCSIDriverValidationSELinuxMountEnabledDisabled(t *testing.T) {
 	tests := []struct {
 		name              string
 		featureEnabled    bool
@@ -2075,5 +2081,260 @@ func TestCSIDriverValidationSELinuxMountAlpha(t *testing.T) {
 				t.Errorf("Validation returned error: %s", err)
 			}
 		})
+	}
+
+	updateTests := []struct {
+		name           string
+		featureEnabled bool
+		oldValue       *bool
+		newValue       *bool
+		expectError    bool
+	}{{
+		name:           "feature enabled, nil->nil",
+		featureEnabled: true,
+		oldValue:       nil,
+		newValue:       nil,
+		expectError:    true, // populated by defaulting and required when feature is enabled
+	}, {
+		name:           "feature enabled, nil->set",
+		featureEnabled: true,
+		oldValue:       nil,
+		newValue:       utilpointer.Bool(true),
+		expectError:    false,
+	}, {
+		name:           "feature enabled, set->set",
+		featureEnabled: true,
+		oldValue:       utilpointer.Bool(true),
+		newValue:       utilpointer.Bool(true),
+		expectError:    false,
+	}, {
+		name:           "feature enabled, set->nil",
+		featureEnabled: true,
+		oldValue:       utilpointer.Bool(true),
+		newValue:       nil,
+		expectError:    true, // populated by defaulting and required when feature is enabled
+	}, {
+		name:           "feature disabled, nil->nil",
+		featureEnabled: false,
+		oldValue:       nil,
+		newValue:       nil,
+		expectError:    false,
+	}, {
+		name:           "feature disabled, nil->set",
+		featureEnabled: false,
+		oldValue:       nil,
+		newValue:       utilpointer.Bool(true),
+		expectError:    false,
+	}, {
+		name:           "feature disabled, set->set",
+		featureEnabled: false,
+		oldValue:       utilpointer.Bool(true),
+		newValue:       utilpointer.Bool(true),
+		expectError:    false,
+	}, {
+		name:           "feature disabled, set->nil",
+		featureEnabled: false,
+		oldValue:       utilpointer.Bool(true),
+		newValue:       nil,
+		expectError:    false,
+	}}
+	for _, test := range updateTests {
+		t.Run(test.name, func(t *testing.T) {
+			defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.SELinuxMountReadWriteOncePod, test.featureEnabled)()
+			oldCSIDriver := &storage.CSIDriver{
+				ObjectMeta: metav1.ObjectMeta{Name: "foo", ResourceVersion: "1"},
+				Spec: storage.CSIDriverSpec{
+					AttachRequired:    utilpointer.Bool(true),
+					PodInfoOnMount:    utilpointer.Bool(true),
+					RequiresRepublish: utilpointer.Bool(true),
+					StorageCapacity:   utilpointer.Bool(true),
+					SELinuxMount:      test.oldValue,
+				},
+			}
+			newCSIDriver := oldCSIDriver.DeepCopy()
+			newCSIDriver.Spec.SELinuxMount = test.newValue
+			err := ValidateCSIDriverUpdate(newCSIDriver, oldCSIDriver)
+			if test.expectError && err == nil {
+				t.Error("Expected validation error, got nil")
+			}
+			if !test.expectError && err != nil {
+				t.Errorf("Validation returned error: %s", err)
+			}
+		})
+	}
+}
+
+func TestValidateVolumeAttributesClass(t *testing.T) {
+	successCases := []storage.VolumeAttributesClass{
+		{
+			// driverName without a slash
+			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+			DriverName: "foo",
+			Parameters: map[string]string{
+				"foo-parameter": "free-form-string",
+			},
+		},
+		{
+			// some parameters
+			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+			DriverName: "kubernetes.io/foo",
+			Parameters: map[string]string{
+				"kubernetes.io/foo-parameter": "free/form/string",
+				"foo-parameter":               "free-form-string",
+				"foo-parameter2":              "{\"embedded\": \"json\", \"with\": {\"structures\":\"inside\"}}",
+				"foo-parameter3":              "",
+			},
+		}}
+
+	// Success cases are expected to pass validation.
+	for testName, v := range successCases {
+		if errs := ValidateVolumeAttributesClass(&v); len(errs) != 0 {
+			t.Errorf("Expected success for %d, got %v", testName, errs)
+		}
+	}
+
+	// generate a map longer than maxParameterSize
+	longParameters := make(map[string]string)
+	totalSize := 0
+	for totalSize < maxProvisionerParameterSize {
+		k := fmt.Sprintf("param/%d", totalSize)
+		v := fmt.Sprintf("value-%d", totalSize)
+		longParameters[k] = v
+		totalSize = totalSize + len(k) + len(v)
+	}
+
+	errorCases := map[string]storage.VolumeAttributesClass{
+		"namespace is present": {
+			ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
+			DriverName: "kubernetes.io/foo",
+			Parameters: map[string]string{
+				"foo-parameter": "free-form-string",
+			},
+		},
+		"invalid driverName": {
+			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+			DriverName: "kubernetes.io/invalid/foo",
+			Parameters: map[string]string{
+				"foo-parameter": "free-form-string",
+			},
+		},
+		"invalid driverName with invalid chars": {
+			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+			DriverName: "^/ ",
+			Parameters: map[string]string{
+				"foo-parameter": "free-form-string",
+			},
+		},
+		"empty parameters": {
+			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+			DriverName: "kubernetes.io/foo",
+			Parameters: map[string]string{},
+		},
+		"nil parameters": {
+			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+			DriverName: "kubernetes.io/foo",
+		},
+		"invalid empty parameter name": {
+			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+			DriverName: "kubernetes.io/foo",
+			Parameters: map[string]string{
+				"": "value",
+			},
+		},
+		"driverName: Required value": {
+			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+			DriverName: "",
+			Parameters: map[string]string{
+				"foo-parameter": "free-form-string",
+			},
+		},
+		"driverName: whitespace": {
+			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+			DriverName: " ",
+			Parameters: map[string]string{
+				"foo-parameter": "free-form-string",
+			},
+		},
+		"too long parameters": {
+			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+			DriverName: "kubernetes.io/foo",
+			Parameters: longParameters,
+		},
+	}
+
+	// Error cases are not expected to pass validation.
+	for testName, v := range errorCases {
+		if errs := ValidateVolumeAttributesClass(&v); len(errs) == 0 {
+			t.Errorf("Expected failure for test: %s", testName)
+		}
+	}
+}
+
+func TestValidateVolumeAttributesClassUpdate(t *testing.T) {
+	cases := map[string]struct {
+		oldClass      *storage.VolumeAttributesClass
+		newClass      *storage.VolumeAttributesClass
+		shouldSucceed bool
+	}{
+		"invalid driverName update": {
+			oldClass: &storage.VolumeAttributesClass{
+				DriverName: "kubernetes.io/foo",
+			},
+			newClass: &storage.VolumeAttributesClass{
+				DriverName: "kubernetes.io/bar",
+			},
+			shouldSucceed: false,
+		},
+		"invalid parameter update which changes values": {
+			oldClass: &storage.VolumeAttributesClass{
+				DriverName: "kubernetes.io/foo",
+				Parameters: map[string]string{
+					"foo": "bar1",
+				},
+			},
+			newClass: &storage.VolumeAttributesClass{
+				DriverName: "kubernetes.io/foo",
+				Parameters: map[string]string{
+					"foo": "bar2",
+				},
+			},
+			shouldSucceed: false,
+		},
+		"invalid parameter update which add new item": {
+			oldClass: &storage.VolumeAttributesClass{
+				DriverName: "kubernetes.io/foo",
+				Parameters: map[string]string{},
+			},
+			newClass: &storage.VolumeAttributesClass{
+				DriverName: "kubernetes.io/foo",
+				Parameters: map[string]string{
+					"foo": "bar",
+				},
+			},
+			shouldSucceed: false,
+		},
+		"invalid parameter update which remove a item": {
+			oldClass: &storage.VolumeAttributesClass{
+				DriverName: "kubernetes.io/foo",
+				Parameters: map[string]string{
+					"foo": "bar",
+				},
+			},
+			newClass: &storage.VolumeAttributesClass{
+				DriverName: "kubernetes.io/foo",
+				Parameters: map[string]string{},
+			},
+			shouldSucceed: false,
+		},
+	}
+
+	for testName, testCase := range cases {
+		errs := ValidateVolumeAttributesClassUpdate(testCase.newClass, testCase.oldClass)
+		if testCase.shouldSucceed && len(errs) != 0 {
+			t.Errorf("Expected success for %v, got %v", testName, errs)
+		}
+		if !testCase.shouldSucceed && len(errs) == 0 {
+			t.Errorf("Expected failure for %v, got success", testName)
+		}
 	}
 }

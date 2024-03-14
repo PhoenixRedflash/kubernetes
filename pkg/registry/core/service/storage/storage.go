@@ -127,6 +127,11 @@ func NewREST(
 	store.BeginCreate = genericStore.beginCreate
 	store.BeginUpdate = genericStore.beginUpdate
 
+	// users can patch the status to remove the finalizer,
+	// hence statusStore must participate on the AfterDelete
+	// hook to release the allocated resources
+	statusStore.AfterDelete = genericStore.afterDelete
+
 	return genericStore, &StatusREST{store: &statusStore}, &svcreg.ProxyREST{Redirector: genericStore, ProxyTransport: proxyTransport}, nil
 }
 
@@ -643,7 +648,11 @@ func needsClusterIP(svc *api.Service) bool {
 }
 
 func needsNodePort(svc *api.Service) bool {
-	if svc.Spec.Type == api.ServiceTypeNodePort || svc.Spec.Type == api.ServiceTypeLoadBalancer {
+	if svc.Spec.Type == api.ServiceTypeNodePort {
+		return true
+	}
+	if svc.Spec.Type == api.ServiceTypeLoadBalancer &&
+		(svc.Spec.AllocateLoadBalancerNodePorts == nil || *svc.Spec.AllocateLoadBalancerNodePorts) {
 		return true
 	}
 	return false

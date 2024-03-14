@@ -52,6 +52,9 @@ func (kl *Kubelet) registerWithAPIServer() {
 	if kl.registrationCompleted {
 		return
 	}
+
+	kl.nodeStartupLatencyTracker.RecordAttemptRegisterNode()
+
 	step := 100 * time.Millisecond
 
 	for {
@@ -85,6 +88,7 @@ func (kl *Kubelet) registerWithAPIServer() {
 func (kl *Kubelet) tryRegisterWithAPIServer(node *v1.Node) bool {
 	_, err := kl.kubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
 	if err == nil {
+		kl.nodeStartupLatencyTracker.RecordRegisteredNewNode()
 		return true
 	}
 
@@ -633,6 +637,12 @@ func (kl *Kubelet) patchNodeStatus(originalNode, node *v1.Node) (*v1.Node, error
 	}
 	kl.lastStatusReportTime = kl.clock.Now()
 	kl.setLastObservedNodeAddresses(updatedNode.Status.Addresses)
+
+	readyIdx, readyCondition := nodeutil.GetNodeCondition(&updatedNode.Status, v1.NodeReady)
+	if readyIdx >= 0 && readyCondition.Status == v1.ConditionTrue {
+		kl.nodeStartupLatencyTracker.RecordNodeReady()
+	}
+
 	return updatedNode, nil
 }
 
@@ -722,10 +732,6 @@ func (kl *Kubelet) defaultNodeStatusFuncs() []func(context.Context, *v1.Node) er
 	if kl.cloud != nil {
 		nodeAddressesFunc = kl.cloudResourceSyncManager.NodeAddresses
 	}
-	var validateHostFunc func() error
-	if kl.appArmorValidator != nil {
-		validateHostFunc = kl.appArmorValidator.ValidateHost
-	}
 	var setters []func(ctx context.Context, n *v1.Node) error
 	setters = append(setters,
 		nodestatus.NodeAddress(kl.nodeIPs, kl.nodeIPValidator, kl.hostname, kl.hostnameOverridden, kl.externalCloudProvider, kl.cloud, nodeAddressesFunc),
@@ -735,6 +741,7 @@ func (kl *Kubelet) defaultNodeStatusFuncs() []func(context.Context, *v1.Node) er
 		nodestatus.DaemonEndpoints(kl.daemonEndpoints),
 		nodestatus.Images(kl.nodeStatusMaxImages, kl.imageManager.GetImageList),
 		nodestatus.GoRuntime(),
+		nodestatus.RuntimeClasses(kl.runtimeState.runtimeHandlers),
 	)
 	// Volume limits
 	setters = append(setters, nodestatus.VolumeLimits(kl.volumePluginMgr.ListVolumePluginWithLimits))
@@ -744,7 +751,7 @@ func (kl *Kubelet) defaultNodeStatusFuncs() []func(context.Context, *v1.Node) er
 		nodestatus.DiskPressureCondition(kl.clock.Now, kl.evictionManager.IsUnderDiskPressure, kl.recordNodeStatusEvent),
 		nodestatus.PIDPressureCondition(kl.clock.Now, kl.evictionManager.IsUnderPIDPressure, kl.recordNodeStatusEvent),
 		nodestatus.ReadyCondition(kl.clock.Now, kl.runtimeState.runtimeErrors, kl.runtimeState.networkErrors, kl.runtimeState.storageErrors,
-			validateHostFunc, kl.containerManager.Status, kl.shutdownManager.ShutdownStatus, kl.recordNodeStatusEvent, kl.supportLocalStorageCapacityIsolation()),
+			kl.containerManager.Status, kl.shutdownManager.ShutdownStatus, kl.recordNodeStatusEvent, kl.supportLocalStorageCapacityIsolation()),
 		nodestatus.VolumesInUse(kl.volumeManager.ReconcilerStatesHasBeenSynced, kl.volumeManager.GetVolumesInUse),
 		// TODO(mtaufen): I decided not to move this setter for now, since all it does is send an event
 		// and record state back to the Kubelet runtime object. In the future, I'd like to isolate

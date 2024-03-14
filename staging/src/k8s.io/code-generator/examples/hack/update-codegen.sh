@@ -22,32 +22,56 @@ SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
 SCRIPT_ROOT="${SCRIPT_DIR}/.."
 CODEGEN_PKG="${CODEGEN_PKG:-"${SCRIPT_ROOT}/.."}"
 
-# generate the code with:
-# - --output-base because this script should also be able to run inside the vendor dir of
-#   k8s.io/kubernetes. The output-base is needed for the generators to output into the vendor dir
-#   instead of the $GOPATH directly. For normal projects this can be dropped.
-"${CODEGEN_PKG}/generate-internal-groups.sh" "client,conversion,deepcopy,defaulter,informer,lister,openapi" \
-  k8s.io/code-generator/examples/apiserver \
-  k8s.io/code-generator/examples/apiserver/apis \
-  k8s.io/code-generator/examples/apiserver/apis \
-  "example:v1 example2:v1 example3.io:v1" \
-  --output-base "${SCRIPT_DIR}/../../../.." \
-  --go-header-file "${SCRIPT_DIR}/boilerplate.go.txt"
-"${CODEGEN_PKG}/generate-groups.sh" "applyconfiguration,client,deepcopy,defaulter,informer,lister" \
-  k8s.io/code-generator/examples/crd \
-  k8s.io/code-generator/examples/crd/apis \
-  "example:v1 example2:v1" \
-  --output-base "${SCRIPT_DIR}/../../../.." \
-  --go-header-file "${SCRIPT_DIR}/boilerplate.go.txt"
-"${CODEGEN_PKG}/generate-groups.sh" "applyconfiguration,client,deepcopy,defaulter,informer,lister" \
-  k8s.io/code-generator/examples/MixedCase \
-  k8s.io/code-generator/examples/MixedCase/apis \
-  "example:v1" \
-  --output-base "${SCRIPT_DIR}/../../../.." \
-  --go-header-file "${SCRIPT_DIR}/boilerplate.go.txt"
-"${CODEGEN_PKG}/generate-groups.sh" "applyconfiguration,client,deepcopy,defaulter,informer,lister" \
-  k8s.io/code-generator/examples/HyphenGroup \
-  k8s.io/code-generator/examples/HyphenGroup/apis \
-  "example:v1" \
-  --output-base "${SCRIPT_DIR}/../../../.." \
-  --go-header-file "${SCRIPT_DIR}/boilerplate.go.txt"
+source "${CODEGEN_PKG}/kube_codegen.sh"
+
+THIS_PKG="k8s.io/code-generator/examples"
+
+kube::codegen::gen_helpers \
+    --boilerplate "${SCRIPT_ROOT}/hack/boilerplate.go.txt" \
+    "${SCRIPT_ROOT}"
+
+if [[ -n "${API_KNOWN_VIOLATIONS_DIR:-}" ]]; then
+    report_filename="${API_KNOWN_VIOLATIONS_DIR}/codegen_violation_exceptions.list"
+    if [[ "${UPDATE_API_KNOWN_VIOLATIONS:-}" == "true" ]]; then
+        update_report="--update-report"
+    fi
+fi
+
+kube::codegen::gen_openapi \
+    --output-dir "${SCRIPT_ROOT}/apiserver/openapi" \
+    --output-pkg "k8s.io/${THIS_PKG}/apiserver/openapi" \
+    --report-filename "${report_filename:-"/dev/null"}" \
+    ${update_report:+"${update_report}"} \
+    --boilerplate "${SCRIPT_ROOT}/hack/boilerplate.go.txt" \
+    "${SCRIPT_ROOT}/apiserver/apis"
+
+kube::codegen::gen_client \
+    --with-watch \
+    --output-dir "${SCRIPT_ROOT}/apiserver" \
+    --output-pkg "${THIS_PKG}/apiserver" \
+    --boilerplate "${SCRIPT_ROOT}/hack/boilerplate.go.txt" \
+    "${SCRIPT_ROOT}/apiserver/apis"
+
+kube::codegen::gen_client \
+    --with-watch \
+    --with-applyconfig \
+    --output-dir "${SCRIPT_ROOT}/crd" \
+    --output-pkg "${THIS_PKG}/crd" \
+    --boilerplate "${SCRIPT_ROOT}/hack/boilerplate.go.txt" \
+    "${SCRIPT_ROOT}/crd/apis"
+
+kube::codegen::gen_client \
+    --with-watch \
+    --with-applyconfig \
+    --output-dir "${SCRIPT_ROOT}/MixedCase" \
+    --output-pkg "${THIS_PKG}/MixedCase" \
+    --boilerplate "${SCRIPT_ROOT}/hack/boilerplate.go.txt" \
+    "${SCRIPT_ROOT}/MixedCase/apis"
+
+kube::codegen::gen_client \
+    --with-watch \
+    --with-applyconfig \
+    --output-dir "${SCRIPT_ROOT}/HyphenGroup" \
+    --output-pkg "${THIS_PKG}/HyphenGroup" \
+    --boilerplate "${SCRIPT_ROOT}/hack/boilerplate.go.txt" \
+    "${SCRIPT_ROOT}/HyphenGroup/apis"

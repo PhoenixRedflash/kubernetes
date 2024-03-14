@@ -26,17 +26,14 @@ import (
 	"testing"
 	"time"
 
-	openapi_v3 "github.com/google/gnostic/openapiv3"
+	openapi_v3 "github.com/google/gnostic-models/openapiv3"
 	"google.golang.org/protobuf/proto"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/apiextensions-apiserver/test/integration/fixtures"
-	genericfeatures "k8s.io/apiserver/pkg/features"
-	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/dynamic"
 	kubernetes "k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
-	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	"k8s.io/kube-openapi/pkg/handler3"
 	"k8s.io/kube-openapi/pkg/spec3"
 	apiservertesting "k8s.io/kubernetes/cmd/kube-apiserver/app/testing"
@@ -46,13 +43,8 @@ import (
 )
 
 func TestOpenAPIV3SpecRoundTrip(t *testing.T) {
-	_, ctx := ktesting.NewTestContext(t)
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, genericfeatures.OpenAPIV3, true)()
-
-	_, kubeConfig, tearDownFn := framework.StartTestServer(ctx, t, framework.TestServerSetup{})
+	tCtx := ktesting.Init(t)
+	_, kubeConfig, tearDownFn := framework.StartTestServer(tCtx, t, framework.TestServerSetup{})
 	defer tearDownFn()
 
 	paths := []string{
@@ -105,7 +97,6 @@ func TestOpenAPIV3SpecRoundTrip(t *testing.T) {
 }
 
 func TestAddRemoveGroupVersion(t *testing.T) {
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, genericfeatures.OpenAPIV3, true)()
 	server, err := apiservertesting.StartTestServer(t, apiservertesting.NewDefaultTestServerOptions(), nil, framework.SharedEtcd())
 	if err != nil {
 		t.Fatal(err)
@@ -195,13 +186,8 @@ func TestOpenAPIV3ProtoRoundtrip(t *testing.T) {
 	// See https://github.com/kubernetes/kubernetes/issues/106387 for more details
 	t.Skip("Skipping OpenAPI V3 Proto roundtrip test")
 
-	_, ctx := ktesting.NewTestContext(t)
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, genericfeatures.OpenAPIV3, true)()
-
-	_, kubeConfig, tearDownFn := framework.StartTestServer(ctx, t, framework.TestServerSetup{})
+	tCtx := ktesting.Init(t)
+	_, kubeConfig, tearDownFn := framework.StartTestServer(tCtx, t, framework.TestServerSetup{})
 	defer tearDownFn()
 
 	rt, err := restclient.TransportFor(kubeConfig)

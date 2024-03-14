@@ -87,13 +87,14 @@ type cloudCIDRAllocator struct {
 var _ CIDRAllocator = (*cloudCIDRAllocator)(nil)
 
 // NewCloudCIDRAllocator creates a new cloud CIDR allocator.
-func NewCloudCIDRAllocator(logger klog.Logger, client clientset.Interface, cloud cloudprovider.Interface, nodeInformer informers.NodeInformer) (CIDRAllocator, error) {
+func NewCloudCIDRAllocator(ctx context.Context, client clientset.Interface, cloud cloudprovider.Interface, nodeInformer informers.NodeInformer) (CIDRAllocator, error) {
+	logger := klog.FromContext(ctx)
 	if client == nil {
 		logger.Error(nil, "kubeClient is nil when starting cloud CIDR allocator")
 		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
 
-	eventBroadcaster := record.NewBroadcaster()
+	eventBroadcaster := record.NewBroadcaster(record.WithContext(ctx))
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "cidrAllocator"})
 
 	gceCloud, ok := cloud.(*gce.Cloud)
@@ -131,7 +132,7 @@ func NewCloudCIDRAllocator(logger klog.Logger, client clientset.Interface, cloud
 			}
 			return nil
 		}),
-		DeleteFunc: controllerutil.CreateDeleteNodeHandler(func(node *v1.Node) error {
+		DeleteFunc: controllerutil.CreateDeleteNodeHandler(logger, func(node *v1.Node) error {
 			return ca.ReleaseCIDR(logger, node)
 		}),
 	})
@@ -143,7 +144,7 @@ func (ca *cloudCIDRAllocator) Run(ctx context.Context) {
 	defer utilruntime.HandleCrash()
 
 	// Start event processing pipeline.
-	ca.broadcaster.StartStructuredLogging(0)
+	ca.broadcaster.StartStructuredLogging(3)
 	logger := klog.FromContext(ctx)
 	logger.Info("Sending events to api server")
 	ca.broadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: ca.client.CoreV1().Events("")})
@@ -272,11 +273,11 @@ func (ca *cloudCIDRAllocator) updateCIDRAllocation(logger klog.Logger, nodeName 
 
 	cidrStrings, err := ca.cloud.AliasRangesByProviderID(node.Spec.ProviderID)
 	if err != nil {
-		controllerutil.RecordNodeStatusChange(ca.recorder, node, "CIDRNotAvailable")
+		controllerutil.RecordNodeStatusChange(logger, ca.recorder, node, "CIDRNotAvailable")
 		return fmt.Errorf("failed to get cidr(s) from provider: %v", err)
 	}
 	if len(cidrStrings) == 0 {
-		controllerutil.RecordNodeStatusChange(ca.recorder, node, "CIDRNotAvailable")
+		controllerutil.RecordNodeStatusChange(logger, ca.recorder, node, "CIDRNotAvailable")
 		return fmt.Errorf("failed to allocate cidr: Node %v has no CIDRs", node.Name)
 	}
 	//Can have at most 2 ips (one for v4 and one for v6)
@@ -311,7 +312,7 @@ func (ca *cloudCIDRAllocator) updateCIDRAllocation(logger klog.Logger, nodeName 
 		}
 	}
 	if err != nil {
-		controllerutil.RecordNodeStatusChange(ca.recorder, node, "CIDRAssignmentFailed")
+		controllerutil.RecordNodeStatusChange(logger, ca.recorder, node, "CIDRAssignmentFailed")
 		logger.Error(err, "Failed to update the node PodCIDR after multiple attempts", "node", klog.KObj(node), "cidrStrings", cidrStrings)
 		return err
 	}

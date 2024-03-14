@@ -36,7 +36,7 @@ build_and_push_mock_plugin() {
         --platform linux/amd64 \
         --output=type=docker \
         -t localhost:5000/mock-kms-provider:e2e \
-        -f staging/src/k8s.io/kms/internal/plugins/mock/Dockerfile staging/src/k8s.io/ \
+        -f staging/src/k8s.io/kms/internal/plugins/_mock/Dockerfile staging/src/k8s.io/ \
         --progress=plain;
 
     docker push localhost:5000/mock-kms-provider:e2e
@@ -91,7 +91,7 @@ create_cluster_and_run_test() {
     TEST_ARGS=""
     if [ "${SKIP_RUN_TESTS:-}" != "true" ]; then
         # (--use-built-binaries) use the kubectl, e2e.test, and ginkgo binaries built during --build as opposed to from a GCS release tarball
-        TEST_ARGS="--test=ginkgo -- --v=5 --focus-regex=\[Conformance\] --skip-regex=\[Serial\] --parallel 20 --use-built-binaries"
+        TEST_ARGS="--test=ginkgo -- --focus-regex=\[Conformance\] --skip-regex=\[Serial\] --parallel 20 --use-built-binaries"
     else
         echo "Skipping running tests"
     fi
@@ -137,7 +137,7 @@ main(){
     mkdir -p "${ARTIFACTS}"
 
     export GO111MODULE=on;
-    go install sigs.k8s.io/kind@v0.17.0;
+    go install sigs.k8s.io/kind@latest;
     go install sigs.k8s.io/kubetest2@latest;
     go install sigs.k8s.io/kubetest2/kubetest2-kind@latest;
     go install sigs.k8s.io/kubetest2/kubetest2-tester-ginkgo@latest;

@@ -30,6 +30,7 @@ GROUP_ID=$(id -g)
 DOCKER_OPTS=${DOCKER_OPTS:-""}
 IFS=" " read -r -a DOCKER <<< "docker ${DOCKER_OPTS}"
 DOCKER_HOST=${DOCKER_HOST:-""}
+GOPROXY=${GOPROXY:-""}
 
 # This will canonicalize the path
 KUBE_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd -P)
@@ -80,6 +81,7 @@ readonly LOCAL_OUTPUT_IMAGE_STAGING="${LOCAL_OUTPUT_ROOT}/images"
 # This is a symlink to binaries for "this platform" (e.g. build tools).
 readonly THIS_PLATFORM_BIN="${LOCAL_OUTPUT_ROOT}/bin"
 
+readonly KUBE_GO_PACKAGE=k8s.io/kubernetes
 readonly REMOTE_ROOT="/go/src/${KUBE_GO_PACKAGE}"
 readonly REMOTE_OUTPUT_ROOT="${REMOTE_ROOT}/_output"
 readonly REMOTE_OUTPUT_SUBPATH="${REMOTE_OUTPUT_ROOT}/dockerized"
@@ -95,9 +97,9 @@ readonly KUBE_RSYNC_PORT="${KUBE_RSYNC_PORT:-}"
 readonly KUBE_CONTAINER_RSYNC_PORT=8730
 
 # These are the default versions (image tags) for their respective base images.
-readonly __default_distroless_iptables_version=v0.2.4
-readonly __default_go_runner_version=v2.3.1-go1.20.4-bullseye.0
-readonly __default_setcap_version=bullseye-v1.4.2
+readonly __default_distroless_iptables_version=v0.5.2
+readonly __default_go_runner_version=v2.3.1-go1.22.1-bookworm.0
+readonly __default_setcap_version=bookworm-v1.0.1
 
 # These are the base images for the Docker-wrapped binaries.
 readonly KUBE_GORUNNER_IMAGE="${KUBE_GORUNNER_IMAGE:-$KUBE_BASE_IMAGE_REGISTRY/go-runner:$__default_go_runner_version}"
@@ -502,6 +504,7 @@ function kube::build::run_build_command_ex() {
     "--name=${container_name}"
     "--user=$(id -u):$(id -g)"
     "--hostname=${HOSTNAME}"
+    "-e=GOPROXY=${GOPROXY}"
     "${DOCKER_MOUNT_ARGS[@]}"
   )
 
@@ -536,8 +539,10 @@ function kube::build::run_build_command_ex() {
     --env "KUBE_BUILD_WITH_COVERAGE=${KUBE_BUILD_WITH_COVERAGE:-}"
     --env "KUBE_BUILD_PLATFORMS=${KUBE_BUILD_PLATFORMS:-}"
     --env "KUBE_CGO_OVERRIDES=' ${KUBE_CGO_OVERRIDES[*]:-} '"
+    --env "KUBE_STATIC_OVERRIDES=' ${KUBE_STATIC_OVERRIDES[*]:-} '"
     --env "FORCE_HOST_GO=${FORCE_HOST_GO:-}"
     --env "GO_VERSION=${GO_VERSION:-}"
+    --env "GOTOOLCHAIN=${GOTOOLCHAIN:-}"
     --env "GOFLAGS=${GOFLAGS:-}"
     --env "GOGCFLAGS=${GOGCFLAGS:-}"
     --env "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-}"
@@ -610,7 +615,7 @@ function kube::build::start_rsyncd_container() {
     -- /rsyncd.sh >/dev/null
 
   local mapped_port
-  if ! mapped_port=$("${DOCKER[@]}" port "${KUBE_RSYNC_CONTAINER_NAME}" ${KUBE_CONTAINER_RSYNC_PORT} 2> /dev/null | cut -d: -f 2) ; then
+  if ! mapped_port=$("${DOCKER[@]}" port "${KUBE_RSYNC_CONTAINER_NAME}" "${KUBE_CONTAINER_RSYNC_PORT}" 2> /dev/null | cut -d: -f 2) ; then
     kube::log::error "Could not get effective rsync port"
     return 1
   fi
@@ -626,7 +631,7 @@ function kube::build::start_rsyncd_container() {
   if kube::build::rsync_probe 127.0.0.1 "${mapped_port}"; then
     KUBE_RSYNC_ADDR="127.0.0.1:${mapped_port}"
     return 0
-  elif kube::build::rsync_probe "${container_ip}" ${KUBE_CONTAINER_RSYNC_PORT}; then
+  elif kube::build::rsync_probe "${container_ip}" "${KUBE_CONTAINER_RSYNC_PORT}"; then
     KUBE_RSYNC_ADDR="${container_ip}:${KUBE_CONTAINER_RSYNC_PORT}"
     return 0
   fi
@@ -674,7 +679,6 @@ function kube::build::sync_to_container() {
   # necessary.
   kube::build::rsync \
     --delete \
-    --filter='H /.git' \
     --filter='- /_tmp/' \
     --filter='- /_output/' \
     --filter='- /' \

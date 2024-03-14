@@ -37,25 +37,18 @@ import (
 	"k8s.io/utils/pointer"
 )
 
+const testPodLogsDirectory = "/var/log/pods"
+
 func TestGeneratePodSandboxConfig(t *testing.T) {
 	_, _, m, err := createTestRuntimeManager()
 	require.NoError(t, err)
 	pod := newTestPod()
 
-	expectedLogDirectory := filepath.Join(podLogsRootDirectory, pod.Namespace+"_"+pod.Name+"_12345678")
+	expectedLogDirectory := filepath.Join(testPodLogsDirectory, pod.Namespace+"_"+pod.Name+"_12345678")
 	expectedLabels := map[string]string{
 		"io.kubernetes.pod.name":      pod.Name,
 		"io.kubernetes.pod.namespace": pod.Namespace,
 		"io.kubernetes.pod.uid":       string(pod.UID),
-	}
-	expectedLinuxPodSandboxConfig := &runtimeapi.LinuxPodSandboxConfig{
-		SecurityContext: &runtimeapi.LinuxSandboxSecurityContext{
-			SelinuxOptions: &runtimeapi.SELinuxOption{
-				User: "qux",
-			},
-			RunAsUser:  &runtimeapi.Int64Value{Value: 1000},
-			RunAsGroup: &runtimeapi.Int64Value{Value: 10},
-		},
 	}
 	expectedMetadata := &runtimeapi.PodSandboxMetadata{
 		Name:      pod.Name,
@@ -75,9 +68,6 @@ func TestGeneratePodSandboxConfig(t *testing.T) {
 	assert.Equal(t, expectedLogDirectory, podSandboxConfig.LogDirectory)
 	assert.Equal(t, expectedMetadata, podSandboxConfig.Metadata)
 	assert.Equal(t, expectedPortMappings, podSandboxConfig.PortMappings)
-	assert.Equal(t, expectedLinuxPodSandboxConfig.SecurityContext.SelinuxOptions, podSandboxConfig.Linux.SecurityContext.SelinuxOptions)
-	assert.Equal(t, expectedLinuxPodSandboxConfig.SecurityContext.RunAsUser, podSandboxConfig.Linux.SecurityContext.RunAsUser)
-	assert.Equal(t, expectedLinuxPodSandboxConfig.SecurityContext.RunAsGroup, podSandboxConfig.Linux.SecurityContext.RunAsGroup)
 }
 
 // TestCreatePodSandbox tests creating sandbox and its corresponding pod log directory.
@@ -90,7 +80,7 @@ func TestCreatePodSandbox(t *testing.T) {
 	fakeOS := m.osInterface.(*containertest.FakeOS)
 	fakeOS.MkdirAllFn = func(path string, perm os.FileMode) error {
 		// Check pod logs root directory is created.
-		assert.Equal(t, filepath.Join(podLogsRootDirectory, pod.Namespace+"_"+pod.Name+"_12345678"), path)
+		assert.Equal(t, filepath.Join(testPodLogsDirectory, pod.Namespace+"_"+pod.Name+"_12345678"), path)
 		assert.Equal(t, os.FileMode(0755), perm)
 		return nil
 	}
@@ -185,8 +175,6 @@ func TestCreatePodSandbox_RuntimeClass(t *testing.T) {
 }
 
 func newTestPod() *v1.Pod {
-	anyGroup := int64(10)
-	anyUser := int64(1000)
 	return &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       "12345678",
@@ -194,13 +182,6 @@ func newTestPod() *v1.Pod {
 			Namespace: "new",
 		},
 		Spec: v1.PodSpec{
-			SecurityContext: &v1.PodSecurityContext{
-				SELinuxOptions: &v1.SELinuxOptions{
-					User: "qux",
-				},
-				RunAsUser:  &anyUser,
-				RunAsGroup: &anyGroup,
-			},
 			Containers: []v1.Container{
 				{
 					Name:            "foo",

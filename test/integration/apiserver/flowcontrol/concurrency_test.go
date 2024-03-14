@@ -28,17 +28,15 @@ import (
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 
-	flowcontrol "k8s.io/api/flowcontrol/v1beta3"
+	flowcontrol "k8s.io/api/flowcontrol/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
-	genericfeatures "k8s.io/apiserver/pkg/features"
-	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	"k8s.io/kubernetes/cmd/kube-apiserver/app/options"
 	"k8s.io/kubernetes/test/integration/framework"
 	"k8s.io/kubernetes/test/utils/ktesting"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -50,10 +48,9 @@ const (
 )
 
 func setup(t testing.TB, maxReadonlyRequestsInFlight, maxMutatingRequestsInFlight int) (context.Context, *rest.Config, framework.TearDownFunc) {
-	_, ctx := ktesting.NewTestContext(t)
-	ctx, cancel := context.WithCancel(ctx)
+	tCtx := ktesting.Init(t)
 
-	_, kubeConfig, tearDownFn := framework.StartTestServer(ctx, t, framework.TestServerSetup{
+	_, kubeConfig, tearDownFn := framework.StartTestServer(tCtx, t, framework.TestServerSetup{
 		ModifyServerRunOptions: func(opts *options.ServerRunOptions) {
 			// Ensure all clients are allowed to send requests.
 			opts.Authorization.Modes = []string{"AlwaysAllow"}
@@ -63,15 +60,13 @@ func setup(t testing.TB, maxReadonlyRequestsInFlight, maxMutatingRequestsInFligh
 	})
 
 	newTeardown := func() {
-		cancel()
+		tCtx.Cancel("tearing down apiserver")
 		tearDownFn()
 	}
-	return ctx, kubeConfig, newTeardown
+	return tCtx, kubeConfig, newTeardown
 }
 
 func TestPriorityLevelIsolation(t *testing.T) {
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, genericfeatures.APIPriorityAndFairness, true)()
-	// NOTE: disabling the feature should fail the test
 	ctx, kubeConfig, closeFn := setup(t, 1, 1)
 	defer closeFn()
 
@@ -240,14 +235,14 @@ func getRequestCountOfPriorityLevel(c clientset.Interface) (map[string]int, map[
 
 func createPriorityLevelAndBindingFlowSchemaForUser(c clientset.Interface, username string, concurrencyShares, queuelength int) (*flowcontrol.PriorityLevelConfiguration, *flowcontrol.FlowSchema, error) {
 	i0 := int32(0)
-	pl, err := c.FlowcontrolV1beta3().PriorityLevelConfigurations().Create(context.Background(), &flowcontrol.PriorityLevelConfiguration{
+	pl, err := c.FlowcontrolV1().PriorityLevelConfigurations().Create(context.Background(), &flowcontrol.PriorityLevelConfiguration{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: username,
 		},
 		Spec: flowcontrol.PriorityLevelConfigurationSpec{
 			Type: flowcontrol.PriorityLevelEnablementLimited,
 			Limited: &flowcontrol.LimitedPriorityLevelConfiguration{
-				NominalConcurrencyShares: int32(concurrencyShares),
+				NominalConcurrencyShares: ptr.To(int32(concurrencyShares)),
 				BorrowingLimitPercent:    &i0,
 				LimitResponse: flowcontrol.LimitResponse{
 					Type: flowcontrol.LimitResponseTypeQueue,
@@ -263,7 +258,7 @@ func createPriorityLevelAndBindingFlowSchemaForUser(c clientset.Interface, usern
 	if err != nil {
 		return nil, nil, err
 	}
-	fs, err := c.FlowcontrolV1beta3().FlowSchemas().Create(context.TODO(), &flowcontrol.FlowSchema{
+	fs, err := c.FlowcontrolV1().FlowSchemas().Create(context.TODO(), &flowcontrol.FlowSchema{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: username,
 		},
@@ -303,7 +298,7 @@ func createPriorityLevelAndBindingFlowSchemaForUser(c clientset.Interface, usern
 	}
 
 	return pl, fs, wait.Poll(time.Second, timeout, func() (bool, error) {
-		fs, err := c.FlowcontrolV1beta3().FlowSchemas().Get(context.TODO(), username, metav1.GetOptions{})
+		fs, err := c.FlowcontrolV1().FlowSchemas().Get(context.TODO(), username, metav1.GetOptions{})
 		if err != nil {
 			return false, err
 		}

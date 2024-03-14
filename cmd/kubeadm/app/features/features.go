@@ -26,6 +26,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/component-base/featuregate"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -33,18 +34,28 @@ const (
 	PublicKeysECDSA = "PublicKeysECDSA"
 	// RootlessControlPlane is expected to be in alpha in v1.22
 	RootlessControlPlane = "RootlessControlPlane"
-	// EtcdLearnerMode is expected to be in alpha in v1.27
+	// EtcdLearnerMode is expected to be in alpha in v1.27, beta in v1.29
 	EtcdLearnerMode = "EtcdLearnerMode"
 	// UpgradeAddonsBeforeControlPlane is expected to be in deprecated in v1.28 and will be removed in future release
 	UpgradeAddonsBeforeControlPlane = "UpgradeAddonsBeforeControlPlane"
+	// WaitForAllControlPlaneComponents is expected to be alpha in v1.30
+	WaitForAllControlPlaneComponents = "WaitForAllControlPlaneComponents"
 )
 
 // InitFeatureGates are the default feature gates for the init command
 var InitFeatureGates = FeatureList{
-	PublicKeysECDSA:                 {FeatureSpec: featuregate.FeatureSpec{Default: false, PreRelease: featuregate.Alpha}},
-	RootlessControlPlane:            {FeatureSpec: featuregate.FeatureSpec{Default: false, PreRelease: featuregate.Alpha}},
-	EtcdLearnerMode:                 {FeatureSpec: featuregate.FeatureSpec{Default: false, PreRelease: featuregate.Alpha}},
-	UpgradeAddonsBeforeControlPlane: {FeatureSpec: featuregate.FeatureSpec{Default: false, PreRelease: featuregate.Deprecated}},
+	PublicKeysECDSA: {
+		FeatureSpec: featuregate.FeatureSpec{Default: false, PreRelease: featuregate.Deprecated},
+		DeprecationMessage: "The PublicKeysECDSA feature gate is deprecated and will be removed when v1beta3 is removed." +
+			" v1beta4 supports a new option 'ClusterConfiguration.EncryptionAlgorithm'.",
+	},
+	RootlessControlPlane: {FeatureSpec: featuregate.FeatureSpec{Default: false, PreRelease: featuregate.Alpha}},
+	EtcdLearnerMode:      {FeatureSpec: featuregate.FeatureSpec{Default: true, PreRelease: featuregate.Beta}},
+	UpgradeAddonsBeforeControlPlane: {
+		FeatureSpec:        featuregate.FeatureSpec{Default: false, PreRelease: featuregate.Deprecated},
+		DeprecationMessage: "The UpgradeAddonsBeforeControlPlane feature gate is deprecated and will be removed in a future release.",
+	},
+	WaitForAllControlPlaneComponents: {FeatureSpec: featuregate.FeatureSpec{Default: false, PreRelease: featuregate.Alpha}},
 }
 
 // Feature represents a feature being gated
@@ -90,21 +101,12 @@ func Enabled(featureList map[string]bool, featureName string) bool {
 // Supports indicates whether a feature name is supported on the given
 // feature set
 func Supports(featureList FeatureList, featureName string) bool {
-	for k, v := range featureList {
+	for k := range featureList {
 		if featureName == k {
-			return v.PreRelease != featuregate.Deprecated
+			return true
 		}
 	}
 	return false
-}
-
-// Keys returns a slice of feature names for a given feature set
-func Keys(featureList FeatureList) []string {
-	var list []string
-	for k := range featureList {
-		list = append(list, k)
-	}
-	return list
 }
 
 // KnownFeatures returns a slice of strings describing the FeatureList features.
@@ -148,7 +150,7 @@ func NewFeatureGate(f *FeatureList, value string) (map[string]bool, error) {
 		}
 
 		if featureSpec.PreRelease == featuregate.Deprecated {
-			return nil, errors.Errorf("feature-gate key is deprecated: %s", k)
+			klog.Warningf("Setting deprecated feature gate %s=%s. It will be removed in a future release.", k, v)
 		}
 
 		boolValue, err := strconv.ParseBool(v)

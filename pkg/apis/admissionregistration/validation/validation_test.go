@@ -21,10 +21,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/cel-go/cel"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/apimachinery/pkg/util/version"
+	plugincel "k8s.io/apiserver/pkg/admission/plugin/cel"
+	"k8s.io/apiserver/pkg/cel/environment"
+	"k8s.io/apiserver/pkg/cel/library"
 	"k8s.io/kubernetes/pkg/apis/admissionregistration"
 )
+
+func ptr[T any](v T) *T { return &v }
 
 func strPtr(s string) *string { return &s }
 
@@ -828,6 +836,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 }
 
 func TestValidateValidatingWebhookConfigurationUpdate(t *testing.T) {
+	noSideEffect := admissionregistration.SideEffectClassNone
 	unknownSideEffect := admissionregistration.SideEffectClassUnknown
 	validClientConfig := admissionregistration.WebhookClientConfig{
 		URL: strPtr("https://example.com"),
@@ -945,6 +954,48 @@ func TestValidateValidatingWebhookConfigurationUpdate(t *testing.T) {
 		},
 		}, true),
 		expectedError: ``,
+	}, {
+		name: "Webhooks must compile CEL expressions with StoredExpression environment if unchanged",
+		config: newValidatingWebhookConfiguration([]admissionregistration.ValidatingWebhook{{
+			Name:         "webhook.k8s.io",
+			ClientConfig: validClientConfig,
+			SideEffects:  &noSideEffect,
+			MatchConditions: []admissionregistration.MatchCondition{{
+				Name:       "checkStorage",
+				Expression: "test() == true",
+			}},
+		},
+		}, true),
+		oldconfig: newValidatingWebhookConfiguration([]admissionregistration.ValidatingWebhook{{
+			Name:         "webhook.k8s.io",
+			ClientConfig: validClientConfig,
+			SideEffects:  &noSideEffect,
+			MatchConditions: []admissionregistration.MatchCondition{{
+				Name:       "checkStorage",
+				Expression: "test() == true",
+			}}},
+		}, true),
+	}, {
+		name: "Webhooks must compile CEL expressions with NewExpression environment type if changed",
+		config: newValidatingWebhookConfiguration([]admissionregistration.ValidatingWebhook{{
+			Name:         "webhook.k8s.io",
+			ClientConfig: validClientConfig,
+			SideEffects:  &noSideEffect,
+			MatchConditions: []admissionregistration.MatchCondition{{
+				Name:       "checkStorage",
+				Expression: "test() == true",
+			}}},
+		}, true),
+		oldconfig: newValidatingWebhookConfiguration([]admissionregistration.ValidatingWebhook{{
+			Name:         "webhook.k8s.io",
+			ClientConfig: validClientConfig,
+			SideEffects:  &noSideEffect,
+			MatchConditions: []admissionregistration.MatchCondition{{
+				Name:       "checkStorage",
+				Expression: "true",
+			}}},
+		}, true),
+		expectedError: `undeclared reference to 'test'`,
 	}}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1907,7 +1958,53 @@ func TestValidateMutatingWebhookConfigurationUpdate(t *testing.T) {
 		},
 		}, true),
 		expectedError: ``,
-	}}
+	}, {
+		name: "Webhooks must compile CEL expressions with StoredExpression environment if unchanged",
+		config: newMutatingWebhookConfiguration([]admissionregistration.MutatingWebhook{{
+			Name:         "webhook.k8s.io",
+			ClientConfig: validClientConfig,
+			SideEffects:  &noSideEffect,
+			MatchConditions: []admissionregistration.MatchCondition{{
+				Name:       "checkStorage",
+				Expression: "test() == true",
+			}},
+		},
+		}, true),
+		oldconfig: newMutatingWebhookConfiguration([]admissionregistration.MutatingWebhook{{
+			Name:         "webhook.k8s.io",
+			ClientConfig: validClientConfig,
+			SideEffects:  &noSideEffect,
+			MatchConditions: []admissionregistration.MatchCondition{{
+				Name:       "checkStorage",
+				Expression: "test() == true",
+			}},
+		},
+		}, true),
+	},
+		{
+			name: "Webhooks must compile CEL expressions with NewExpression environment if changed",
+			config: newMutatingWebhookConfiguration([]admissionregistration.MutatingWebhook{{
+				Name:         "webhook.k8s.io",
+				ClientConfig: validClientConfig,
+				SideEffects:  &noSideEffect,
+				MatchConditions: []admissionregistration.MatchCondition{{
+					Name:       "checkStorage",
+					Expression: "test() == true",
+				},
+				}},
+			}, true),
+			oldconfig: newMutatingWebhookConfiguration([]admissionregistration.MutatingWebhook{{
+				Name:         "webhook.k8s.io",
+				ClientConfig: validClientConfig,
+				SideEffects:  &noSideEffect,
+				MatchConditions: []admissionregistration.MatchCondition{{
+					Name:       "checkStorage",
+					Expression: "true",
+				},
+				}},
+			}, true),
+			expectedError: `undeclared reference to 'test'`,
+		}}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			errs := ValidateMutatingWebhookConfigurationUpdate(test.config, test.oldconfig)
@@ -2769,7 +2866,128 @@ func TestValidateValidatingAdmissionPolicy(t *testing.T) {
 			},
 		},
 		expectedError: `undeclared reference to 'params'`,
-	}}
+	}, {
+		name: "variable composition empty name",
+		config: &admissionregistration.ValidatingAdmissionPolicy{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "config",
+			},
+			Spec: admissionregistration.ValidatingAdmissionPolicySpec{
+				Variables: []admissionregistration.Variable{
+					{
+						Name:       "    ",
+						Expression: "true",
+					},
+				},
+				Validations: []admissionregistration.Validation{
+					{
+						Expression: "true",
+					},
+				},
+			},
+		},
+		expectedError: `spec.variables[0].name: Required value: name is not specified`,
+	}, {
+		name: "variable composition name is not a valid identifier",
+		config: &admissionregistration.ValidatingAdmissionPolicy{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "config",
+			},
+			Spec: admissionregistration.ValidatingAdmissionPolicySpec{
+				Variables: []admissionregistration.Variable{
+					{
+						Name:       "4ever",
+						Expression: "true",
+					},
+				},
+				Validations: []admissionregistration.Validation{
+					{
+						Expression: "true",
+					},
+				},
+			},
+		},
+		expectedError: `spec.variables[0].name: Invalid value: "4ever": name is not a valid CEL identifier`,
+	}, {
+		name: "variable composition cannot compile",
+		config: &admissionregistration.ValidatingAdmissionPolicy{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "config",
+			},
+			Spec: admissionregistration.ValidatingAdmissionPolicySpec{
+				Variables: []admissionregistration.Variable{
+					{
+						Name:       "foo",
+						Expression: "114 + '514'", // compile error: type confusion
+					},
+				},
+				Validations: []admissionregistration.Validation{
+					{
+						Expression: "true",
+					},
+				},
+			},
+		},
+		expectedError: `spec.variables[0].expression: Invalid value: "114 + '514'": compilation failed: ERROR: <input>:1:5: found no matching overload for '_+_' applied to '(int, string)`,
+	}, {
+		name: "validation referred to non-existing variable",
+		config: &admissionregistration.ValidatingAdmissionPolicy{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "config",
+			},
+			Spec: admissionregistration.ValidatingAdmissionPolicySpec{
+				Variables: []admissionregistration.Variable{
+					{
+						Name:       "foo",
+						Expression: "1 + 1",
+					},
+					{
+						Name:       "bar",
+						Expression: "variables.foo + 1",
+					},
+				},
+				Validations: []admissionregistration.Validation{
+					{
+						Expression: "variables.foo > 1", // correct
+					},
+					{
+						Expression: "variables.replicas == 2", // replicas undefined
+					},
+				},
+			},
+		},
+		expectedError: `spec.validations[1].expression: Invalid value: "variables.replicas == 2": compilation failed: ERROR: <input>:1:10: undefined field 'replicas'`,
+	}, {
+		name: "variables wrong order",
+		config: &admissionregistration.ValidatingAdmissionPolicy{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "config",
+			},
+			Spec: admissionregistration.ValidatingAdmissionPolicySpec{
+				Variables: []admissionregistration.Variable{
+					{
+						Name:       "correct",
+						Expression: "object",
+					},
+					{
+						Name:       "bar", // should go below foo
+						Expression: "variables.foo + 1",
+					},
+					{
+						Name:       "foo",
+						Expression: "1 + 1",
+					},
+				},
+				Validations: []admissionregistration.Validation{
+					{
+						Expression: "variables.foo > 1", // correct
+					},
+				},
+			},
+		},
+		expectedError: `spec.variables[1].expression: Invalid value: "variables.foo + 1": compilation failed: ERROR: <input>:1:10: undefined field 'foo'`,
+	},
+	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			errs := ValidateValidatingAdmissionPolicy(test.config)
@@ -3068,8 +3286,146 @@ func TestValidateValidatingAdmissionPolicyUpdate(t *testing.T) {
 		},
 		expectedError: "",
 	},
-	// TODO: CustomAuditAnnotations: string valueExpression with {oldObject} is allowed
+		{
+			name: "expressions that are not changed must be compiled using the StoredExpression environment",
+			oldconfig: validatingAdmissionPolicyWithExpressions(
+				[]admissionregistration.MatchCondition{
+					{
+						Name:       "checkEnvironmentMode",
+						Expression: `test() == true`,
+					},
+				},
+				[]admissionregistration.Validation{
+					{
+						Expression:        `test() == true`,
+						MessageExpression: "string(test())",
+					},
+				},
+				[]admissionregistration.AuditAnnotation{
+					{
+						Key:             "checkEnvironmentMode",
+						ValueExpression: "string(test())",
+					},
+				}),
+			config: validatingAdmissionPolicyWithExpressions(
+				[]admissionregistration.MatchCondition{
+					{
+						Name:       "checkEnvironmentMode",
+						Expression: `test() == true`,
+					},
+				},
+				[]admissionregistration.Validation{
+					{
+						Expression:        `test() == true`,
+						MessageExpression: "string(test())",
+					},
+				},
+				[]admissionregistration.AuditAnnotation{
+					{
+						Key:             "checkEnvironmentMode",
+						ValueExpression: "string(test())",
+					},
+				}),
+			expectedError: "",
+		},
+		{
+			name: "matchCondition expressions that are changed must be compiled using the NewExpression environment",
+			oldconfig: validatingAdmissionPolicyWithExpressions(
+				[]admissionregistration.MatchCondition{
+					{
+						Name:       "checkEnvironmentMode",
+						Expression: `true`,
+					},
+				},
+				nil, nil),
+			config: validatingAdmissionPolicyWithExpressions(
+				[]admissionregistration.MatchCondition{
+					{
+						Name:       "checkEnvironmentMode",
+						Expression: `test() == true`,
+					},
+				},
+				nil, nil),
+			expectedError: `undeclared reference to 'test'`,
+		},
+		{
+			name: "validation expressions that are changed must be compiled using the NewExpression environment",
+			oldconfig: validatingAdmissionPolicyWithExpressions(
+				nil,
+				[]admissionregistration.Validation{
+					{
+						Expression: `true`,
+					},
+				},
+				nil),
+			config: validatingAdmissionPolicyWithExpressions(
+				nil,
+				[]admissionregistration.Validation{
+					{
+						Expression: `test() == true`,
+					},
+				},
+				nil),
+			expectedError: `undeclared reference to 'test'`,
+		},
+		{
+			name: "validation messageExpressions that are changed must be compiled using the NewExpression environment",
+			oldconfig: validatingAdmissionPolicyWithExpressions(
+				nil,
+				[]admissionregistration.Validation{
+					{
+						Expression:        `true`,
+						MessageExpression: "'test'",
+					},
+				},
+				nil),
+			config: validatingAdmissionPolicyWithExpressions(
+				nil,
+				[]admissionregistration.Validation{
+					{
+						Expression:        `true`,
+						MessageExpression: "string(test())",
+					},
+				},
+				nil),
+			expectedError: `undeclared reference to 'test'`,
+		},
+		{
+			name: "auditAnnotation valueExpressions that are changed must be compiled using the NewExpression environment",
+			oldconfig: validatingAdmissionPolicyWithExpressions(
+				nil, nil,
+				[]admissionregistration.AuditAnnotation{
+					{
+						Key:             "checkEnvironmentMode",
+						ValueExpression: "'test'",
+					},
+				}),
+			config: validatingAdmissionPolicyWithExpressions(
+				nil, nil,
+				[]admissionregistration.AuditAnnotation{
+					{
+						Key:             "checkEnvironmentMode",
+						ValueExpression: "string(test())",
+					},
+				}),
+			expectedError: `undeclared reference to 'test'`,
+		},
+		// TODO: CustomAuditAnnotations: string valueExpression with {oldObject} is allowed
 	}
+	// Include the test library, which includes the test() function in the storage environment during test
+	base := environment.MustBaseEnvSet(environment.DefaultCompatibilityVersion())
+	extended, err := base.Extend(environment.VersionedOptions{
+		IntroducedVersion: version.MustParseGeneric("1.999"),
+		EnvOptions:        []cel.EnvOption{library.Test()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	statelessCELCompiler = plugincel.NewCompiler(extended)
+	defer func() {
+		statelessCELCompiler = plugincel.NewCompiler(environment.MustBaseEnvSet(environment.DefaultCompatibilityVersion()))
+	}()
+
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			errs := ValidateValidatingAdmissionPolicyUpdate(test.config, test.oldconfig)
@@ -3085,6 +3441,50 @@ func TestValidateValidatingAdmissionPolicyUpdate(t *testing.T) {
 			}
 		})
 
+	}
+}
+
+func validatingAdmissionPolicyWithExpressions(
+	matchConditions []admissionregistration.MatchCondition,
+	validations []admissionregistration.Validation,
+	auditAnnotations []admissionregistration.AuditAnnotation) *admissionregistration.ValidatingAdmissionPolicy {
+	return &admissionregistration.ValidatingAdmissionPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "config",
+		},
+		Spec: admissionregistration.ValidatingAdmissionPolicySpec{
+			MatchConstraints: &admissionregistration.MatchResources{
+				ResourceRules: []admissionregistration.NamedRuleWithOperations{
+					{
+						RuleWithOperations: admissionregistration.RuleWithOperations{
+							Operations: []admissionregistration.OperationType{"*"},
+							Rule: admissionregistration.Rule{
+								APIGroups:   []string{"a"},
+								APIVersions: []string{"a"},
+								Resources:   []string{"a"},
+							},
+						},
+					},
+				},
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"a": "b"},
+				},
+				ObjectSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"a": "b"},
+				},
+				MatchPolicy: func() *admissionregistration.MatchPolicyType {
+					r := admissionregistration.MatchPolicyType("Exact")
+					return &r
+				}(),
+			},
+			FailurePolicy: func() *admissionregistration.FailurePolicyType {
+				r := admissionregistration.FailurePolicyType("Ignore")
+				return &r
+			}(),
+			MatchConditions:  matchConditions,
+			Validations:      validations,
+			AuditAnnotations: auditAnnotations,
+		},
 	}
 }
 
@@ -3119,7 +3519,8 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
-					Name: "xyzlimit-scale-setting.example.com",
+					Name:                    "xyzlimit-scale-setting.example.com",
+					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
 				},
 				MatchResources: &admissionregistration.MatchResources{
 					MatchPolicy: func() *admissionregistration.MatchPolicyType {
@@ -3139,7 +3540,8 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
-					Name: "xyzlimit-scale-setting.example.com",
+					Name:                    "xyzlimit-scale-setting.example.com",
+					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
 				},
 				MatchResources: &admissionregistration.MatchResources{
 					ResourceRules: []admissionregistration.NamedRuleWithOperations{{
@@ -3193,7 +3595,8 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
-					Name: "xyzlimit-scale-setting.example.com",
+					Name:                    "xyzlimit-scale-setting.example.com",
+					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
 				}, MatchResources: &admissionregistration.MatchResources{
 					ResourceRules: []admissionregistration.NamedRuleWithOperations{{
 						RuleWithOperations: admissionregistration.RuleWithOperations{
@@ -3218,7 +3621,8 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
-					Name: "xyzlimit-scale-setting.example.com",
+					Name:                    "xyzlimit-scale-setting.example.com",
+					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
 				}, MatchResources: &admissionregistration.MatchResources{
 					ResourceRules: []admissionregistration.NamedRuleWithOperations{{
 						RuleWithOperations: admissionregistration.RuleWithOperations{
@@ -3243,7 +3647,8 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
-					Name: "xyzlimit-scale-setting.example.com",
+					Name:                    "xyzlimit-scale-setting.example.com",
+					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{
@@ -3270,7 +3675,8 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
-					Name: "xyzlimit-scale-setting.example.com",
+					Name:                    "xyzlimit-scale-setting.example.com",
+					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{
@@ -3306,7 +3712,8 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
-					Name: "xyzlimit-scale-setting.example.com",
+					Name:                    "xyzlimit-scale-setting.example.com",
+					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{
@@ -3333,7 +3740,8 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
-					Name: "xyzlimit-scale-setting.example.com",
+					Name:                    "xyzlimit-scale-setting.example.com",
+					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{
@@ -3360,7 +3768,8 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
-					Name: "xyzlimit-scale-setting.example.com",
+					Name:                    "xyzlimit-scale-setting.example.com",
+					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{
@@ -3396,7 +3805,8 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
-					Name: "xyzlimit-scale-setting.example.com",
+					Name:                    "xyzlimit-scale-setting.example.com",
+					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{
@@ -3423,7 +3833,8 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
-					Name: "xyzlimit-scale-setting.example.com",
+					Name:                    "xyzlimit-scale-setting.example.com",
+					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{
@@ -3450,7 +3861,8 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
-					Name: "xyzlimit-scale-setting.example.com",
+					Name:                    "xyzlimit-scale-setting.example.com",
+					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny, admissionregistration.Deny},
 			},
@@ -3465,12 +3877,80 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
-					Name: "xyzlimit-scale-setting.example.com",
+					Name:                    "xyzlimit-scale-setting.example.com",
+					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.ValidationAction("illegal")},
 			},
 		},
 		expectedError: `Unsupported value: "illegal": supported values: "Audit", "Deny", "Warn"`,
+	}, {
+		name: "paramRef selector must not be set when name is set",
+		config: &admissionregistration.ValidatingAdmissionPolicyBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "config",
+			},
+			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
+				PolicyName:        "xyzlimit-scale.example.com",
+				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
+				ParamRef: &admissionregistration.ParamRef{
+					Name: "xyzlimit-scale-setting.example.com",
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"label": "value",
+						},
+					},
+					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+				},
+			},
+		},
+		expectedError: `spec.paramRef.name: Forbidden: name and selector are mutually exclusive, spec.paramRef.selector: Forbidden: name and selector are mutually exclusive`,
+	}, {
+		name: "paramRef parameterNotFoundAction must be set",
+		config: &admissionregistration.ValidatingAdmissionPolicyBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "config",
+			},
+			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
+				PolicyName:        "xyzlimit-scale.example.com",
+				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
+				ParamRef: &admissionregistration.ParamRef{
+					Name: "xyzlimit-scale-setting.example.com",
+				},
+			},
+		},
+		expectedError: "spec.paramRef.parameterNotFoundAction: Required value",
+	}, {
+		name: "paramRef parameterNotFoundAction must be an valid value",
+		config: &admissionregistration.ValidatingAdmissionPolicyBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "config",
+			},
+			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
+				PolicyName:        "xyzlimit-scale.example.com",
+				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
+				ParamRef: &admissionregistration.ParamRef{
+					Name:                    "xyzlimit-scale-setting.example.com",
+					ParameterNotFoundAction: ptr(admissionregistration.ParameterNotFoundActionType("invalid")),
+				},
+			},
+		},
+		expectedError: `spec.paramRef.parameterNotFoundAction: Unsupported value: "invalid": supported values: "Deny", "Allow"`,
+	}, {
+		name: "paramRef one of name or selector",
+		config: &admissionregistration.ValidatingAdmissionPolicyBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "config",
+			},
+			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
+				PolicyName:        "xyzlimit-scale.example.com",
+				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
+				ParamRef: &admissionregistration.ParamRef{
+					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+				},
+			},
+		},
+		expectedError: `one of name or selector must be specified`,
 	}}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -3505,7 +3985,8 @@ func TestValidateValidatingAdmissionPolicyBindingUpdate(t *testing.T) {
 			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
-					Name: "xyzlimit-scale-setting.example.com",
+					Name:                    "xyzlimit-scale-setting.example.com",
+					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{
@@ -3539,7 +4020,8 @@ func TestValidateValidatingAdmissionPolicyBindingUpdate(t *testing.T) {
 			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
-					Name: "xyzlimit-scale-setting.example.com",
+					Name:                    "xyzlimit-scale-setting.example.com",
+					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{
@@ -3575,7 +4057,8 @@ func TestValidateValidatingAdmissionPolicyBindingUpdate(t *testing.T) {
 			Spec: admissionregistration.ValidatingAdmissionPolicyBindingSpec{
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
-					Name: "xyzlimit-scale-setting.example.com",
+					Name:                    "xyzlimit-scale-setting.example.com",
+					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{

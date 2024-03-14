@@ -26,6 +26,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 
+	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/options"
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/phases/workflow"
 	cmdutil "k8s.io/kubernetes/cmd/kubeadm/app/cmd/util"
@@ -78,8 +79,8 @@ func runKubeletFinalizeCertRotation(c workflow.RunData) error {
 	// If yes, use that path, else use the kubeadm provided value.
 	cfg := data.Cfg()
 	pkiPath := filepath.Join(data.KubeletDir(), "pki")
-	val, ok := cfg.NodeRegistration.KubeletExtraArgs["cert-dir"]
-	if ok {
+	val, idx := kubeadmapi.GetArgValue(cfg.NodeRegistration.KubeletExtraArgs, "cert-dir", -1)
+	if idx > -1 {
 		pkiPath = val
 	}
 
@@ -113,7 +114,17 @@ func runKubeletFinalizeCertRotation(c workflow.RunData) error {
 	}
 
 	// Perform basic validation. The errors here can only happen if the kubelet.conf was corrupted.
-	userName := fmt.Sprintf("%s%s", kubeadmconstants.NodesUserPrefix, cfg.NodeRegistration.Name)
+	if len(kubeconfig.CurrentContext) == 0 {
+		return errors.Errorf("the file %q does not have current context set", kubeconfigPath)
+	}
+	currentContext, ok := kubeconfig.Contexts[kubeconfig.CurrentContext]
+	if !ok {
+		return errors.Errorf("the file %q is not a valid kubeconfig: %q set as current-context, but not found in context list", kubeconfigPath, kubeconfig.CurrentContext)
+	}
+	userName := currentContext.AuthInfo
+	if len(userName) == 0 {
+		return errors.Errorf("the file %q is not a valid kubeconfig: empty username for current context", kubeconfigPath)
+	}
 	info, ok := kubeconfig.AuthInfos[userName]
 	if !ok {
 		return errors.Errorf("the file %q does not contain authentication for user %q", kubeconfigPath, cfg.NodeRegistration.Name)

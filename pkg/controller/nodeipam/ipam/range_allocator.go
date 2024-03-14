@@ -67,13 +67,14 @@ type rangeAllocator struct {
 // Caller must always pass in a list of existing nodes so the new allocator.
 // Caller must ensure that ClusterCIDRs are semantically correct e.g (1 for non DualStack, 2 for DualStack etc..)
 // can initialize its CIDR map. NodeList is only nil in testing.
-func NewCIDRRangeAllocator(logger klog.Logger, client clientset.Interface, nodeInformer informers.NodeInformer, allocatorParams CIDRAllocatorParams, nodeList *v1.NodeList) (CIDRAllocator, error) {
+func NewCIDRRangeAllocator(ctx context.Context, client clientset.Interface, nodeInformer informers.NodeInformer, allocatorParams CIDRAllocatorParams, nodeList *v1.NodeList) (CIDRAllocator, error) {
+	logger := klog.FromContext(ctx)
 	if client == nil {
 		logger.Error(nil, "kubeClient is nil when starting CIDRRangeAllocator")
 		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
 
-	eventBroadcaster := record.NewBroadcaster()
+	eventBroadcaster := record.NewBroadcaster(record.WithContext(ctx))
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "cidrAllocator"})
 
 	// create a cidrSet for each cidr we operate on
@@ -157,7 +158,7 @@ func NewCIDRRangeAllocator(logger klog.Logger, client clientset.Interface, nodeI
 			}
 			return nil
 		}),
-		DeleteFunc: controllerutil.CreateDeleteNodeHandler(func(node *v1.Node) error {
+		DeleteFunc: controllerutil.CreateDeleteNodeHandler(logger, func(node *v1.Node) error {
 			return ra.ReleaseCIDR(logger, node)
 		}),
 	})
@@ -169,7 +170,7 @@ func (r *rangeAllocator) Run(ctx context.Context) {
 	defer utilruntime.HandleCrash()
 
 	// Start event processing pipeline.
-	r.broadcaster.StartStructuredLogging(0)
+	r.broadcaster.StartStructuredLogging(3)
 	logger := klog.FromContext(ctx)
 	logger.Info("Sending events to api server")
 	r.broadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: r.client.CoreV1().Events("")})
@@ -274,7 +275,7 @@ func (r *rangeAllocator) AllocateOrOccupyCIDR(logger klog.Logger, node *v1.Node)
 		podCIDR, err := r.cidrSets[idx].AllocateNext()
 		if err != nil {
 			r.removeNodeFromProcessing(node.Name)
-			controllerutil.RecordNodeStatusChange(r.recorder, node, "CIDRNotAvailable")
+			controllerutil.RecordNodeStatusChange(logger, r.recorder, node, "CIDRNotAvailable")
 			return fmt.Errorf("failed to allocate cidr from cluster cidr at idx:%v: %v", idx, err)
 		}
 		allocated.allocatedCIDRs[idx] = podCIDR
@@ -383,7 +384,7 @@ func (r *rangeAllocator) updateCIDRsAllocation(logger klog.Logger, data nodeRese
 	}
 	// failed release back to the pool
 	logger.Error(err, "Failed to update node PodCIDR after multiple attempts", "node", klog.KObj(node), "podCIDRs", cidrsString)
-	controllerutil.RecordNodeStatusChange(r.recorder, node, "CIDRAssignmentFailed")
+	controllerutil.RecordNodeStatusChange(logger, r.recorder, node, "CIDRAssignmentFailed")
 	// We accept the fact that we may leak CIDRs here. This is safer than releasing
 	// them in case when we don't know if request went through.
 	// NodeController restart will return all falsely allocated CIDRs to the pool.
