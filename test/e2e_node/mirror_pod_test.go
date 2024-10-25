@@ -233,9 +233,6 @@ var _ = SIGDescribe("MirrorPod", func() {
 			ginkgo.By("Stopping the NFS server")
 			stopNfsServer(f, nfsServerPod)
 
-			ginkgo.By("Waiting for NFS server to stop...")
-			time.Sleep(30 * time.Second)
-
 			ginkgo.By(fmt.Sprintf("Deleting the static nfs test pod: %s", staticPodName))
 			err = deleteStaticPod(podPath, staticPodName, ns)
 			framework.ExpectNoError(err)
@@ -243,7 +240,7 @@ var _ = SIGDescribe("MirrorPod", func() {
 			// Wait 5 mins for syncTerminatedPod to fail. We expect that the pod volume should not be cleaned up because the NFS server is down.
 			gomega.Consistently(func() bool {
 				return podVolumeDirectoryExists(types.UID(hash))
-			}, 5*time.Minute, 10*time.Second).Should(gomega.BeTrue(), "pod volume should exist while nfs server is stopped")
+			}, 5*time.Minute, 10*time.Second).Should(gomega.BeTrueBecause("pod volume should exist while nfs server is stopped"))
 
 			ginkgo.By("Start the NFS server")
 			restartNfsServer(f, nfsServerPod)
@@ -251,7 +248,7 @@ var _ = SIGDescribe("MirrorPod", func() {
 			ginkgo.By("Waiting for the pod volume to deleted after the NFS server is started")
 			gomega.Eventually(func() bool {
 				return podVolumeDirectoryExists(types.UID(hash))
-			}, 5*time.Minute, 10*time.Second).Should(gomega.BeFalse(), "pod volume should be deleted after nfs server is started")
+			}, 5*time.Minute, 10*time.Second).Should(gomega.BeFalseBecause("pod volume should be deleted after nfs server is started"))
 
 			// Create the static pod again with the same config and expect it to start running
 			err = createStaticPodUsingNfs(nfsServerHost, node, "sleep 999999", podPath, staticPodName, ns)
@@ -303,7 +300,7 @@ func restartNfsServer(f *framework.Framework, serverPod *v1.Pod) {
 // pod's (only) container. This command changes the number of nfs server threads to 0,
 // thus closing all open nfs connections.
 func stopNfsServer(f *framework.Framework, serverPod *v1.Pod) {
-	const stopcmd = "/usr/sbin/rpc.nfsd 0"
+	const stopcmd = "rpc.nfsd 0 && for i in $(seq 200); do rpcinfo -p | grep -q nfs || break; sleep 1; done"
 	_, _, err := e2evolume.PodExec(f, serverPod, stopcmd)
 	framework.ExpectNoError(err)
 }

@@ -38,6 +38,7 @@ import (
 	"k8s.io/apiserver/pkg/endpoints"
 	discoveryendpoint "k8s.io/apiserver/pkg/endpoints/discovery/aggregated"
 	"k8s.io/apiserver/pkg/endpoints/request"
+	"k8s.io/apiserver/pkg/util/responsewriter"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -103,7 +104,7 @@ type discoveryManager struct {
 	// It is important that the reconciler for this queue does not excessively
 	// contact the apiserver if a key was enqueued before the server was last
 	// contacted.
-	dirtyAPIServiceQueue workqueue.RateLimitingInterface
+	dirtyAPIServiceQueue workqueue.TypedRateLimitingInterface[string]
 
 	// Merged handler which stores all known groupversions
 	mergedDiscoveryHandler discoveryendpoint.ResourceManager
@@ -197,8 +198,11 @@ func NewDiscoveryManager(
 		mergedDiscoveryHandler: target,
 		apiServices:            make(map[string]groupVersionInfo),
 		cachedResults:          make(map[serviceKey]cachedResult),
-		dirtyAPIServiceQueue:   workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "discovery-manager"),
-		codecs:                 codecs,
+		dirtyAPIServiceQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
+			workqueue.DefaultTypedControllerRateLimiter[string](),
+			workqueue.TypedRateLimitingQueueConfig[string]{Name: "discovery-manager"},
+		),
+		codecs: codecs,
 	}
 }
 
@@ -246,14 +250,14 @@ func (dm *discoveryManager) fetchFreshDiscoveryForService(gv metav1.GroupVersion
 	// from BEFORE the request is dispatched so that lastUpdated can be used to
 	// de-duplicate requests.
 	now := time.Now()
-	writer := newInMemoryResponseWriter()
+	writer := responsewriter.NewInMemoryResponseWriter()
 	handler.ServeHTTP(writer, req)
 
 	isV2Beta1GVK, _ := discovery.ContentTypeIsGVK(writer.Header().Get("Content-Type"), v2Beta1GVK)
 	isV2GVK, _ := discovery.ContentTypeIsGVK(writer.Header().Get("Content-Type"), v2GVK)
 
 	switch {
-	case writer.respCode == http.StatusNotModified:
+	case writer.RespCode() == http.StatusNotModified:
 		// Keep old entry, update timestamp
 		cached = cachedResult{
 			discovery:   cached.discovery,
@@ -263,12 +267,12 @@ func (dm *discoveryManager) fetchFreshDiscoveryForService(gv metav1.GroupVersion
 
 		dm.setCacheEntryForService(info.service, cached)
 		return &cached, nil
-	case writer.respCode == http.StatusServiceUnavailable:
+	case writer.RespCode() == http.StatusServiceUnavailable:
 		return nil, fmt.Errorf("service %s returned non-success response code: %v",
-			info.service.String(), writer.respCode)
-	case writer.respCode == http.StatusOK && (isV2GVK || isV2Beta1GVK):
+			info.service.String(), writer.RespCode())
+	case writer.RespCode() == http.StatusOK && (isV2GVK || isV2Beta1GVK):
 		parsed := &apidiscoveryv2.APIGroupDiscoveryList{}
-		if err := runtime.DecodeInto(dm.codecs.UniversalDecoder(), writer.data, parsed); err != nil {
+		if err := runtime.DecodeInto(dm.codecs.UniversalDecoder(), writer.Data(), parsed); err != nil {
 			return nil, err
 		}
 
@@ -335,15 +339,15 @@ func (dm *discoveryManager) fetchFreshDiscoveryForService(gv metav1.GroupVersion
 			req.Header.Add("If-None-Match", cached.etag)
 		}
 
-		writer := newInMemoryResponseWriter()
+		writer := responsewriter.NewInMemoryResponseWriter()
 		handler.ServeHTTP(writer, req)
 
-		if writer.respCode != http.StatusOK {
+		if writer.RespCode() != http.StatusOK {
 			return nil, fmt.Errorf("failed to download legacy discovery for %s: %v", path, writer.String())
 		}
 
 		parsed := &metav1.APIResourceList{}
-		if err := runtime.DecodeInto(scheme.Codecs.UniversalDecoder(), writer.data, parsed); err != nil {
+		if err := runtime.DecodeInto(scheme.Codecs.UniversalDecoder(), writer.Data(), parsed); err != nil {
 			return nil, err
 		}
 
@@ -488,7 +492,7 @@ func (dm *discoveryManager) Run(stopCh <-chan struct{}, discoverySyncedCh chan<-
 				func() {
 					defer dm.dirtyAPIServiceQueue.Done(next)
 
-					if err := dm.syncAPIService(next.(string)); err != nil {
+					if err := dm.syncAPIService(next); err != nil {
 						dm.dirtyAPIServiceQueue.AddRateLimited(next)
 					} else {
 						dm.dirtyAPIServiceQueue.Forget(next)
@@ -615,47 +619,4 @@ func (dm *discoveryManager) setInfoForAPIService(name string, result *groupVersi
 	}
 
 	return oldValueIfExisted
-}
-
-// !TODO: This was copied from staging/src/k8s.io/kube-aggregator/pkg/controllers/openapi/aggregator/downloader.go
-// which was copied from staging/src/k8s.io/kube-aggregator/pkg/controllers/openapiv3/aggregator/downloader.go
-// so we should find a home for this
-// inMemoryResponseWriter is a http.Writer that keep the response in memory.
-type inMemoryResponseWriter struct {
-	writeHeaderCalled bool
-	header            http.Header
-	respCode          int
-	data              []byte
-}
-
-func newInMemoryResponseWriter() *inMemoryResponseWriter {
-	return &inMemoryResponseWriter{header: http.Header{}}
-}
-
-func (r *inMemoryResponseWriter) Header() http.Header {
-	return r.header
-}
-
-func (r *inMemoryResponseWriter) WriteHeader(code int) {
-	r.writeHeaderCalled = true
-	r.respCode = code
-}
-
-func (r *inMemoryResponseWriter) Write(in []byte) (int, error) {
-	if !r.writeHeaderCalled {
-		r.WriteHeader(http.StatusOK)
-	}
-	r.data = append(r.data, in...)
-	return len(in), nil
-}
-
-func (r *inMemoryResponseWriter) String() string {
-	s := fmt.Sprintf("ResponseCode: %d", r.respCode)
-	if r.data != nil {
-		s += fmt.Sprintf(", Body: %s", string(r.data))
-	}
-	if r.header != nil {
-		s += fmt.Sprintf(", Header: %s", r.header)
-	}
-	return s
 }

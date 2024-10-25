@@ -35,11 +35,14 @@ import (
 	"time"
 
 	"github.com/coreos/go-systemd/v22/daemon"
-	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric/noop"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	jsonpatch "gopkg.in/evanphx/json-patch.v4"
+
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 
@@ -48,9 +51,12 @@ import (
 	otelsdkresource "go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
 	oteltrace "go.opentelemetry.io/otel/trace"
+	noopoteltrace "go.opentelemetry.io/otel/trace/noop"
+
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -91,6 +97,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet"
 	kubeletconfiginternal "k8s.io/kubernetes/pkg/kubelet/apis/config"
 	kubeletscheme "k8s.io/kubernetes/pkg/kubelet/apis/config/scheme"
+	kubeletconfigv1beta1conversion "k8s.io/kubernetes/pkg/kubelet/apis/config/v1beta1"
 	kubeletconfigvalidation "k8s.io/kubernetes/pkg/kubelet/apis/config/validation"
 	"k8s.io/kubernetes/pkg/kubelet/cadvisor"
 	kubeletcertificate "k8s.io/kubernetes/pkg/kubelet/certificate"
@@ -120,6 +127,9 @@ import (
 
 func init() {
 	utilruntime.Must(logsapi.AddFeatureGates(utilfeature.DefaultMutableFeatureGate))
+	// Prevent memory leak from OTel metrics, which we don't use:
+	// https://github.com/open-telemetry/opentelemetry-go-contrib/issues/5190
+	otel.SetMeterProvider(noop.NewMeterProvider())
 }
 
 const (
@@ -203,7 +213,7 @@ is checked every 20 seconds (also configurable with a flag).`,
 
 			if cleanFlagSet.Changed("pod-infra-container-image") {
 				klog.InfoS("--pod-infra-container-image will not be pruned by the image garbage collector in kubelet and should also be set in the remote runtime")
-				_ = cmd.Flags().MarkDeprecated("pod-infra-container-image", "--pod-infra-container-image will be removed in 1.30. Image garbage collector will get sandbox image information from CRI.")
+				_ = cmd.Flags().MarkDeprecated("pod-infra-container-image", "--pod-infra-container-image will be removed in 1.35. Image garbage collector will get sandbox image information from CRI.")
 			}
 
 			// load kubelet config file, if provided
@@ -310,7 +320,15 @@ is checked every 20 seconds (also configurable with a flag).`,
 // potentially overriding the previous values.
 func mergeKubeletConfigurations(kubeletConfig *kubeletconfiginternal.KubeletConfiguration, kubeletDropInConfigDir string) error {
 	const dropinFileExtension = ".conf"
-	baseKubeletConfigJSON, err := json.Marshal(kubeletConfig)
+
+	// TODO: move the "internal --> versioned --> merge --> default --> internal" operation inside the loop,
+	// and use the version of each drop-in file as the versioned target once config files can be in versions other than just v1beta1
+	versionedConfig := &kubeletconfigv1beta1.KubeletConfiguration{}
+	if err := kubeletconfigv1beta1conversion.Convert_config_KubeletConfiguration_To_v1beta1_KubeletConfiguration(kubeletConfig, versionedConfig, nil); err != nil {
+		return err
+	}
+
+	baseKubeletConfigJSON, err := json.Marshal(versionedConfig)
 	if err != nil {
 		return fmt.Errorf("failed to marshal base config: %w", err)
 	}
@@ -320,9 +338,16 @@ func mergeKubeletConfigurations(kubeletConfig *kubeletconfiginternal.KubeletConf
 			return err
 		}
 		if !info.IsDir() && filepath.Ext(info.Name()) == dropinFileExtension {
-			dropinConfigJSON, err := loadDropinConfigFileIntoJSON(path)
+			dropinConfigJSON, gvk, err := loadDropinConfigFileIntoJSON(path)
 			if err != nil {
 				return fmt.Errorf("failed to load kubelet dropin file, path: %s, error: %w", path, err)
+			}
+			if gvk == nil || gvk.Empty() {
+				return fmt.Errorf("failed to load kubelet dropin file, path: %s, no apiVersion/kind", path)
+			}
+			// TODO: expand this once more than a single kubelet config version exists
+			if *gvk != kubeletconfigv1beta1.SchemeGroupVersion.WithKind("KubeletConfiguration") {
+				return fmt.Errorf("failed to load kubelet dropin file, path: %s, unknown apiVersion/kind: %v", path, gvk.String())
 			}
 			mergedConfigJSON, err := jsonpatch.MergePatch(baseKubeletConfigJSON, dropinConfigJSON)
 			if err != nil {
@@ -335,9 +360,18 @@ func mergeKubeletConfigurations(kubeletConfig *kubeletconfiginternal.KubeletConf
 		return fmt.Errorf("failed to walk through kubelet dropin directory %q: %w", kubeletDropInConfigDir, err)
 	}
 
-	if err := json.Unmarshal(baseKubeletConfigJSON, kubeletConfig); err != nil {
+	// reset versioned config and decode
+	versionedConfig = &kubeletconfigv1beta1.KubeletConfiguration{}
+	if err := json.Unmarshal(baseKubeletConfigJSON, versionedConfig); err != nil {
 		return fmt.Errorf("failed to unmarshal merged JSON into kubelet configuration: %w", err)
 	}
+	// apply defaulting after decoding
+	kubeletconfigv1beta1conversion.SetDefaults_KubeletConfiguration(versionedConfig)
+	// convert back to internal config
+	if err := kubeletconfigv1beta1conversion.Convert_v1beta1_KubeletConfiguration_To_config_KubeletConfiguration(versionedConfig, kubeletConfig, nil); err != nil {
+		return fmt.Errorf("failed to convert merged config to internal kubelet configuration: %w", err)
+	}
+
 	return nil
 }
 
@@ -417,16 +451,16 @@ func loadConfigFile(name string) (*kubeletconfiginternal.KubeletConfiguration, e
 	return kc, err
 }
 
-func loadDropinConfigFileIntoJSON(name string) ([]byte, error) {
+func loadDropinConfigFileIntoJSON(name string) ([]byte, *schema.GroupVersionKind, error) {
 	const errFmt = "failed to load drop-in kubelet config file %s, error %v"
 	// compute absolute path based on current working dir
 	kubeletConfigFile, err := filepath.Abs(name)
 	if err != nil {
-		return nil, fmt.Errorf(errFmt, name, err)
+		return nil, nil, fmt.Errorf(errFmt, name, err)
 	}
 	loader, err := configfiles.NewFsLoader(&utilfs.DefaultFs{}, kubeletConfigFile)
 	if err != nil {
-		return nil, fmt.Errorf(errFmt, name, err)
+		return nil, nil, fmt.Errorf(errFmt, name, err)
 	}
 	return loader.LoadIntoJSON()
 }
@@ -443,13 +477,14 @@ func UnsecuredDependencies(s *options.KubeletServer, featureGate featuregate.Fea
 	mounter := mount.New(s.ExperimentalMounterPath)
 	subpather := subpath.New(mounter)
 	hu := hostutil.NewHostUtil()
-	var pluginRunner = exec.New()
+	pluginRunner := exec.New()
 
 	plugins, err := ProbeVolumePlugins(featureGate)
 	if err != nil {
 		return nil, err
 	}
-	tp := oteltrace.NewNoopTracerProvider()
+	var tp oteltrace.TracerProvider
+	tp = noopoteltrace.NewTracerProvider()
 	if utilfeature.DefaultFeatureGate.Enabled(features.KubeletTracing) {
 		tp, err = newTracerProvider(s)
 		if err != nil {
@@ -616,16 +651,10 @@ func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
 	}
 
 	if kubeDeps.Cloud == nil {
-		if !cloudprovider.IsExternal(s.CloudProvider) {
-			cloudprovider.DeprecationWarningForProvider(s.CloudProvider)
-			cloud, err := cloudprovider.InitCloudProvider(s.CloudProvider, s.CloudConfigFile)
-			if err != nil {
-				return err
-			}
-			if cloud != nil {
-				klog.V(2).InfoS("Successfully initialized cloud provider", "cloudProvider", s.CloudProvider, "cloudConfigFile", s.CloudConfigFile)
-			}
-			kubeDeps.Cloud = cloud
+		if !cloudprovider.IsExternal(s.CloudProvider) && len(s.CloudProvider) != 0 {
+			// internal cloud provider loops are disabled
+			cloudprovider.DisableWarningForProvider(s.CloudProvider)
+			return cloudprovider.ErrorForDisabledProvider(s.CloudProvider)
 		}
 	}
 
@@ -772,6 +801,7 @@ func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
 		if err != nil {
 			return fmt.Errorf("--system-reserved value failed to parse: %w", err)
 		}
+
 		var hardEvictionThresholds []evictionapi.Threshold
 		// If the user requested to ignore eviction thresholds, then do not set valid values for hardEvictionThresholds here.
 		if !s.ExperimentalNodeAllocatableIgnoreEvictionThreshold {
@@ -871,7 +901,7 @@ func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
 		klog.InfoS("Failed to ApplyOOMScoreAdj", "err", err)
 	}
 
-	if err := RunKubelet(s, kubeDeps, s.RunOnce); err != nil {
+	if err := RunKubelet(ctx, s, kubeDeps, s.RunOnce); err != nil {
 		return err
 	}
 
@@ -1202,7 +1232,7 @@ func setContentTypeForClient(cfg *restclient.Config, contentType string) {
 //	3 Standalone 'kubernetes' binary
 //
 // Eventually, #2 will be replaced with instances of #3
-func RunKubelet(kubeServer *options.KubeletServer, kubeDeps *kubelet.Dependencies, runOnce bool) error {
+func RunKubelet(ctx context.Context, kubeServer *options.KubeletServer, kubeDeps *kubelet.Dependencies, runOnce bool) error {
 	hostname, err := nodeutil.GetHostname(kubeServer.HostnameOverride)
 	if err != nil {
 		return err
@@ -1214,11 +1244,14 @@ func RunKubelet(kubeServer *options.KubeletServer, kubeDeps *kubelet.Dependencie
 	}
 	hostnameOverridden := len(kubeServer.HostnameOverride) > 0
 	// Setup event recorder if required.
-	makeEventRecorder(context.TODO(), kubeDeps, nodeName)
+	makeEventRecorder(ctx, kubeDeps, nodeName)
 
-	nodeIPs, err := nodeutil.ParseNodeIPArgument(kubeServer.NodeIP, kubeServer.CloudProvider)
+	nodeIPs, invalidNodeIps, err := nodeutil.ParseNodeIPArgument(kubeServer.NodeIP, kubeServer.CloudProvider)
 	if err != nil {
 		return fmt.Errorf("bad --node-ip %q: %v", kubeServer.NodeIP, err)
+	}
+	if len(invalidNodeIps) != 0 {
+		klog.FromContext(ctx).Info("Could not parse some node IP(s), ignoring them", "IPs", invalidNodeIps)
 	}
 
 	capabilities.Initialize(capabilities.Capabilities{
@@ -1275,7 +1308,7 @@ func startKubelet(k kubelet.Bootstrap, podCfg *config.PodConfig, kubeCfg *kubele
 		go k.ListenAndServe(kubeCfg, kubeDeps.TLSOptions, kubeDeps.Auth, kubeDeps.TracerProvider)
 	}
 	if kubeCfg.ReadOnlyPort > 0 {
-		go k.ListenAndServeReadOnly(netutils.ParseIPSloppy(kubeCfg.Address), uint(kubeCfg.ReadOnlyPort))
+		go k.ListenAndServeReadOnly(netutils.ParseIPSloppy(kubeCfg.Address), uint(kubeCfg.ReadOnlyPort), kubeDeps.TracerProvider)
 	}
 	go k.ListenAndServePodResources()
 }
@@ -1313,7 +1346,6 @@ func createAndInitKubelet(kubeServer *options.KubeletServer,
 		kubeServer.MaxPerPodContainerCount,
 		kubeServer.MaxContainerCount,
 		kubeServer.RegisterSchedulable,
-		kubeServer.KeepTerminatedPodVolumes,
 		kubeServer.NodeLabels,
 		kubeServer.NodeStatusMaxImages,
 		kubeServer.KubeletFlags.SeccompDefault || kubeServer.KubeletConfiguration.SeccompDefault)
@@ -1356,7 +1388,7 @@ func parseResourceList(m map[string]string) (v1.ResourceList, error) {
 
 func newTracerProvider(s *options.KubeletServer) (oteltrace.TracerProvider, error) {
 	if s.KubeletConfiguration.Tracing == nil {
-		return oteltrace.NewNoopTracerProvider(), nil
+		return noopoteltrace.NewTracerProvider(), nil
 	}
 	hostname, err := nodeutil.GetHostname(s.HostnameOverride)
 	if err != nil {

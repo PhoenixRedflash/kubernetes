@@ -18,10 +18,12 @@ package testing
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
-	resourcev1alpha2 "k8s.io/api/resource/v1alpha2"
+	resourceapi "k8s.io/api/resource/v1alpha3"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -40,17 +42,28 @@ func MakeNodeSelector() *NodeSelectorWrapper {
 	return &NodeSelectorWrapper{v1.NodeSelector{}}
 }
 
+type NodeSelectorType int
+
+const (
+	NodeSelectorTypeMatchExpressions NodeSelectorType = iota
+	NodeSelectorTypeMatchFields
+)
+
 // In injects a matchExpression (with an operator IN) as a selectorTerm
 // to the inner nodeSelector.
 // NOTE: appended selecterTerms are ORed.
-func (s *NodeSelectorWrapper) In(key string, vals []string) *NodeSelectorWrapper {
+func (s *NodeSelectorWrapper) In(key string, vals []string, t NodeSelectorType) *NodeSelectorWrapper {
 	expression := v1.NodeSelectorRequirement{
 		Key:      key,
 		Operator: v1.NodeSelectorOpIn,
 		Values:   vals,
 	}
 	selectorTerm := v1.NodeSelectorTerm{}
-	selectorTerm.MatchExpressions = append(selectorTerm.MatchExpressions, expression)
+	if t == NodeSelectorTypeMatchExpressions {
+		selectorTerm.MatchExpressions = append(selectorTerm.MatchExpressions, expression)
+	} else {
+		selectorTerm.MatchFields = append(selectorTerm.MatchFields, expression)
+	}
 	s.NodeSelectorTerms = append(s.NodeSelectorTerms, selectorTerm)
 	return s
 }
@@ -212,6 +225,12 @@ func (c *ContainerWrapper) ResourceLimits(limMap map[v1.ResourceName]string) *Co
 	return c
 }
 
+// RestartPolicy sets the container's restartPolicy to the given restartPolicy.
+func (c *ContainerWrapper) RestartPolicy(restartPolicy v1.ContainerRestartPolicy) *ContainerWrapper {
+	c.Container.RestartPolicy = &restartPolicy
+	return c
+}
+
 // PodWrapper wraps a Pod inside.
 type PodWrapper struct{ v1.Pod }
 
@@ -281,6 +300,12 @@ func (p *PodWrapper) PodResourceClaims(podResourceClaims ...v1.PodResourceClaim)
 	return p
 }
 
+// PodResourceClaims appends claim statuses into PodSpec of the inner pod.
+func (p *PodWrapper) ResourceClaimStatuses(resourceClaimStatuses ...v1.PodResourceClaimStatus) *PodWrapper {
+	p.Status.ResourceClaimStatuses = append(p.Status.ResourceClaimStatuses, resourceClaimStatuses...)
+	return p
+}
+
 // Priority sets a priority value into PodSpec of the inner pod.
 func (p *PodWrapper) Priority(val int32) *PodWrapper {
 	p.Spec.Priority = &val
@@ -320,19 +345,19 @@ func (p *PodWrapper) NodeSelector(m map[string]string) *PodWrapper {
 
 // NodeAffinityIn creates a HARD node affinity (with the operator In)
 // and injects into the inner pod.
-func (p *PodWrapper) NodeAffinityIn(key string, vals []string) *PodWrapper {
+func (p *PodWrapper) NodeAffinityIn(key string, vals []string, t NodeSelectorType) *PodWrapper {
 	if p.Spec.Affinity == nil {
 		p.Spec.Affinity = &v1.Affinity{}
 	}
 	if p.Spec.Affinity.NodeAffinity == nil {
 		p.Spec.Affinity.NodeAffinity = &v1.NodeAffinity{}
 	}
-	nodeSelector := MakeNodeSelector().In(key, vals).Obj()
+	nodeSelector := MakeNodeSelector().In(key, vals, t).Obj()
 	p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = nodeSelector
 	return p
 }
 
-// NodeAffinityNotIn creates a HARD node affinity (with the operator NotIn)
+// NodeAffinityNotIn creates a HARD node affinity (with MatchExpressinos and the operator NotIn)
 // and injects into the inner pod.
 func (p *PodWrapper) NodeAffinityNotIn(key string, vals []string) *PodWrapper {
 	if p.Spec.Affinity == nil {
@@ -683,6 +708,17 @@ func (p *PodWrapper) InitReq(resMap map[v1.ResourceName]string) *PodWrapper {
 	return p
 }
 
+// SidecarReq adds a new sidecar container to the inner pod with given resource map.
+func (p *PodWrapper) SidecarReq(resMap map[v1.ResourceName]string) *PodWrapper {
+	if len(resMap) == 0 {
+		return p
+	}
+
+	name := fmt.Sprintf("sidecar-con%d", len(p.Spec.InitContainers))
+	p.Spec.InitContainers = append(p.Spec.InitContainers, MakeContainer().Name(name).Image(imageutils.GetPauseImageName()).RestartPolicy(v1.ContainerRestartPolicyAlways).Resources(resMap).Obj())
+	return p
+}
+
 // PreemptionPolicy sets the give preemption policy to the inner pod.
 func (p *PodWrapper) PreemptionPolicy(policy v1.PreemptionPolicy) *PodWrapper {
 	p.Spec.PreemptionPolicy = &policy
@@ -882,21 +918,52 @@ func (p *PersistentVolumeWrapper) HostPathVolumeSource(src *v1.HostPathVolumeSou
 	return p
 }
 
+// NodeAffinityIn creates a HARD node affinity (with MatchExpressions and the operator In)
+// and injects into the pv.
+func (p *PersistentVolumeWrapper) NodeAffinityIn(key string, vals []string) *PersistentVolumeWrapper {
+	if p.Spec.NodeAffinity == nil {
+		p.Spec.NodeAffinity = &v1.VolumeNodeAffinity{}
+	}
+	if p.Spec.NodeAffinity.Required == nil {
+		p.Spec.NodeAffinity.Required = &v1.NodeSelector{}
+	}
+	nodeSelector := MakeNodeSelector().In(key, vals, NodeSelectorTypeMatchExpressions).Obj()
+	p.Spec.NodeAffinity.Required.NodeSelectorTerms = append(p.Spec.NodeAffinity.Required.NodeSelectorTerms, nodeSelector.NodeSelectorTerms...)
+	return p
+}
+
+// Labels sets all {k,v} pair provided by `labels` to the pv.
+func (p *PersistentVolumeWrapper) Labels(labels map[string]string) *PersistentVolumeWrapper {
+	for k, v := range labels {
+		p.Label(k, v)
+	}
+	return p
+}
+
+// Label sets a {k,v} pair to the pv.
+func (p *PersistentVolumeWrapper) Label(k, v string) *PersistentVolumeWrapper {
+	if p.PersistentVolume.ObjectMeta.Labels == nil {
+		p.PersistentVolume.ObjectMeta.Labels = make(map[string]string)
+	}
+	p.PersistentVolume.ObjectMeta.Labels[k] = v
+	return p
+}
+
 // ResourceClaimWrapper wraps a ResourceClaim inside.
-type ResourceClaimWrapper struct{ resourcev1alpha2.ResourceClaim }
+type ResourceClaimWrapper struct{ resourceapi.ResourceClaim }
 
 // MakeResourceClaim creates a ResourceClaim wrapper.
 func MakeResourceClaim() *ResourceClaimWrapper {
-	return &ResourceClaimWrapper{resourcev1alpha2.ResourceClaim{}}
+	return &ResourceClaimWrapper{}
 }
 
 // FromResourceClaim creates a ResourceClaim wrapper from some existing object.
-func FromResourceClaim(other *resourcev1alpha2.ResourceClaim) *ResourceClaimWrapper {
+func FromResourceClaim(other *resourceapi.ResourceClaim) *ResourceClaimWrapper {
 	return &ResourceClaimWrapper{*other.DeepCopy()}
 }
 
 // Obj returns the inner ResourceClaim.
-func (wrapper *ResourceClaimWrapper) Obj() *resourcev1alpha2.ResourceClaim {
+func (wrapper *ResourceClaimWrapper) Obj() *resourceapi.ResourceClaim {
 	return &wrapper.ResourceClaim
 }
 
@@ -932,112 +999,109 @@ func (wrapper *ResourceClaimWrapper) OwnerReference(name, uid string, gvk schema
 	return wrapper
 }
 
-// AllocationMode sets the allocation mode of the inner object.
-func (wrapper *ResourceClaimWrapper) AllocationMode(a resourcev1alpha2.AllocationMode) *ResourceClaimWrapper {
-	wrapper.ResourceClaim.Spec.AllocationMode = a
-	return wrapper
-}
-
-// ResourceClassName sets the resource class name of the inner object.
-func (wrapper *ResourceClaimWrapper) ResourceClassName(name string) *ResourceClaimWrapper {
-	wrapper.ResourceClaim.Spec.ResourceClassName = name
+// Request adds one device request for the given device class.
+func (wrapper *ResourceClaimWrapper) Request(deviceClassName string) *ResourceClaimWrapper {
+	wrapper.Spec.Devices.Requests = append(wrapper.Spec.Devices.Requests,
+		resourceapi.DeviceRequest{
+			Name: fmt.Sprintf("req-%d", len(wrapper.Spec.Devices.Requests)+1),
+			// Cannot rely on defaulting here, this is used in unit tests.
+			AllocationMode:  resourceapi.DeviceAllocationModeExactCount,
+			Count:           1,
+			DeviceClassName: deviceClassName,
+		},
+	)
 	return wrapper
 }
 
 // Allocation sets the allocation of the inner object.
-func (wrapper *ResourceClaimWrapper) Allocation(allocation *resourcev1alpha2.AllocationResult) *ResourceClaimWrapper {
+func (wrapper *ResourceClaimWrapper) Allocation(allocation *resourceapi.AllocationResult) *ResourceClaimWrapper {
+	if !slices.Contains(wrapper.ResourceClaim.Finalizers, resourceapi.Finalizer) {
+		wrapper.ResourceClaim.Finalizers = append(wrapper.ResourceClaim.Finalizers, resourceapi.Finalizer)
+	}
 	wrapper.ResourceClaim.Status.Allocation = allocation
 	return wrapper
 }
 
-// DeallocationRequested sets that field of the inner object.
-func (wrapper *ResourceClaimWrapper) DeallocationRequested(deallocationRequested bool) *ResourceClaimWrapper {
-	wrapper.ResourceClaim.Status.DeallocationRequested = deallocationRequested
+// Deleting sets the deletion timestamp of the inner object.
+func (wrapper *ResourceClaimWrapper) Deleting(time metav1.Time) *ResourceClaimWrapper {
+	wrapper.ResourceClaim.DeletionTimestamp = &time
 	return wrapper
 }
 
 // ReservedFor sets that field of the inner object.
-func (wrapper *ResourceClaimWrapper) ReservedFor(consumers ...resourcev1alpha2.ResourceClaimConsumerReference) *ResourceClaimWrapper {
+func (wrapper *ResourceClaimWrapper) ReservedFor(consumers ...resourceapi.ResourceClaimConsumerReference) *ResourceClaimWrapper {
 	wrapper.ResourceClaim.Status.ReservedFor = consumers
 	return wrapper
 }
 
-// PodSchedulingWrapper wraps a PodSchedulingContext inside.
-type PodSchedulingWrapper struct {
-	resourcev1alpha2.PodSchedulingContext
+// ReservedForPod sets that field of the inner object given information about one pod.
+func (wrapper *ResourceClaimWrapper) ReservedForPod(podName string, podUID types.UID) *ResourceClaimWrapper {
+	return wrapper.ReservedFor(resourceapi.ResourceClaimConsumerReference{Resource: "pods", Name: podName, UID: podUID})
 }
 
-// MakePodSchedulingContexts creates a PodSchedulingContext wrapper.
-func MakePodSchedulingContexts() *PodSchedulingWrapper {
-	return &PodSchedulingWrapper{resourcev1alpha2.PodSchedulingContext{}}
+type ResourceSliceWrapper struct {
+	resourceapi.ResourceSlice
 }
 
-// FromPodSchedulingContexts creates a PodSchedulingContext wrapper from an existing object.
-func FromPodSchedulingContexts(other *resourcev1alpha2.PodSchedulingContext) *PodSchedulingWrapper {
-	return &PodSchedulingWrapper{*other.DeepCopy()}
-}
-
-// Obj returns the inner object.
-func (wrapper *PodSchedulingWrapper) Obj() *resourcev1alpha2.PodSchedulingContext {
-	return &wrapper.PodSchedulingContext
-}
-
-// Name sets `s` as the name of the inner object.
-func (wrapper *PodSchedulingWrapper) Name(s string) *PodSchedulingWrapper {
-	wrapper.SetName(s)
+func MakeResourceSlice(nodeName, driverName string) *ResourceSliceWrapper {
+	wrapper := new(ResourceSliceWrapper)
+	wrapper.Name = nodeName + "-" + driverName
+	wrapper.Spec.NodeName = nodeName
+	wrapper.Spec.Pool.Name = nodeName
+	wrapper.Spec.Driver = driverName
 	return wrapper
 }
 
-// UID sets `s` as the UID of the inner object.
-func (wrapper *PodSchedulingWrapper) UID(s string) *PodSchedulingWrapper {
-	wrapper.SetUID(types.UID(s))
-	return wrapper
+// FromResourceSlice creates a ResourceSlice wrapper from some existing object.
+func FromResourceSlice(other *resourceapi.ResourceSlice) *ResourceSliceWrapper {
+	return &ResourceSliceWrapper{*other.DeepCopy()}
 }
 
-// Namespace sets `s` as the namespace of the inner object.
-func (wrapper *PodSchedulingWrapper) Namespace(s string) *PodSchedulingWrapper {
-	wrapper.SetNamespace(s)
-	return wrapper
+func (wrapper *ResourceSliceWrapper) Obj() *resourceapi.ResourceSlice {
+	return &wrapper.ResourceSlice
 }
 
-// OwnerReference updates the owning controller of the inner object.
-func (wrapper *PodSchedulingWrapper) OwnerReference(name, uid string, gvk schema.GroupVersionKind) *PodSchedulingWrapper {
-	wrapper.OwnerReferences = []metav1.OwnerReference{
-		{
-			APIVersion:         gvk.GroupVersion().String(),
-			Kind:               gvk.Kind,
-			Name:               name,
-			UID:                types.UID(uid),
-			Controller:         ptr.To(true),
-			BlockOwnerDeletion: ptr.To(true),
-		},
+// Devices sets the devices field of the inner object.
+func (wrapper *ResourceSliceWrapper) Devices(names ...string) *ResourceSliceWrapper {
+	for _, name := range names {
+		wrapper.Spec.Devices = append(wrapper.Spec.Devices, resourceapi.Device{Name: name})
 	}
 	return wrapper
 }
 
-// Label applies a {k,v} label pair to the inner object
-func (wrapper *PodSchedulingWrapper) Label(k, v string) *PodSchedulingWrapper {
-	if wrapper.Labels == nil {
-		wrapper.Labels = make(map[string]string)
-	}
-	wrapper.Labels[k] = v
+// Device sets the devices field of the inner object.
+func (wrapper *ResourceSliceWrapper) Device(name string, attrs map[resourceapi.QualifiedName]resourceapi.DeviceAttribute) *ResourceSliceWrapper {
+	wrapper.Spec.Devices = append(wrapper.Spec.Devices, resourceapi.Device{Name: name, Basic: &resourceapi.BasicDevice{Attributes: attrs}})
 	return wrapper
 }
 
-// SelectedNode sets that field of the inner object.
-func (wrapper *PodSchedulingWrapper) SelectedNode(s string) *PodSchedulingWrapper {
-	wrapper.Spec.SelectedNode = s
-	return wrapper
+// StorageClassWrapper wraps a StorageClass inside.
+type StorageClassWrapper struct{ storagev1.StorageClass }
+
+// MakeStorageClass creates a StorageClass wrapper.
+func MakeStorageClass() *StorageClassWrapper {
+	return &StorageClassWrapper{}
 }
 
-// PotentialNodes sets that field of the inner object.
-func (wrapper *PodSchedulingWrapper) PotentialNodes(nodes ...string) *PodSchedulingWrapper {
-	wrapper.Spec.PotentialNodes = nodes
-	return wrapper
+// Obj returns the inner StorageClass.
+func (s *StorageClassWrapper) Obj() *storagev1.StorageClass {
+	return &s.StorageClass
 }
 
-// ResourceClaims sets that field of the inner object.
-func (wrapper *PodSchedulingWrapper) ResourceClaims(statuses ...resourcev1alpha2.ResourceClaimSchedulingStatus) *PodSchedulingWrapper {
-	wrapper.Status.ResourceClaims = statuses
-	return wrapper
+// Name sets `n` as the name of the inner StorageClass.
+func (s *StorageClassWrapper) Name(n string) *StorageClassWrapper {
+	s.SetName(n)
+	return s
+}
+
+// VolumeBindingMode sets mode as the mode of the inner StorageClass.
+func (s *StorageClassWrapper) VolumeBindingMode(mode storagev1.VolumeBindingMode) *StorageClassWrapper {
+	s.StorageClass.VolumeBindingMode = &mode
+	return s
+}
+
+// Provisoner sets p as the provisioner of the inner StorageClass.
+func (s *StorageClassWrapper) Provisioner(p string) *StorageClassWrapper {
+	s.StorageClass.Provisioner = p
+	return s
 }

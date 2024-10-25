@@ -285,7 +285,7 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 
 func clientIPHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("GET /clientip")
-	fmt.Fprintf(w, r.RemoteAddr)
+	fmt.Fprint(w, r.RemoteAddr)
 }
 func headerHandler(w http.ResponseWriter, r *http.Request) {
 	key := r.FormValue("key")
@@ -693,7 +693,11 @@ func startSCTPServer(sctpPort int) {
 	for {
 		conn, err := listener.AcceptSCTP()
 		assertNoError(err, fmt.Sprintf("failed accepting SCTP connections"))
-		clientAddress := conn.RemoteAddr().String()
+		remoteAddr, err := conn.SCTPRemoteAddr(0)
+		if err != nil {
+			assertNoError(err, "failed to get SCTP client remote address")
+		}
+		clientAddress := remoteAddr.String()
 		n, err := conn.Read(buf)
 		assertNoError(err, fmt.Sprintf("failed to read from SCTP client %s", clientAddress))
 		receivedText := strings.ToLower(strings.TrimSpace(string(buf[0:n])))

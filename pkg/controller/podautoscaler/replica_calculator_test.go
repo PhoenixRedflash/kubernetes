@@ -355,16 +355,14 @@ func (tc *replicaCalcTestCase) runTest(t *testing.T) {
 	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
 		MatchLabels: map[string]string{"name": podNamePrefix},
 	})
-	if err != nil {
-		require.Nil(t, err, "something went horribly wrong...")
-	}
+	require.NoError(t, err, "something went horribly wrong...")
 
 	if tc.resource != nil {
 		outReplicas, outUtilization, outRawValue, outTimestamp, err := replicaCalc.GetResourceReplicas(context.TODO(), tc.currentReplicas, tc.resource.targetUtilization, tc.resource.name, testNamespace, selector, tc.container)
 
 		if tc.expectedError != nil {
 			require.Error(t, err, "there should be an error calculating the replica count")
-			assert.Contains(t, err.Error(), tc.expectedError.Error(), "the error message should have contained the expected error message")
+			assert.ErrorContains(t, err, tc.expectedError.Error(), "the error message should have contained the expected error message")
 			return
 		}
 		require.NoError(t, err, "there should not have been an error calculating the replica count")
@@ -414,7 +412,7 @@ func (tc *replicaCalcTestCase) runTest(t *testing.T) {
 
 	if tc.expectedError != nil {
 		require.Error(t, err, "there should be an error calculating the replica count")
-		assert.Contains(t, err.Error(), tc.expectedError.Error(), "the error message should have contained the expected error message")
+		assert.ErrorContains(t, err, tc.expectedError.Error(), "the error message should have contained the expected error message")
 		return
 	}
 	require.NoError(t, err, "there should not have been an error calculating the replica count")

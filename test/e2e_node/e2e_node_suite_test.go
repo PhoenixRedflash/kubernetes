@@ -28,7 +28,6 @@ import (
 	"flag"
 	"fmt"
 
-	"math/rand"
 	"os"
 	"os/exec"
 	"syscall"
@@ -41,14 +40,15 @@ import (
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	clientset "k8s.io/client-go/kubernetes"
 	cliflag "k8s.io/component-base/cli/flag"
-	"k8s.io/component-base/logs"
 	"k8s.io/kubernetes/pkg/util/rlimit"
 	commontest "k8s.io/kubernetes/test/e2e/common"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2econfig "k8s.io/kubernetes/test/e2e/framework/config"
+	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	e2etestfiles "k8s.io/kubernetes/test/e2e/framework/testfiles"
 	e2etestingmanifests "k8s.io/kubernetes/test/e2e/testing-manifests"
+	"k8s.io/kubernetes/test/e2e_node/criproxy"
 	"k8s.io/kubernetes/test/e2e_node/services"
 	e2enodetestingmanifests "k8s.io/kubernetes/test/e2e_node/testing-manifests"
 	system "k8s.io/system-validators/validators"
@@ -70,7 +70,8 @@ import (
 )
 
 var (
-	e2es *services.E2EServices
+	e2eCriProxy *criproxy.RemoteRuntime
+	e2es        *services.E2EServices
 	// featureGates is a map of feature names to bools that enable or disable alpha/experimental features.
 	featureGates map[string]bool
 	// serviceFeatureGates is a map of feature names to bools that enable or
@@ -110,6 +111,7 @@ func registerNodeFlags(flags *flag.FlagSet) {
 	flags.Var(cliflag.NewMapStringBool(&featureGates), "feature-gates", "A set of key=value pairs that describe feature gates for alpha/experimental features.")
 	flags.Var(cliflag.NewMapStringBool(&serviceFeatureGates), "service-feature-gates", "A set of key=value pairs that describe feature gates for alpha/experimental features for API service.")
 	flags.BoolVar(&framework.TestContext.StandaloneMode, "standalone-mode", false, "If true, starts kubelet in standalone mode.")
+	flags.BoolVar(&framework.TestContext.CriProxyEnabled, "cri-proxy-enabled", false, "If true, enable CRI API proxy for failure injection.")
 }
 
 func init() {
@@ -123,7 +125,6 @@ func TestMain(m *testing.M) {
 	e2econfig.CopyFlags(e2econfig.Flags, flag.CommandLine)
 	framework.RegisterCommonFlags(flag.CommandLine)
 	registerNodeFlags(flag.CommandLine)
-	logs.AddFlags(pflag.CommandLine)
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	// Mark the run-services-mode flag as hidden to prevent user from using it.
 	pflag.CommandLine.MarkHidden("run-services-mode")
@@ -133,7 +134,6 @@ func TestMain(m *testing.M) {
 	// into TestContext.
 	// TODO(pohly): remove RegisterNodeFlags from test_context.go enable Viper config support here?
 
-	rand.Seed(time.Now().UnixNano())
 	pflag.Parse()
 	if pflag.CommandLine.NArg() > 0 {
 		fmt.Fprintf(os.Stderr, "unknown additional command line arguments: %s", pflag.CommandLine.Args())
@@ -193,8 +193,12 @@ func TestE2eNode(t *testing.T) {
 				klog.Exitf("chroot %q failed: %v", rootfs, err)
 			}
 		}
-		if _, err := system.ValidateSpec(*spec, "remote"); len(err) != 0 {
-			klog.Exitf("system validation failed: %v", err)
+		warns, errs := system.ValidateSpec(*spec, "remote")
+		if len(warns) != 0 {
+			klog.Warningf("system validation warns: %v", warns)
+		}
+		if len(errs) != 0 {
+			klog.Exitf("system validation failed: %v", errs)
 		}
 		return
 	}
@@ -217,6 +221,11 @@ func TestE2eNode(t *testing.T) {
 			klog.Errorf("Failed creating report directory: %v", err)
 		}
 	}
+
+	// annotate created pods with source code location to make it easier to find tests
+	// which do insufficient cleanup and pollute the node state with lingering pods
+	e2epod.GlobalOwnerTracking = true
+
 	suiteConfig, reporterConfig := framework.CreateGinkgoConfig()
 	ginkgo.RunSpecs(t, "E2eNode Suite", suiteConfig, reporterConfig)
 }
@@ -239,6 +248,22 @@ var _ = ginkgo.SynchronizedBeforeSuite(func(ctx context.Context) []byte {
 	// by masking the locksmithd.
 	// We should mask locksmithd when provisioning the machine.
 	maskLocksmithdOnCoreos()
+
+	if framework.TestContext.CriProxyEnabled {
+		framework.Logf("Start cri proxy")
+		rs, is, err := getCRIClient()
+		framework.ExpectNoError(err)
+
+		e2eCriProxy = criproxy.NewRemoteRuntimeProxy(rs, is)
+		endpoint, err := criproxy.GenerateEndpoint()
+		framework.ExpectNoError(err)
+
+		err = e2eCriProxy.Start(endpoint)
+		framework.ExpectNoError(err)
+
+		framework.TestContext.ContainerRuntimeEndpoint = endpoint
+		framework.TestContext.ImageServiceEndpoint = endpoint
+	}
 
 	if *startServices {
 		// If the services are expected to stop after test, they should monitor the test process.
@@ -281,6 +306,11 @@ var _ = ginkgo.SynchronizedAfterSuite(func() {}, func() {
 			klog.Infof("Stopping node services...")
 			e2es.Stop()
 		}
+	}
+
+	if e2eCriProxy != nil {
+		framework.Logf("Stopping cri proxy service...")
+		e2eCriProxy.Stop()
 	}
 
 	klog.Infof("Tests Finished")

@@ -29,14 +29,11 @@ import (
 	plugincel "k8s.io/apiserver/pkg/admission/plugin/cel"
 	"k8s.io/apiserver/pkg/cel/environment"
 	"k8s.io/apiserver/pkg/cel/library"
+	"k8s.io/apiserver/pkg/features"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/kubernetes/pkg/apis/admissionregistration"
+	"k8s.io/utils/ptr"
 )
-
-func ptr[T any](v T) *T { return &v }
-
-func strPtr(s string) *string { return &s }
-
-func int32Ptr(i int32) *int32 { return &i }
 
 func newValidatingWebhookConfiguration(hooks []admissionregistration.ValidatingWebhook, defaultAdmissionReviewVersions bool) *admissionregistration.ValidatingWebhookConfiguration {
 	// If the test case did not specify an AdmissionReviewVersions, default it so the test passes as
@@ -58,7 +55,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 	noSideEffect := admissionregistration.SideEffectClassNone
 	unknownSideEffect := admissionregistration.SideEffectClassUnknown
 	validClientConfig := admissionregistration.WebhookClientConfig{
-		URL: strPtr("https://example.com"),
+		URL: ptr.To("https://example.com"),
 	}
 	tests := []struct {
 		name          string
@@ -378,7 +375,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 					Name:      "n",
 					Port:      443,
 				},
-				URL: strPtr("example.com/k8s/webhook"),
+				URL: ptr.To("example.com/k8s/webhook"),
 			},
 		},
 		}, true),
@@ -388,7 +385,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 		config: newValidatingWebhookConfiguration([]admissionregistration.ValidatingWebhook{{
 			Name: "webhook.k8s.io",
 			ClientConfig: admissionregistration.WebhookClientConfig{
-				URL: strPtr(""),
+				URL: ptr.To(""),
 			},
 		},
 		}, true),
@@ -398,7 +395,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 		config: newValidatingWebhookConfiguration([]admissionregistration.ValidatingWebhook{{
 			Name: "webhook.k8s.io",
 			ClientConfig: admissionregistration.WebhookClientConfig{
-				URL: strPtr("http://example.com"),
+				URL: ptr.To("http://example.com"),
 			},
 		},
 		}, true),
@@ -408,7 +405,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 		config: newValidatingWebhookConfiguration([]admissionregistration.ValidatingWebhook{{
 			Name: "webhook.k8s.io",
 			ClientConfig: admissionregistration.WebhookClientConfig{
-				URL: strPtr("https:///fancy/webhook"),
+				URL: ptr.To("https:///fancy/webhook"),
 			},
 		},
 		}, true),
@@ -418,7 +415,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 		config: newValidatingWebhookConfiguration([]admissionregistration.ValidatingWebhook{{
 			Name: "webhook.k8s.io",
 			ClientConfig: admissionregistration.WebhookClientConfig{
-				URL: strPtr("https://example.com/#bookmark"),
+				URL: ptr.To("https://example.com/#bookmark"),
 			},
 		},
 		}, true),
@@ -428,7 +425,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 		config: newValidatingWebhookConfiguration([]admissionregistration.ValidatingWebhook{{
 			Name: "webhook.k8s.io",
 			ClientConfig: admissionregistration.WebhookClientConfig{
-				URL: strPtr("https://example.com?arg=value"),
+				URL: ptr.To("https://example.com?arg=value"),
 			},
 		},
 		}, true),
@@ -438,7 +435,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 		config: newValidatingWebhookConfiguration([]admissionregistration.ValidatingWebhook{{
 			Name: "webhook.k8s.io",
 			ClientConfig: admissionregistration.WebhookClientConfig{
-				URL: strPtr("https://harry.potter@example.com/"),
+				URL: ptr.To("https://harry.potter@example.com/"),
 			},
 		},
 		}, true),
@@ -448,7 +445,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 		config: newValidatingWebhookConfiguration([]admissionregistration.ValidatingWebhook{{
 			Name: "webhook.k8s.io",
 			ClientConfig: admissionregistration.WebhookClientConfig{
-				URL: strPtr("arg#backwards=thisis?html.index/port:host//:https"),
+				URL: ptr.To("arg#backwards=thisis?html.index/port:host//:https"),
 			},
 		},
 		}, true),
@@ -461,7 +458,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 				Service: &admissionregistration.ServiceReference{
 					Namespace: "ns",
 					Name:      "n",
-					Path:      strPtr("foo/"),
+					Path:      ptr.To("foo/"),
 					Port:      443,
 				},
 			},
@@ -476,7 +473,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 				Service: &admissionregistration.ServiceReference{
 					Namespace: "ns",
 					Name:      "n",
-					Path:      strPtr("/"),
+					Path:      ptr.To("/"),
 					Port:      443,
 				},
 			},
@@ -492,7 +489,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 				Service: &admissionregistration.ServiceReference{
 					Namespace: "ns",
 					Name:      "n",
-					Path:      strPtr("/foo"),
+					Path:      ptr.To("/foo"),
 					Port:      443,
 				},
 			},
@@ -508,7 +505,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 				Service: &admissionregistration.ServiceReference{
 					Namespace: "ns",
 					Name:      "n",
-					Path:      strPtr("//"),
+					Path:      ptr.To("//"),
 					Port:      443,
 				},
 			},
@@ -524,7 +521,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 				Service: &admissionregistration.ServiceReference{
 					Namespace: "ns",
 					Name:      "n",
-					Path:      strPtr("/foo//bar/"),
+					Path:      ptr.To("/foo//bar/"),
 					Port:      443,
 				},
 			},
@@ -540,7 +537,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 				Service: &admissionregistration.ServiceReference{
 					Namespace: "ns",
 					Name:      "n",
-					Path:      strPtr("/foo/bar//"),
+					Path:      ptr.To("/foo/bar//"),
 					Port:      443,
 				},
 			},
@@ -556,7 +553,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 				Service: &admissionregistration.ServiceReference{
 					Namespace: "ns",
 					Name:      "n",
-					Path:      strPtr("/apis/foo.bar/v1alpha1/--bad"),
+					Path:      ptr.To("/apis/foo.bar/v1alpha1/--bad"),
 					Port:      443,
 				},
 			},
@@ -573,7 +570,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 					Service: &admissionregistration.ServiceReference{
 						Namespace: "ns",
 						Name:      "n",
-						Path:      strPtr("https://apis/foo.bar"),
+						Path:      ptr.To("https://apis/foo.bar"),
 						Port:      0,
 					},
 				},
@@ -590,7 +587,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 					Service: &admissionregistration.ServiceReference{
 						Namespace: "ns",
 						Name:      "n",
-						Path:      strPtr("https://apis/foo.bar"),
+						Path:      ptr.To("https://apis/foo.bar"),
 						Port:      65536,
 					},
 				},
@@ -604,7 +601,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 			Name:           "webhook.k8s.io",
 			ClientConfig:   validClientConfig,
 			SideEffects:    &unknownSideEffect,
-			TimeoutSeconds: int32Ptr(31),
+			TimeoutSeconds: ptr.To[int32](31),
 		},
 		}, true),
 		expectedError: `webhooks[0].timeoutSeconds: Invalid value: 31: the timeout value must be between 1 and 30 seconds`,
@@ -614,7 +611,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 			Name:           "webhook.k8s.io",
 			ClientConfig:   validClientConfig,
 			SideEffects:    &unknownSideEffect,
-			TimeoutSeconds: int32Ptr(0),
+			TimeoutSeconds: ptr.To[int32](0),
 		},
 		}, true),
 		expectedError: `webhooks[0].timeoutSeconds: Invalid value: 0: the timeout value must be between 1 and 30 seconds`,
@@ -624,7 +621,7 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 			Name:           "webhook.k8s.io",
 			ClientConfig:   validClientConfig,
 			SideEffects:    &unknownSideEffect,
-			TimeoutSeconds: int32Ptr(-1),
+			TimeoutSeconds: ptr.To[int32](-1),
 		},
 		}, true),
 		expectedError: `webhooks[0].timeoutSeconds: Invalid value: -1: the timeout value must be between 1 and 30 seconds`,
@@ -634,17 +631,17 @@ func TestValidateValidatingWebhookConfiguration(t *testing.T) {
 			Name:           "webhook.k8s.io",
 			ClientConfig:   validClientConfig,
 			SideEffects:    &noSideEffect,
-			TimeoutSeconds: int32Ptr(1),
+			TimeoutSeconds: ptr.To[int32](1),
 		}, {
 			Name:           "webhook2.k8s.io",
 			ClientConfig:   validClientConfig,
 			SideEffects:    &noSideEffect,
-			TimeoutSeconds: int32Ptr(15),
+			TimeoutSeconds: ptr.To[int32](15),
 		}, {
 			Name:           "webhook3.k8s.io",
 			ClientConfig:   validClientConfig,
 			SideEffects:    &noSideEffect,
-			TimeoutSeconds: int32Ptr(30),
+			TimeoutSeconds: ptr.To[int32](30),
 		},
 		}, true),
 	}, {
@@ -839,7 +836,7 @@ func TestValidateValidatingWebhookConfigurationUpdate(t *testing.T) {
 	noSideEffect := admissionregistration.SideEffectClassNone
 	unknownSideEffect := admissionregistration.SideEffectClassUnknown
 	validClientConfig := admissionregistration.WebhookClientConfig{
-		URL: strPtr("https://example.com"),
+		URL: ptr.To("https://example.com"),
 	}
 	tests := []struct {
 		name          string
@@ -1035,7 +1032,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 	noSideEffect := admissionregistration.SideEffectClassNone
 	unknownSideEffect := admissionregistration.SideEffectClassUnknown
 	validClientConfig := admissionregistration.WebhookClientConfig{
-		URL: strPtr("https://example.com"),
+		URL: ptr.To("https://example.com"),
 	}
 	tests := []struct {
 		name          string
@@ -1355,7 +1352,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 					Name:      "n",
 					Port:      443,
 				},
-				URL: strPtr("example.com/k8s/webhook"),
+				URL: ptr.To("example.com/k8s/webhook"),
 			},
 		},
 		}, true),
@@ -1365,7 +1362,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 		config: newMutatingWebhookConfiguration([]admissionregistration.MutatingWebhook{{
 			Name: "webhook.k8s.io",
 			ClientConfig: admissionregistration.WebhookClientConfig{
-				URL: strPtr(""),
+				URL: ptr.To(""),
 			},
 		},
 		}, true),
@@ -1375,7 +1372,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 		config: newMutatingWebhookConfiguration([]admissionregistration.MutatingWebhook{{
 			Name: "webhook.k8s.io",
 			ClientConfig: admissionregistration.WebhookClientConfig{
-				URL: strPtr("http://example.com"),
+				URL: ptr.To("http://example.com"),
 			},
 		},
 		}, true),
@@ -1385,7 +1382,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 		config: newMutatingWebhookConfiguration([]admissionregistration.MutatingWebhook{{
 			Name: "webhook.k8s.io",
 			ClientConfig: admissionregistration.WebhookClientConfig{
-				URL: strPtr("https:///fancy/webhook"),
+				URL: ptr.To("https:///fancy/webhook"),
 			},
 		},
 		}, true),
@@ -1395,7 +1392,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 		config: newMutatingWebhookConfiguration([]admissionregistration.MutatingWebhook{{
 			Name: "webhook.k8s.io",
 			ClientConfig: admissionregistration.WebhookClientConfig{
-				URL: strPtr("https://example.com/#bookmark"),
+				URL: ptr.To("https://example.com/#bookmark"),
 			},
 		},
 		}, true),
@@ -1405,7 +1402,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 		config: newMutatingWebhookConfiguration([]admissionregistration.MutatingWebhook{{
 			Name: "webhook.k8s.io",
 			ClientConfig: admissionregistration.WebhookClientConfig{
-				URL: strPtr("https://example.com?arg=value"),
+				URL: ptr.To("https://example.com?arg=value"),
 			},
 		},
 		}, true),
@@ -1415,7 +1412,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 		config: newMutatingWebhookConfiguration([]admissionregistration.MutatingWebhook{{
 			Name: "webhook.k8s.io",
 			ClientConfig: admissionregistration.WebhookClientConfig{
-				URL: strPtr("https://harry.potter@example.com/"),
+				URL: ptr.To("https://harry.potter@example.com/"),
 			},
 		},
 		}, true),
@@ -1425,7 +1422,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 		config: newMutatingWebhookConfiguration([]admissionregistration.MutatingWebhook{{
 			Name: "webhook.k8s.io",
 			ClientConfig: admissionregistration.WebhookClientConfig{
-				URL: strPtr("arg#backwards=thisis?html.index/port:host//:https"),
+				URL: ptr.To("arg#backwards=thisis?html.index/port:host//:https"),
 			},
 		},
 		}, true),
@@ -1438,7 +1435,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 				Service: &admissionregistration.ServiceReference{
 					Namespace: "ns",
 					Name:      "n",
-					Path:      strPtr("foo/"),
+					Path:      ptr.To("foo/"),
 					Port:      443,
 				},
 			},
@@ -1453,7 +1450,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 				Service: &admissionregistration.ServiceReference{
 					Namespace: "ns",
 					Name:      "n",
-					Path:      strPtr("/"),
+					Path:      ptr.To("/"),
 					Port:      443,
 				},
 			},
@@ -1469,7 +1466,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 				Service: &admissionregistration.ServiceReference{
 					Namespace: "ns",
 					Name:      "n",
-					Path:      strPtr("/foo"),
+					Path:      ptr.To("/foo"),
 					Port:      443,
 				},
 			},
@@ -1485,7 +1482,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 				Service: &admissionregistration.ServiceReference{
 					Namespace: "ns",
 					Name:      "n",
-					Path:      strPtr("//"),
+					Path:      ptr.To("//"),
 					Port:      443,
 				},
 			},
@@ -1501,7 +1498,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 				Service: &admissionregistration.ServiceReference{
 					Namespace: "ns",
 					Name:      "n",
-					Path:      strPtr("/foo//bar/"),
+					Path:      ptr.To("/foo//bar/"),
 					Port:      443,
 				},
 			},
@@ -1517,7 +1514,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 				Service: &admissionregistration.ServiceReference{
 					Namespace: "ns",
 					Name:      "n",
-					Path:      strPtr("/foo/bar//"),
+					Path:      ptr.To("/foo/bar//"),
 					Port:      443,
 				},
 			},
@@ -1533,7 +1530,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 				Service: &admissionregistration.ServiceReference{
 					Namespace: "ns",
 					Name:      "n",
-					Path:      strPtr("/apis/foo.bar/v1alpha1/--bad"),
+					Path:      ptr.To("/apis/foo.bar/v1alpha1/--bad"),
 					Port:      443,
 				},
 			},
@@ -1550,7 +1547,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 					Service: &admissionregistration.ServiceReference{
 						Namespace: "ns",
 						Name:      "n",
-						Path:      strPtr("https://apis/foo.bar"),
+						Path:      ptr.To("https://apis/foo.bar"),
 						Port:      0,
 					},
 				},
@@ -1567,7 +1564,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 					Service: &admissionregistration.ServiceReference{
 						Namespace: "ns",
 						Name:      "n",
-						Path:      strPtr("https://apis/foo.bar"),
+						Path:      ptr.To("https://apis/foo.bar"),
 						Port:      65536,
 					},
 				},
@@ -1581,7 +1578,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 			Name:           "webhook.k8s.io",
 			ClientConfig:   validClientConfig,
 			SideEffects:    &unknownSideEffect,
-			TimeoutSeconds: int32Ptr(31),
+			TimeoutSeconds: ptr.To[int32](31),
 		},
 		}, true),
 		expectedError: `webhooks[0].timeoutSeconds: Invalid value: 31: the timeout value must be between 1 and 30 seconds`,
@@ -1591,7 +1588,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 			Name:           "webhook.k8s.io",
 			ClientConfig:   validClientConfig,
 			SideEffects:    &unknownSideEffect,
-			TimeoutSeconds: int32Ptr(0),
+			TimeoutSeconds: ptr.To[int32](0),
 		},
 		}, true),
 		expectedError: `webhooks[0].timeoutSeconds: Invalid value: 0: the timeout value must be between 1 and 30 seconds`,
@@ -1601,7 +1598,7 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 			Name:           "webhook.k8s.io",
 			ClientConfig:   validClientConfig,
 			SideEffects:    &unknownSideEffect,
-			TimeoutSeconds: int32Ptr(-1),
+			TimeoutSeconds: ptr.To[int32](-1),
 		},
 		}, true),
 		expectedError: `webhooks[0].timeoutSeconds: Invalid value: -1: the timeout value must be between 1 and 30 seconds`,
@@ -1611,17 +1608,17 @@ func TestValidateMutatingWebhookConfiguration(t *testing.T) {
 			Name:           "webhook.k8s.io",
 			ClientConfig:   validClientConfig,
 			SideEffects:    &noSideEffect,
-			TimeoutSeconds: int32Ptr(1),
+			TimeoutSeconds: ptr.To[int32](1),
 		}, {
 			Name:           "webhook2.k8s.io",
 			ClientConfig:   validClientConfig,
 			SideEffects:    &noSideEffect,
-			TimeoutSeconds: int32Ptr(15),
+			TimeoutSeconds: ptr.To[int32](15),
 		}, {
 			Name:           "webhook3.k8s.io",
 			ClientConfig:   validClientConfig,
 			SideEffects:    &noSideEffect,
-			TimeoutSeconds: int32Ptr(30),
+			TimeoutSeconds: ptr.To[int32](30),
 		},
 		}, true),
 	}, {
@@ -1816,7 +1813,7 @@ func TestValidateMutatingWebhookConfigurationUpdate(t *testing.T) {
 	unknownSideEffect := admissionregistration.SideEffectClassUnknown
 	noSideEffect := admissionregistration.SideEffectClassNone
 	validClientConfig := admissionregistration.WebhookClientConfig{
-		URL: strPtr("https://example.com"),
+		URL: ptr.To("https://example.com"),
 	}
 	tests := []struct {
 		name          string
@@ -3412,8 +3409,9 @@ func TestValidateValidatingAdmissionPolicyUpdate(t *testing.T) {
 		},
 		// TODO: CustomAuditAnnotations: string valueExpression with {oldObject} is allowed
 	}
+	strictCost := utilfeature.DefaultFeatureGate.Enabled(features.StrictCostEnforcementForVAP)
 	// Include the test library, which includes the test() function in the storage environment during test
-	base := environment.MustBaseEnvSet(environment.DefaultCompatibilityVersion())
+	base := environment.MustBaseEnvSet(environment.DefaultCompatibilityVersion(), strictCost)
 	extended, err := base.Extend(environment.VersionedOptions{
 		IntroducedVersion: version.MustParseGeneric("1.999"),
 		EnvOptions:        []cel.EnvOption{library.Test()},
@@ -3421,10 +3419,19 @@ func TestValidateValidatingAdmissionPolicyUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	statelessCELCompiler = plugincel.NewCompiler(extended)
-	defer func() {
-		statelessCELCompiler = plugincel.NewCompiler(environment.MustBaseEnvSet(environment.DefaultCompatibilityVersion()))
-	}()
+	if strictCost {
+		originalCompiler := getStrictStatelessCELCompiler()
+		lazyStrictStatelessCELCompiler = plugincel.NewCompiler(extended)
+		defer func() {
+			lazyStrictStatelessCELCompiler = originalCompiler
+		}()
+	} else {
+		originalCompiler := getNonStrictStatelessCELCompiler()
+		lazyNonStrictStatelessCELCompiler = plugincel.NewCompiler(extended)
+		defer func() {
+			lazyNonStrictStatelessCELCompiler = originalCompiler
+		}()
+	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -3520,7 +3527,7 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
 					Name:                    "xyzlimit-scale-setting.example.com",
-					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+					ParameterNotFoundAction: ptr.To(admissionregistration.DenyAction),
 				},
 				MatchResources: &admissionregistration.MatchResources{
 					MatchPolicy: func() *admissionregistration.MatchPolicyType {
@@ -3541,7 +3548,7 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
 					Name:                    "xyzlimit-scale-setting.example.com",
-					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+					ParameterNotFoundAction: ptr.To(admissionregistration.DenyAction),
 				},
 				MatchResources: &admissionregistration.MatchResources{
 					ResourceRules: []admissionregistration.NamedRuleWithOperations{{
@@ -3596,7 +3603,7 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
 					Name:                    "xyzlimit-scale-setting.example.com",
-					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+					ParameterNotFoundAction: ptr.To(admissionregistration.DenyAction),
 				}, MatchResources: &admissionregistration.MatchResources{
 					ResourceRules: []admissionregistration.NamedRuleWithOperations{{
 						RuleWithOperations: admissionregistration.RuleWithOperations{
@@ -3622,7 +3629,7 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
 					Name:                    "xyzlimit-scale-setting.example.com",
-					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+					ParameterNotFoundAction: ptr.To(admissionregistration.DenyAction),
 				}, MatchResources: &admissionregistration.MatchResources{
 					ResourceRules: []admissionregistration.NamedRuleWithOperations{{
 						RuleWithOperations: admissionregistration.RuleWithOperations{
@@ -3648,7 +3655,7 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
 					Name:                    "xyzlimit-scale-setting.example.com",
-					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+					ParameterNotFoundAction: ptr.To(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{
@@ -3676,7 +3683,7 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
 					Name:                    "xyzlimit-scale-setting.example.com",
-					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+					ParameterNotFoundAction: ptr.To(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{
@@ -3713,7 +3720,7 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
 					Name:                    "xyzlimit-scale-setting.example.com",
-					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+					ParameterNotFoundAction: ptr.To(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{
@@ -3741,7 +3748,7 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
 					Name:                    "xyzlimit-scale-setting.example.com",
-					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+					ParameterNotFoundAction: ptr.To(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{
@@ -3769,7 +3776,7 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
 					Name:                    "xyzlimit-scale-setting.example.com",
-					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+					ParameterNotFoundAction: ptr.To(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{
@@ -3806,7 +3813,7 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
 					Name:                    "xyzlimit-scale-setting.example.com",
-					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+					ParameterNotFoundAction: ptr.To(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{
@@ -3834,7 +3841,7 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
 					Name:                    "xyzlimit-scale-setting.example.com",
-					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+					ParameterNotFoundAction: ptr.To(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{
@@ -3862,7 +3869,7 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
 					Name:                    "xyzlimit-scale-setting.example.com",
-					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+					ParameterNotFoundAction: ptr.To(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny, admissionregistration.Deny},
 			},
@@ -3878,7 +3885,7 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
 					Name:                    "xyzlimit-scale-setting.example.com",
-					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+					ParameterNotFoundAction: ptr.To(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.ValidationAction("illegal")},
 			},
@@ -3900,7 +3907,7 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 							"label": "value",
 						},
 					},
-					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+					ParameterNotFoundAction: ptr.To(admissionregistration.DenyAction),
 				},
 			},
 		},
@@ -3931,7 +3938,7 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				ParamRef: &admissionregistration.ParamRef{
 					Name:                    "xyzlimit-scale-setting.example.com",
-					ParameterNotFoundAction: ptr(admissionregistration.ParameterNotFoundActionType("invalid")),
+					ParameterNotFoundAction: ptr.To(admissionregistration.ParameterNotFoundActionType("invalid")),
 				},
 			},
 		},
@@ -3946,7 +3953,7 @@ func TestValidateValidatingAdmissionPolicyBinding(t *testing.T) {
 				PolicyName:        "xyzlimit-scale.example.com",
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				ParamRef: &admissionregistration.ParamRef{
-					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+					ParameterNotFoundAction: ptr.To(admissionregistration.DenyAction),
 				},
 			},
 		},
@@ -3986,7 +3993,7 @@ func TestValidateValidatingAdmissionPolicyBindingUpdate(t *testing.T) {
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
 					Name:                    "xyzlimit-scale-setting.example.com",
-					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+					ParameterNotFoundAction: ptr.To(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{
@@ -4021,7 +4028,7 @@ func TestValidateValidatingAdmissionPolicyBindingUpdate(t *testing.T) {
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
 					Name:                    "xyzlimit-scale-setting.example.com",
-					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+					ParameterNotFoundAction: ptr.To(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{
@@ -4058,7 +4065,7 @@ func TestValidateValidatingAdmissionPolicyBindingUpdate(t *testing.T) {
 				PolicyName: "xyzlimit-scale.example.com",
 				ParamRef: &admissionregistration.ParamRef{
 					Name:                    "xyzlimit-scale-setting.example.com",
-					ParameterNotFoundAction: ptr(admissionregistration.DenyAction),
+					ParameterNotFoundAction: ptr.To(admissionregistration.DenyAction),
 				},
 				ValidationActions: []admissionregistration.ValidationAction{admissionregistration.Deny},
 				MatchResources: &admissionregistration.MatchResources{

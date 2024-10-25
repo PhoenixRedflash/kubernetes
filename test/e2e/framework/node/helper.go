@@ -23,14 +23,13 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
-
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
-	testutils "k8s.io/kubernetes/test/utils"
 
 	"k8s.io/kubernetes/test/e2e/framework"
+	testutils "k8s.io/kubernetes/test/utils"
 )
 
 const (
@@ -46,10 +45,11 @@ func WaitForAllNodesSchedulable(ctx context.Context, c clientset.Interface, time
 	}
 
 	framework.Logf("Waiting up to %v for all (but %d) nodes to be schedulable", timeout, framework.TestContext.AllowedNotReadyNodes)
-	return wait.PollImmediateWithContext(
+	return wait.PollUntilContextTimeout(
 		ctx,
 		30*time.Second,
 		timeout,
+		true,
 		CheckReadyForTests(ctx, c, framework.TestContext.NonblockingTaints, framework.TestContext.AllowedNotReadyNodes, largeClusterThreshold),
 	)
 }
@@ -163,5 +163,15 @@ func taintExists(taints []v1.Taint, taintToFind *v1.Taint) bool {
 			return true
 		}
 	}
+	return false
+}
+
+// IsARM64 checks whether the k8s Node has arm64 arch.
+func IsARM64(node *v1.Node) bool {
+	arch, ok := node.Labels["kubernetes.io/arch"]
+	if ok {
+		return arch == "arm64"
+	}
+
 	return false
 }

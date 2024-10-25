@@ -37,7 +37,7 @@ API_KNOWN_VIOLATIONS_DIR="${API_KNOWN_VIOLATIONS_DIR:-"${KUBE_ROOT}/api/api-rule
 OUT_DIR="_output"
 BOILERPLATE_FILENAME="hack/boilerplate/boilerplate.generatego.txt"
 APPLYCONFIG_PKG="k8s.io/client-go/applyconfigurations"
-PLURAL_EXCEPTIONS="Endpoints:Endpoints,ResourceClaimParameters:ResourceClaimParameters,ResourceClassParameters:ResourceClassParameters"
+PLURAL_EXCEPTIONS="Endpoints:Endpoints"
 
 # Any time we call sort, we want it in the same locale.
 export LC_ALL="C"
@@ -645,6 +645,7 @@ function codegen::clients() {
         --input-base="k8s.io/api" \
         --plural-exceptions "${PLURAL_EXCEPTIONS}" \
         --apply-configuration-package "${APPLYCONFIG_PKG}" \
+        --prefers-protobuf \
         $(printf -- " --input %s" "${gv_dirs[@]}") \
         "$@"
 

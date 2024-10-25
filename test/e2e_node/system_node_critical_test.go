@@ -18,6 +18,7 @@ package e2enode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -36,7 +37,7 @@ import (
 	"github.com/onsi/gomega"
 )
 
-var _ = SIGDescribe("SystemNodeCriticalPod", framework.WithSlow(), framework.WithSerial(), framework.WithDisruptive(), nodefeature.SystemNodeCriticalPod, func() {
+var _ = SIGDescribe("SystemNodeCriticalPod", framework.WithSlow(), framework.WithSerial(), framework.WithDisruptive(), nodefeature.SystemNodeCriticalPod, nodefeature.Eviction, func() {
 	f := framework.NewDefaultFramework("system-node-critical-pod-test")
 	f.NamespacePodSecurityLevel = admissionapi.LevelPrivileged
 	// this test only manipulates pods in kube-system
@@ -90,8 +91,7 @@ var _ = SIGDescribe("SystemNodeCriticalPod", framework.WithSlow(), framework.Wit
 						return nil
 					}
 					msg := fmt.Sprintf("NodeCondition: %s not encountered yet", v1.NodeDiskPressure)
-					framework.Logf(msg)
-					return fmt.Errorf(msg)
+					return errors.New(msg)
 				}, time.Minute*2, time.Second*4).Should(gomega.Succeed())
 
 				ginkgo.By("check if it's running all the time")
@@ -100,7 +100,7 @@ var _ = SIGDescribe("SystemNodeCriticalPod", framework.WithSlow(), framework.Wit
 					if err == nil {
 						framework.Logf("mirror pod %q is running", mirrorPodName)
 					} else {
-						framework.Logf(err.Error())
+						framework.Logf("%s", err.Error())
 					}
 					return err
 				}, time.Minute*8, time.Second*4).ShouldNot(gomega.HaveOccurred())

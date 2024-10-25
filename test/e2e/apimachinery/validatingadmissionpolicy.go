@@ -367,10 +367,10 @@ var _ = SIGDescribe("ValidatingAdmissionPolicy [Privileged:ClusterAdmin]", func(
 					// If the warnings are empty, touch the policy to retry type checking
 					if len(policy.Status.TypeChecking.ExpressionWarnings) == 0 {
 						applyConfig := applyadmissionregistrationv1.ValidatingAdmissionPolicy(policy.Name).WithLabels(map[string]string{
-							"touched": time.Now().String(),
-							"random":  fmt.Sprintf("%d", rand.Int()),
+							"touched": fmt.Sprintf("a%d", time.Now().UnixMilli()),
+							"random":  fmt.Sprintf("a%d", rand.Int()),
 						})
-						_, err := client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Apply(ctx, applyConfig, metav1.ApplyOptions{})
+						_, err := client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Apply(ctx, applyConfig, metav1.ApplyOptions{FieldManager: "validatingadmissionpolicy-e2e"})
 						return false, err
 					}
 					return true, nil
@@ -403,7 +403,7 @@ var _ = SIGDescribe("ValidatingAdmissionPolicy [Privileged:ClusterAdmin]", func(
 	   The validatingadmisionpolicy resource must support create, get,
 	     list, watch, update, patch, delete, and deletecollection.
 	*/
-	ginkgo.It("should support ValidatingAdmissionPolicy API operations", func(ctx context.Context) {
+	framework.ConformanceIt("should support ValidatingAdmissionPolicy API operations", func(ctx context.Context) {
 		vapVersion := "v1"
 		ginkgo.By("getting /apis")
 		{
@@ -670,7 +670,7 @@ var _ = SIGDescribe("ValidatingAdmissionPolicy [Privileged:ClusterAdmin]", func(
 	   The ValidatingadmissionPolicyBinding resource must support create, get,
 	     list, watch, update, patch, delete, and deletecollection.
 	*/
-	ginkgo.It("should support ValidatingAdmissionPolicyBinding API operations", func(ctx context.Context) {
+	framework.ConformanceIt("should support ValidatingAdmissionPolicyBinding API operations", func(ctx context.Context) {
 		vapbVersion := "v1"
 		ginkgo.By("getting /apis")
 		{

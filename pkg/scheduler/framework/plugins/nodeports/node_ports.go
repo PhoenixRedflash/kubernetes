@@ -24,12 +24,15 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
+	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/feature"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/names"
 	"k8s.io/kubernetes/pkg/scheduler/util"
 )
 
 // NodePorts is a plugin that checks if a node has free ports for the requested pod ports.
-type NodePorts struct{}
+type NodePorts struct {
+	enableSchedulingQueueHint bool
+}
 
 var _ framework.PreFilterPlugin = &NodePorts{}
 var _ framework.FilterPlugin = &NodePorts{}
@@ -111,18 +114,24 @@ func getPreFilterState(cycleState *framework.CycleState) (preFilterState, error)
 
 // EventsToRegister returns the possible events that may make a Pod
 // failed by this plugin schedulable.
-func (pl *NodePorts) EventsToRegister() []framework.ClusterEventWithHint {
+func (pl *NodePorts) EventsToRegister(_ context.Context) ([]framework.ClusterEventWithHint, error) {
+	// A note about UpdateNodeTaint/UpdateNodeLabel event:
+	// Ideally, it's supposed to register only Add because NodeUpdated event never means to have any free ports for the Pod.
+	// But, we may miss Node/Add event due to preCheck, and we decided to register UpdateNodeTaint | UpdateNodeLabel for all plugins registering Node/Add.
+	// See: https://github.com/kubernetes/kubernetes/issues/109437
+	nodeActionType := framework.Add | framework.UpdateNodeTaint | framework.UpdateNodeLabel
+	if pl.enableSchedulingQueueHint {
+		// preCheck is not used when QHint is enabled, and hence Update event isn't necessary.
+		nodeActionType = framework.Add
+	}
+
 	return []framework.ClusterEventWithHint{
 		// Due to immutable fields `spec.containers[*].ports`, pod update events are ignored.
 		{Event: framework.ClusterEvent{Resource: framework.Pod, ActionType: framework.Delete}, QueueingHintFn: pl.isSchedulableAfterPodDeleted},
-		// TODO(#110175): Ideally, it's supposed to register only NodeCreated, because NodeUpdated event never means to have any free ports for the Pod.
-		// But, we may miss NodeCreated event due to preCheck.
-		// See: https://github.com/kubernetes/kubernetes/issues/109437
-		// And, we can remove NodeUpdated event once https://github.com/kubernetes/kubernetes/issues/110175 is solved.
 		// We don't need the QueueingHintFn here because the scheduling of Pods will be always retried with backoff when this Event happens.
 		// (the same as Queue)
-		{Event: framework.ClusterEvent{Resource: framework.Node, ActionType: framework.Add | framework.Update}},
-	}
+		{Event: framework.ClusterEvent{Resource: framework.Node, ActionType: nodeActionType}},
+	}, nil
 }
 
 // isSchedulableAfterPodDeleted is invoked whenever a pod deleted. It checks whether
@@ -135,7 +144,7 @@ func (pl *NodePorts) isSchedulableAfterPodDeleted(logger klog.Logger, pod *v1.Po
 
 	// If the deleted pod is unscheduled, it doesn't make the target pod schedulable.
 	if deletedPod.Spec.NodeName == "" {
-		logger.V(4).Info("the deleted pod is unscheduled and it doesn't make the target pod schedulable", "pod", pod, "deletedPod", deletedPod)
+		logger.V(4).Info("the deleted pod is unscheduled and it doesn't make the target pod schedulable", "pod", klog.KObj(pod), "deletedPod", klog.KObj(deletedPod))
 		return framework.QueueSkip, nil
 	}
 
@@ -159,7 +168,7 @@ func (pl *NodePorts) isSchedulableAfterPodDeleted(logger klog.Logger, pod *v1.Po
 	// So, deleting that pod couldn't make `pod` schedulable.
 	nodeInfo := framework.NodeInfo{UsedPorts: usedPorts}
 	if Fits(pod, &nodeInfo) {
-		logger.V(4).Info("the deleted pod and the target pod don't have any common port(s), returning QueueSkip as deleting this Pod won't make the Pod schedulable", "pod", pod, "deletedPod", deletedPod)
+		logger.V(4).Info("the deleted pod and the target pod don't have any common port(s), returning QueueSkip as deleting this Pod won't make the Pod schedulable", "pod", klog.KObj(pod), "deletedPod", klog.KObj(deletedPod))
 		return framework.QueueSkip, nil
 	}
 
@@ -199,6 +208,8 @@ func fitsPorts(wantPorts []*v1.ContainerPort, nodeInfo *framework.NodeInfo) bool
 }
 
 // New initializes a new plugin and returns it.
-func New(_ context.Context, _ runtime.Object, _ framework.Handle) (framework.Plugin, error) {
-	return &NodePorts{}, nil
+func New(_ context.Context, _ runtime.Object, _ framework.Handle, fts feature.Features) (framework.Plugin, error) {
+	return &NodePorts{
+		enableSchedulingQueueHint: fts.EnableSchedulingQueueHint,
+	}, nil
 }

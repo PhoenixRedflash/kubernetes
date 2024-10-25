@@ -17,11 +17,13 @@ limitations under the License.
 package benchmark
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"html/template"
+	"os"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -30,6 +32,8 @@ import (
 	"k8s.io/client-go/restmapper"
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/test/utils/ktesting"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/yaml"
 )
 
 // createAny defines an op where some object gets created from a YAML file.
@@ -40,15 +44,18 @@ type createAny struct {
 	// Namespace the object should be created in. Must be empty for cluster-scoped objects.
 	Namespace string
 	// Path to spec file describing the object to create.
+	// This will be processed with text/template.
+	// .Index will be in the range [0, Count-1] when creating
+	// more than one object. .Count is the total number of objects.
 	TemplatePath string
+	// Count determines how many objects get created. Defaults to 1 if unset.
+	Count      *int
+	CountParam string
 }
 
 var _ runnableOp = &createAny{}
 
 func (c *createAny) isValid(allowParameterization bool) error {
-	if c.Opcode != createAnyOpcode {
-		return fmt.Errorf("invalid opcode %q; expected %q", c.Opcode, createAnyOpcode)
-	}
 	if c.TemplatePath == "" {
 		return fmt.Errorf("TemplatePath must be set")
 	}
@@ -61,8 +68,15 @@ func (c *createAny) collectsMetrics() bool {
 	return false
 }
 
-func (c *createAny) patchParams(w *workload) (realOp, error) {
-	return c, c.isValid(false)
+func (c createAny) patchParams(w *workload) (realOp, error) {
+	if c.CountParam != "" {
+		count, err := w.Params.get(c.CountParam[1:])
+		if err != nil {
+			return nil, err
+		}
+		c.Count = ptr.To(count)
+	}
+	return &c, c.isValid(false)
 }
 
 func (c *createAny) requiredNamespaces() []string {
@@ -73,29 +87,30 @@ func (c *createAny) requiredNamespaces() []string {
 }
 
 func (c *createAny) run(tCtx ktesting.TContext) {
+	count := 1
+	if c.Count != nil {
+		count = *c.Count
+	}
+	for index := 0; index < count; index++ {
+		c.create(tCtx, map[string]any{"Index": index, "Count": count})
+	}
+}
+
+func (c *createAny) create(tCtx ktesting.TContext, env map[string]any) {
 	var obj *unstructured.Unstructured
-	if err := getSpecFromFile(&c.TemplatePath, &obj); err != nil {
+	if err := getSpecFromTextTemplateFile(c.TemplatePath, env, &obj); err != nil {
 		tCtx.Fatalf("%s: parsing failed: %v", c.TemplatePath, err)
 	}
 
 	// Not caching the discovery result isn't very efficient, but good enough when
 	// createAny isn't done often.
-	discoveryCache := memory.NewMemCacheClient(tCtx.Client().Discovery())
-	restMapper := restmapper.NewDeferredDiscoveryRESTMapper(discoveryCache)
-	gv, err := schema.ParseGroupVersion(obj.GetAPIVersion())
+	mapping, err := restMappingFromUnstructuredObj(tCtx, obj)
 	if err != nil {
-		tCtx.Fatalf("%s: extract group+version from object %q: %v", c.TemplatePath, klog.KObj(obj), err)
+		tCtx.Fatalf("%s: %v", c.TemplatePath, err)
 	}
-	gk := schema.GroupKind{Group: gv.Group, Kind: obj.GetKind()}
+	resourceClient := tCtx.Dynamic().Resource(mapping.Resource)
 
 	create := func() error {
-		mapping, err := restMapper.RESTMapping(gk, gv.Version)
-		if err != nil {
-			// Cached mapping might be stale, refresh on next try.
-			restMapper.Reset()
-			return fmt.Errorf("map %q to resource: %v", gk, err)
-		}
-		resourceClient := tCtx.Dynamic().Resource(mapping.Resource)
 		options := metav1.CreateOptions{
 			// If the YAML input is invalid, then we want the
 			// apiserver to tell us via an error. This can
@@ -105,26 +120,14 @@ func (c *createAny) run(tCtx ktesting.TContext) {
 		}
 		if c.Namespace != "" {
 			if mapping.Scope.Name() != meta.RESTScopeNameNamespace {
-				return fmt.Errorf("namespace %q set for %q, but %q has scope %q", c.Namespace, c.TemplatePath, gk, mapping.Scope.Name())
+				return fmt.Errorf("namespace %q set for %q, but %q has scope %q", c.Namespace, c.TemplatePath, mapping.GroupVersionKind, mapping.Scope.Name())
 			}
 			_, err = resourceClient.Namespace(c.Namespace).Create(tCtx, obj, options)
 		} else {
 			if mapping.Scope.Name() != meta.RESTScopeNameRoot {
-				return fmt.Errorf("namespace not set for %q, but %q has scope %q", c.TemplatePath, gk, mapping.Scope.Name())
+				return fmt.Errorf("namespace not set for %q, but %q has scope %q", c.TemplatePath, mapping.GroupVersionKind, mapping.Scope.Name())
 			}
 			_, err = resourceClient.Create(tCtx, obj, options)
-		}
-		if err == nil && shouldCleanup(tCtx) {
-			tCtx.CleanupCtx(func(tCtx ktesting.TContext) {
-				del := resourceClient.Delete
-				if mapping.Scope.Name() != meta.RESTScopeNameNamespace {
-					del = resourceClient.Namespace(c.Namespace).Delete
-				}
-				err := del(tCtx, obj.GetName(), metav1.DeleteOptions{})
-				if !apierrors.IsNotFound(err) {
-					tCtx.ExpectNoError(err, fmt.Sprintf("deleting %s.%s %s", obj.GetKind(), obj.GetAPIVersion(), klog.KObj(obj)))
-				}
-			})
 		}
 		return err
 	}
@@ -142,4 +145,45 @@ func (c *createAny) run(tCtx ktesting.TContext) {
 		case <-time.After(time.Second):
 		}
 	}
+}
+
+func getSpecFromTextTemplateFile(path string, env map[string]any, spec interface{}) error {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	fm := template.FuncMap{"div": func(a, b int) int {
+		return a / b
+	}}
+	modFn := template.FuncMap{"mod": func(a, b int) int {
+		return a % b
+	}}
+	tmpl, err := template.New("object").Funcs(fm).Funcs(modFn).Parse(string(content))
+	if err != nil {
+		return err
+	}
+	var buffer bytes.Buffer
+	if err := tmpl.Execute(&buffer, env); err != nil {
+		return err
+	}
+
+	return yaml.UnmarshalStrict(buffer.Bytes(), spec)
+}
+
+func restMappingFromUnstructuredObj(tCtx ktesting.TContext, obj *unstructured.Unstructured) (*meta.RESTMapping, error) {
+	discoveryCache := memory.NewMemCacheClient(tCtx.Client().Discovery())
+	restMapper := restmapper.NewDeferredDiscoveryRESTMapper(discoveryCache)
+	gv, err := schema.ParseGroupVersion(obj.GetAPIVersion())
+	if err != nil {
+		return nil, fmt.Errorf("extract group+version from object %q: %w", klog.KObj(obj), err)
+	}
+	gk := schema.GroupKind{Group: gv.Group, Kind: obj.GetKind()}
+
+	mapping, err := restMapper.RESTMapping(gk, gv.Version)
+	if err != nil {
+		// Cached mapping might be stale, refresh on next try.
+		restMapper.Reset()
+		return nil, fmt.Errorf("failed mapping %q to resource: %w", gk, err)
+	}
+	return mapping, nil
 }

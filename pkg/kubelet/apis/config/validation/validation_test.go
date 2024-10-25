@@ -29,7 +29,7 @@ import (
 	kubeletconfig "k8s.io/kubernetes/pkg/kubelet/apis/config"
 	"k8s.io/kubernetes/pkg/kubelet/apis/config/validation"
 	kubetypes "k8s.io/kubernetes/pkg/kubelet/types"
-	utilpointer "k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 )
 
 var (
@@ -66,7 +66,7 @@ var (
 		TopologyManagerPolicy:           kubeletconfig.SingleNumaNodeTopologyManagerPolicy,
 		ShutdownGracePeriod:             metav1.Duration{Duration: 30 * time.Second},
 		ShutdownGracePeriodCriticalPods: metav1.Duration{Duration: 10 * time.Second},
-		MemoryThrottlingFactor:          utilpointer.Float64(0.9),
+		MemoryThrottlingFactor:          ptr.To(0.9),
 		FeatureGates: map[string]bool{
 			"CustomCPUCFSQuotaPeriod": true,
 			"GracefulNodeShutdown":    true,
@@ -105,10 +105,10 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 		name: "specify EnforceNodeAllocatable without enabling CgroupsPerQOS",
 		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
 			conf.CgroupsPerQOS = false
-			conf.EnforceNodeAllocatable = []string{"pods"}
+			conf.EnforceNodeAllocatable = []string{kubetypes.NodeAllocatableEnforcementKey}
 			return conf
 		},
-		errMsg: "invalid configuration: enforceNodeAllocatable (--enforce-node-allocatable) is not supported unless cgroupsPerQOS (--cgroups-per-qos) is set to true",
+		errMsg: "invalid configuration: cgroupsPerQOS (--cgroups-per-qos) must be set to true when \"pods\" contained in enforceNodeAllocatable (--enforce-node-allocatable)",
 	}, {
 		name: "specify SystemCgroups without CgroupRoot",
 		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
@@ -278,14 +278,14 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 	}, {
 		name: "invalid MaxParallelImagePulls",
 		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
-			conf.MaxParallelImagePulls = utilpointer.Int32(0)
+			conf.MaxParallelImagePulls = ptr.To[int32](0)
 			return conf
 		},
 		errMsg: "invalid configuration: maxParallelImagePulls 0 must be a positive number",
 	}, {
 		name: "invalid MaxParallelImagePulls and SerializeImagePulls combination",
 		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
-			conf.MaxParallelImagePulls = utilpointer.Int32(3)
+			conf.MaxParallelImagePulls = ptr.To[int32](3)
 			conf.SerializeImagePulls = true
 			return conf
 		},
@@ -293,7 +293,7 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 	}, {
 		name: "valid MaxParallelImagePulls and SerializeImagePulls combination",
 		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
-			conf.MaxParallelImagePulls = utilpointer.Int32(1)
+			conf.MaxParallelImagePulls = ptr.To[int32](1)
 			conf.SerializeImagePulls = true
 			return conf
 		},
@@ -383,7 +383,30 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 			conf.SystemReservedCgroup = ""
 			return conf
 		},
-		errMsg: "invalid configuration: systemReservedCgroup (--system-reserved-cgroup) must be specified when \"system-reserved\" contained in enforceNodeAllocatable (--enforce-node-allocatable)",
+		errMsg: "invalid configuration: systemReservedCgroup (--system-reserved-cgroup) must be specified when \"system-reserved\" or \"system-reserved-compressible\" included in enforceNodeAllocatable (--enforce-node-allocatable)",
+	}, {
+		name: "specify SystemReservedCompressibleEnforcementKey without specifying SystemReservedCgroup",
+		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+			conf.EnforceNodeAllocatable = []string{kubetypes.SystemReservedCompressibleEnforcementKey}
+			conf.SystemReservedCgroup = ""
+			return conf
+		},
+		errMsg: "invalid configuration: systemReservedCgroup (--system-reserved-cgroup) must be specified when \"system-reserved\" or \"system-reserved-compressible\" included in enforceNodeAllocatable (--enforce-node-allocatable)",
+	}, {
+		name: "specify SystemReservedCompressibleEnforcementKey with SystemReservedEnforcementKey",
+		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+			conf.EnforceNodeAllocatable = []string{kubetypes.SystemReservedCompressibleEnforcementKey, kubetypes.SystemReservedEnforcementKey}
+			return conf
+		},
+		errMsg: "invalid configuration: both \"system-reserved\" and \"system-reserved-compressible\" cannot be specified together in enforceNodeAllocatable (--enforce-node-allocatable)",
+	}, {
+		name: "specify KubeReservedCompressibleEnforcementKey without specifying KubeReservedCgroup",
+		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+			conf.EnforceNodeAllocatable = []string{kubetypes.KubeReservedCompressibleEnforcementKey}
+			conf.KubeReservedCgroup = ""
+			return conf
+		},
+		errMsg: "invalid configuration: kubeReservedCgroup (--kube-reserved-cgroup) must be specified when \"kube-reserved\" or \"kube-reserved-compressible\" included in enforceNodeAllocatable (--enforce-node-allocatable)",
 	}, {
 		name: "specify KubeReservedEnforcementKey without specifying KubeReservedCgroup",
 		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
@@ -391,7 +414,14 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 			conf.KubeReservedCgroup = ""
 			return conf
 		},
-		errMsg: "invalid configuration: kubeReservedCgroup (--kube-reserved-cgroup) must be specified when \"kube-reserved\" contained in enforceNodeAllocatable (--enforce-node-allocatable)",
+		errMsg: "invalid configuration: kubeReservedCgroup (--kube-reserved-cgroup) must be specified when \"kube-reserved\" or \"kube-reserved-compressible\" included in enforceNodeAllocatable (--enforce-node-allocatable)",
+	}, {
+		name: "specify KubeReservedCompressibleEnforcementKey with KubeReservedEnforcementKey",
+		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+			conf.EnforceNodeAllocatable = []string{kubetypes.KubeReservedCompressibleEnforcementKey, kubetypes.KubeReservedEnforcementKey}
+			return conf
+		},
+		errMsg: "invalid configuration: both \"kube-reserved\" and \"kube-reserved-compressible\" cannot be specified together in enforceNodeAllocatable (--enforce-node-allocatable)",
 	}, {
 		name: "specify NodeAllocatableNoneKey with additional enforcements",
 		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
@@ -400,12 +430,19 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 		},
 		errMsg: "invalid configuration: enforceNodeAllocatable (--enforce-node-allocatable) may not contain additional enforcements when \"none\" is specified",
 	}, {
+		name: "duplicated EnforceNodeAllocatable",
+		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+			conf.EnforceNodeAllocatable = []string{kubetypes.NodeAllocatableNoneKey, kubetypes.NodeAllocatableNoneKey}
+			return conf
+		},
+		errMsg: "invalid configuration: duplicated enforcements \"none\" in enforceNodeAllocatable (--enforce-node-allocatable)",
+	}, {
 		name: "invalid EnforceNodeAllocatable",
 		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
 			conf.EnforceNodeAllocatable = []string{"invalid-enforce-node-allocatable"}
 			return conf
 		},
-		errMsg: "invalid configuration: option \"invalid-enforce-node-allocatable\" specified for enforceNodeAllocatable (--enforce-node-allocatable). Valid options are \"pods\", \"system-reserved\", \"kube-reserved\", or \"none\"",
+		errMsg: "invalid configuration: option \"invalid-enforce-node-allocatable\" specified for enforceNodeAllocatable (--enforce-node-allocatable). Valid options are \"pods\", \"system-reserved\", \"system-reserved-compressible\", \"kube-reserved\", \"kube-reserved-compressible\" or \"none\"",
 	}, {
 		name: "invalid HairpinMode",
 		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
@@ -447,7 +484,7 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 	}, {
 		name: "invalid MemoryThrottlingFactor",
 		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
-			conf.MemoryThrottlingFactor = utilpointer.Float64(1.1)
+			conf.MemoryThrottlingFactor = ptr.To(1.1)
 			return conf
 		},
 		errMsg: "invalid configuration: memoryThrottlingFactor 1.1 must be greater than 0 and less than or equal to 1.0",
@@ -598,6 +635,27 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 			return config
 		},
 		errMsg: `invalid configuration: pod logs path "/🧪" mut contains ASCII characters only`,
+	}, {
+		name: "invalid ContainerRuntimeEndpoint",
+		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+			conf.ContainerRuntimeEndpoint = ""
+			return conf
+		},
+		errMsg: "invalid configuration: the containerRuntimeEndpoint was not specified or empty",
+	}, {
+		name: "invalid Logging configuration",
+		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+			conf.Logging.Format = "invalid"
+			return conf
+		},
+		errMsg: "logging.format: Invalid value: \"invalid\": Unsupported log format",
+	}, {
+		name: "invalid FeatureGate",
+		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+			conf.FeatureGates["invalid"] = true
+			return conf
+		},
+		errMsg: "unrecognized feature gate: invalid",
 	},
 	}
 

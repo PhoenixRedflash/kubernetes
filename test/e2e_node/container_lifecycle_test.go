@@ -19,6 +19,7 @@ package e2enode
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -32,11 +33,15 @@ import (
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	"k8s.io/kubernetes/test/e2e/nodefeature"
 	imageutils "k8s.io/kubernetes/test/utils/image"
+	"k8s.io/utils/ptr"
 )
 
 const (
+	LivenessPrefix  = "Liveness"
 	PostStartPrefix = "PostStart"
 	PreStopPrefix   = "PreStop"
+	ReadinessPrefix = "Readiness"
+	StartupPrefix   = "Startup"
 )
 
 var containerRestartPolicyAlways = v1.ContainerRestartPolicyAlways
@@ -45,372 +50,951 @@ func prefixedName(namePrefix string, name string) string {
 	return fmt.Sprintf("%s-%s", namePrefix, name)
 }
 
+type podTerminationContainerStatus struct {
+	exitCode int32
+	reason   string
+}
+
+func expectPodTerminationContainerStatuses(statuses []v1.ContainerStatus, to map[string]podTerminationContainerStatus) {
+	ginkgo.GinkgoHelper()
+
+	if len(statuses) != len(to) {
+		ginkgo.Fail(fmt.Sprintf("mismatched lengths in pod termination container statuses. got %d, expected %d", len(statuses), len(to)))
+	}
+	for _, status := range statuses {
+		expected, ok := to[status.Name]
+		if !ok {
+			ginkgo.Fail(fmt.Sprintf("container %q not found in expected pod termination container statuses", status.Name))
+		}
+		gomega.Expect(status.State.Terminated).NotTo(gomega.BeNil())
+		gomega.Expect(status.State.Terminated.ExitCode).To(gomega.Equal(expected.exitCode))
+		gomega.Expect(status.State.Terminated.Reason).To(gomega.Equal(expected.reason))
+	}
+}
+
 var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", func() {
 	f := framework.NewDefaultFramework("containers-lifecycle-test")
+	addAfterEachForCleaningUpPods(f)
 	f.NamespacePodSecurityLevel = admissionapi.LevelPrivileged
 
-	ginkgo.It("should launch init container serially before a regular container", func() {
+	ginkgo.When("Running a pod with init containers and regular containers, restartPolicy=Never", func() {
+		ginkgo.When("A pod initializes successfully", func() {
+			ginkgo.It("should launch init container serially before a regular container", func(ctx context.Context) {
 
-		init1 := "init-1"
-		init2 := "init-2"
-		init3 := "init-3"
-		regular1 := "regular-1"
+				init1 := "init-1"
+				init2 := "init-2"
+				init3 := "init-3"
+				regular1 := "regular-1"
 
-		podSpec := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "initcontainer-test-pod",
-			},
-			Spec: v1.PodSpec{
-				RestartPolicy: v1.RestartPolicyNever,
-				InitContainers: []v1.Container{
-					{
-						Name:  init1,
-						Image: busyboxImage,
-						Command: ExecCommand(init1, execCommand{
-							Delay:    1,
-							ExitCode: 0,
-						}),
+				podSpec := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "initcontainer-test-pod",
 					},
-					{
-						Name:  init2,
-						Image: busyboxImage,
-						Command: ExecCommand(init2, execCommand{
-							Delay:    1,
-							ExitCode: 0,
-						}),
-					},
-					{
-						Name:  init3,
-						Image: busyboxImage,
-						Command: ExecCommand(init3, execCommand{
-							Delay:    1,
-							ExitCode: 0,
-						}),
-					},
-				},
-				Containers: []v1.Container{
-					{
-						Name:  regular1,
-						Image: busyboxImage,
-						Command: ExecCommand(regular1, execCommand{
-							StartDelay: 5,
-							Delay:      1,
-							ExitCode:   0,
-						}),
-						StartupProbe: &v1.Probe{
-							ProbeHandler: v1.ProbeHandler{
-								Exec: &v1.ExecAction{
-									Command: []string{
-										"test",
-										"-f",
-										"started",
+					Spec: v1.PodSpec{
+						RestartPolicy: v1.RestartPolicyNever,
+						InitContainers: []v1.Container{
+							{
+								Name:  init1,
+								Image: busyboxImage,
+								Command: ExecCommand(init1, execCommand{
+									Delay:    1,
+									ExitCode: 0,
+								}),
+							},
+							{
+								Name:  init2,
+								Image: busyboxImage,
+								Command: ExecCommand(init2, execCommand{
+									Delay:    1,
+									ExitCode: 0,
+								}),
+							},
+							{
+								Name:  init3,
+								Image: busyboxImage,
+								Command: ExecCommand(init3, execCommand{
+									Delay:    1,
+									ExitCode: 0,
+								}),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									StartDelay: 5,
+									Delay:      1,
+									ExitCode:   0,
+								}),
+								StartupProbe: &v1.Probe{
+									ProbeHandler: v1.ProbeHandler{
+										Exec: &v1.ExecAction{
+											Command: []string{
+												"test",
+												"-f",
+												"started",
+											},
+										},
 									},
 								},
 							},
 						},
 					},
-				},
-			},
-		}
+				}
 
-		preparePod(podSpec)
+				preparePod(podSpec)
 
-		/// generates an out file output like:
-		//
-		// 1682076093 4905.79 init-1 Starting 0
-		// 1682076093 4905.80 init-1 Started
-		// 1682076093 4905.80 init-1 Delaying 1
-		// 1682076094 4906.80 init-1 Exiting
-		// 1682076095 4907.70 init-2 Starting 0
-		// 1682076095 4907.71 init-2 Started
-		// 1682076095 4907.71 init-2 Delaying 1
-		// 1682076096 4908.71 init-2 Exiting
-		// 1682076097 4909.74 init-3 Starting 0
-		// 1682076097 4909.74 init-3 Started
-		// 1682076097 4909.74 init-3 Delaying 1
-		// 1682076098 4910.75 init-3 Exiting
-		// 1682076099 4911.70 regular-1 Starting 5
-		// 1682076104 4916.71 regular-1 Started
-		// 1682076104 4916.71 regular-1 Delaying 1
-		// 1682076105 4917.72 regular-1 Exiting
+				/// generates an out file output like:
+				//
+				// 1682076093 4905.79 init-1 Starting 0
+				// 1682076093 4905.80 init-1 Started
+				// 1682076093 4905.80 init-1 Delaying 1
+				// 1682076094 4906.80 init-1 Exiting
+				// 1682076095 4907.70 init-2 Starting 0
+				// 1682076095 4907.71 init-2 Started
+				// 1682076095 4907.71 init-2 Delaying 1
+				// 1682076096 4908.71 init-2 Exiting
+				// 1682076097 4909.74 init-3 Starting 0
+				// 1682076097 4909.74 init-3 Started
+				// 1682076097 4909.74 init-3 Delaying 1
+				// 1682076098 4910.75 init-3 Exiting
+				// 1682076099 4911.70 regular-1 Starting 5
+				// 1682076104 4916.71 regular-1 Started
+				// 1682076104 4916.71 regular-1 Delaying 1
+				// 1682076105 4917.72 regular-1 Exiting
 
-		client := e2epod.NewPodClient(f)
-		podSpec = client.Create(context.TODO(), podSpec)
-		ginkgo.By("Waiting for the pod to finish")
-		err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(context.TODO(), f.ClientSet, podSpec.Name, podSpec.Namespace, 1*time.Minute)
-		framework.ExpectNoError(err)
+				client := e2epod.NewPodClient(f)
+				podSpec = client.Create(ctx, podSpec)
+				ginkgo.By("Waiting for the pod to finish")
+				err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(ctx, f.ClientSet, podSpec.Name, podSpec.Namespace, 1*time.Minute)
+				framework.ExpectNoError(err)
 
-		ginkgo.By("Parsing results")
-		podSpec, err = client.Get(context.Background(), podSpec.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-		results := parseOutput(context.TODO(), f, podSpec)
+				ginkgo.By("Parsing results")
+				podSpec, err = client.Get(context.Background(), podSpec.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err)
+				results := parseOutput(ctx, f, podSpec)
 
-		// which we then use to make assertions regarding container ordering
-		ginkgo.By("Analyzing results")
-		framework.ExpectNoError(results.StartsBefore(init1, init2))
-		framework.ExpectNoError(results.ExitsBefore(init1, init2))
+				// which we then use to make assertions regarding container ordering
+				ginkgo.By("Analyzing results")
+				framework.ExpectNoError(results.StartsBefore(init1, init2))
+				framework.ExpectNoError(results.ExitsBefore(init1, init2))
 
-		framework.ExpectNoError(results.StartsBefore(init2, init3))
-		framework.ExpectNoError(results.ExitsBefore(init2, init3))
+				framework.ExpectNoError(results.StartsBefore(init2, init3))
+				framework.ExpectNoError(results.ExitsBefore(init2, init3))
 
-		framework.ExpectNoError(results.StartsBefore(init3, regular1))
-		framework.ExpectNoError(results.ExitsBefore(init3, regular1))
-	})
+				framework.ExpectNoError(results.StartsBefore(init3, regular1))
+				framework.ExpectNoError(results.ExitsBefore(init3, regular1))
+			})
+		})
 
-	ginkgo.It("should not launch regular containers if an init container fails", func() {
+		ginkgo.When("an init container fails", func() {
+			ginkgo.It("should not launch regular containers if an init container fails", func(ctx context.Context) {
 
-		init1 := "init-1"
-		regular1 := "regular-1"
+				init1 := "init-1"
+				regular1 := "regular-1"
 
-		podSpec := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "initcontainer-test-pod-failure",
-			},
-			Spec: v1.PodSpec{
-				RestartPolicy: v1.RestartPolicyNever,
-				InitContainers: []v1.Container{
-					{
-						Name:  init1,
-						Image: busyboxImage,
-						Command: ExecCommand(init1, execCommand{
-							Delay:    1,
-							ExitCode: 1,
-						}),
+				podSpec := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "initcontainer-test-pod-failure",
 					},
-				},
-				Containers: []v1.Container{
-					{
-						Name:  regular1,
-						Image: busyboxImage,
-						Command: ExecCommand(regular1, execCommand{
-							Delay:    1,
-							ExitCode: 0,
-						}),
+					Spec: v1.PodSpec{
+						RestartPolicy: v1.RestartPolicyNever,
+						InitContainers: []v1.Container{
+							{
+								Name:  init1,
+								Image: busyboxImage,
+								Command: ExecCommand(init1, execCommand{
+									Delay:    1,
+									ExitCode: 1,
+								}),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									Delay:    1,
+									ExitCode: 0,
+								}),
+							},
+						},
 					},
-				},
-			},
-		}
+				}
 
-		preparePod(podSpec)
+				preparePod(podSpec)
 
-		client := e2epod.NewPodClient(f)
-		podSpec = client.Create(context.TODO(), podSpec)
-		ginkgo.By("Waiting for the pod to fail")
-		err := e2epod.WaitForPodFailedReason(context.TODO(), f.ClientSet, podSpec, "", 1*time.Minute)
-		framework.ExpectNoError(err)
+				client := e2epod.NewPodClient(f)
+				podSpec = client.Create(ctx, podSpec)
+				ginkgo.By("Waiting for the pod to fail")
+				err := e2epod.WaitForPodFailedReason(ctx, f.ClientSet, podSpec, "", 1*time.Minute)
+				framework.ExpectNoError(err)
 
-		ginkgo.By("Parsing results")
-		podSpec, err = client.Get(context.Background(), podSpec.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-		results := parseOutput(context.TODO(), f, podSpec)
+				ginkgo.By("Parsing results")
+				podSpec, err = client.Get(context.Background(), podSpec.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err)
+				results := parseOutput(ctx, f, podSpec)
 
-		ginkgo.By("Analyzing results")
-		// init container should start and exit with an error, and the regular container should never start
-		framework.ExpectNoError(results.Starts(init1))
-		framework.ExpectNoError(results.Exits(init1))
+				ginkgo.By("Analyzing results")
+				// init container should start and exit with an error, and the regular container should never start
+				framework.ExpectNoError(results.Starts(init1))
+				framework.ExpectNoError(results.Exits(init1))
 
-		framework.ExpectNoError(results.DoesntStart(regular1))
-	})
+				framework.ExpectNoError(results.DoesntStart(regular1))
+			})
+		})
 
-	ginkgo.It("should run Init container to completion before call to PostStart of regular container", func() {
-		init1 := "init-1"
-		regular1 := "regular-1"
+		ginkgo.When("The regular container has a PostStart hook", func() {
+			ginkgo.It("should run Init container to completion before call to PostStart of regular container", func(ctx context.Context) {
+				init1 := "init-1"
+				regular1 := "regular-1"
 
-		podSpec := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "initcontainer-test-pod-with-post-start",
-			},
-			Spec: v1.PodSpec{
-				RestartPolicy: v1.RestartPolicyNever,
-				InitContainers: []v1.Container{
-					{
-						Name:  init1,
-						Image: busyboxImage,
-						Command: ExecCommand(init1, execCommand{
-							Delay:    1,
-							ExitCode: 0,
-						}),
+				podSpec := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "initcontainer-test-pod-with-post-start",
 					},
-				},
-				Containers: []v1.Container{
-					{
-						Name:  regular1,
-						Image: busyboxImage,
-						Command: ExecCommand(regular1, execCommand{
-							// Allocate sufficient time for its postStart hook
-							// to complete.
-							// Note that we've observed approximately a 2s
-							// delay before the postStart hook is called.
-							// 10s > 1s + 2s(estimated maximum delay) + other possible delays
-							Delay:    10,
-							ExitCode: 0,
-						}),
-						Lifecycle: &v1.Lifecycle{
-							PostStart: &v1.LifecycleHandler{
+					Spec: v1.PodSpec{
+						RestartPolicy: v1.RestartPolicyNever,
+						InitContainers: []v1.Container{
+							{
+								Name:  init1,
+								Image: busyboxImage,
+								Command: ExecCommand(init1, execCommand{
+									Delay:    1,
+									ExitCode: 0,
+								}),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									// Allocate sufficient time for its postStart hook
+									// to complete.
+									// Note that we've observed approximately a 2s
+									// delay before the postStart hook is called.
+									// 10s > 1s + 2s(estimated maximum delay) + other possible delays
+									Delay:    10,
+									ExitCode: 0,
+								}),
+								Lifecycle: &v1.Lifecycle{
+									PostStart: &v1.LifecycleHandler{
+										Exec: &v1.ExecAction{
+											Command: ExecCommand(prefixedName(PostStartPrefix, regular1), execCommand{
+												Delay:         1,
+												ExitCode:      0,
+												ContainerName: regular1,
+											}),
+										},
+									},
+								},
+							},
+						},
+					},
+				}
+
+				preparePod(podSpec)
+
+				client := e2epod.NewPodClient(f)
+				podSpec = client.Create(ctx, podSpec)
+				ginkgo.By("Waiting for the pod to finish")
+				err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(ctx, f.ClientSet, podSpec.Name, podSpec.Namespace, 1*time.Minute)
+				framework.ExpectNoError(err)
+
+				ginkgo.By("Parsing results")
+				podSpec, err = client.Get(context.Background(), podSpec.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err)
+				results := parseOutput(ctx, f, podSpec)
+
+				ginkgo.By("Analyzing results")
+				// init container should start and exit with an error, and the regular container should never start
+				framework.ExpectNoError(results.StartsBefore(init1, prefixedName(PostStartPrefix, regular1)))
+				framework.ExpectNoError(results.ExitsBefore(init1, prefixedName(PostStartPrefix, regular1)))
+
+				framework.ExpectNoError(results.RunTogether(regular1, prefixedName(PostStartPrefix, regular1)))
+			})
+		})
+
+		ginkgo.When("running a Pod with a failed regular container", func() {
+			ginkgo.It("should restart failing container when pod restartPolicy is Always", func(ctx context.Context) {
+
+				regular1 := "regular-1"
+
+				podSpec := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "container-must-be-restarted",
+					},
+					Spec: v1.PodSpec{
+						RestartPolicy: v1.RestartPolicyAlways,
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									Delay:    1,
+									ExitCode: 1,
+								}),
+							},
+						},
+					},
+				}
+
+				preparePod(podSpec)
+
+				client := e2epod.NewPodClient(f)
+				podSpec = client.Create(ctx, podSpec)
+				ginkgo.By("Waiting for the pod, it will not finish")
+				err := WaitForPodContainerRestartCount(ctx, f.ClientSet, podSpec.Namespace, podSpec.Name, 0, 3, 2*time.Minute)
+				framework.ExpectNoError(err)
+
+				ginkgo.By("Parsing results")
+				podSpec, err = client.Get(context.Background(), podSpec.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err)
+				results := parseOutput(ctx, f, podSpec)
+
+				ginkgo.By("Analyzing results")
+				// container must be restarted
+				framework.ExpectNoError(results.Starts(regular1))
+				framework.ExpectNoError(results.StartsBefore(regular1, regular1))
+				framework.ExpectNoError(results.ExitsBefore(regular1, regular1))
+			})
+		})
+
+		ginkgo.When("Running a pod with multiple containers and a PostStart hook", func() {
+			ginkgo.It("should not launch second container before PostStart of the first container completed", func(ctx context.Context) {
+
+				regular1 := "regular-1"
+				regular2 := "regular-2"
+
+				podSpec := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "post-start-blocks-second-container",
+					},
+					Spec: v1.PodSpec{
+						RestartPolicy: v1.RestartPolicyNever,
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									// Allocate sufficient time for its postStart hook
+									// to complete.
+									// Note that we've observed approximately a 2s
+									// delay before the postStart hook is called.
+									// 10s > 1s + 2s(estimated maximum delay) + other possible delays
+									Delay:    10,
+									ExitCode: 0,
+								}),
+								Lifecycle: &v1.Lifecycle{
+									PostStart: &v1.LifecycleHandler{
+										Exec: &v1.ExecAction{
+											Command: ExecCommand(prefixedName(PostStartPrefix, regular1), execCommand{
+												Delay:         1,
+												ExitCode:      0,
+												ContainerName: regular1,
+											}),
+										},
+									},
+								},
+							},
+							{
+								Name:  regular2,
+								Image: busyboxImage,
+								Command: ExecCommand(regular2, execCommand{
+									Delay:    1,
+									ExitCode: 0,
+								}),
+							},
+						},
+					},
+				}
+
+				preparePod(podSpec)
+
+				client := e2epod.NewPodClient(f)
+				podSpec = client.Create(ctx, podSpec)
+				ginkgo.By("Waiting for the pod to finish")
+				err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(ctx, f.ClientSet, podSpec.Name, podSpec.Namespace, 1*time.Minute)
+				framework.ExpectNoError(err)
+
+				ginkgo.By("Parsing results")
+				podSpec, err = client.Get(context.Background(), podSpec.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err)
+				results := parseOutput(ctx, f, podSpec)
+
+				ginkgo.By("Analyzing results")
+				// second container should not start before the PostStart of a first container completed
+				framework.ExpectNoError(results.StartsBefore(prefixedName(PostStartPrefix, regular1), regular2))
+				framework.ExpectNoError(results.ExitsBefore(prefixedName(PostStartPrefix, regular1), regular2))
+			})
+		})
+
+		ginkgo.When("have init container in a Pod with restartPolicy=Never", func() {
+			ginkgo.When("an init container fails to start because of a bad image", ginkgo.Ordered, func() {
+
+				init1 := "init1-1"
+				regular1 := "regular-1"
+
+				podSpec := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "bad-image",
+					},
+					Spec: v1.PodSpec{
+						RestartPolicy: v1.RestartPolicyNever,
+						InitContainers: []v1.Container{
+							{
+								Name:  init1,
+								Image: imageutils.GetE2EImage(imageutils.InvalidRegistryImage),
+								Command: ExecCommand(init1, execCommand{
+									Delay:    600,
+									ExitCode: 0,
+								}),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									Delay:    1,
+									ExitCode: 0,
+								}),
+							},
+						},
+					},
+				}
+
+				preparePod(podSpec)
+				var results containerOutputList
+
+				ginkgo.It("should mark a Pod as failed and produce log", func(ctx context.Context) {
+					client := e2epod.NewPodClient(f)
+					podSpec = client.Create(ctx, podSpec)
+
+					err := WaitForPodInitContainerToFail(ctx, f.ClientSet, podSpec.Namespace, podSpec.Name, 0, "ImagePullBackOff", f.Timeouts.PodStart)
+					framework.ExpectNoError(err)
+
+					podSpec, err = client.Get(context.Background(), podSpec.Name, metav1.GetOptions{})
+					framework.ExpectNoError(err)
+					results = parseOutput(ctx, f, podSpec)
+				})
+				ginkgo.It("should not start an init container", func() {
+					framework.ExpectNoError(results.DoesntStart(init1))
+				})
+				ginkgo.It("should not start a regular container", func() {
+					framework.ExpectNoError(results.DoesntStart(regular1))
+				})
+			})
+		})
+
+		ginkgo.When("A regular container restarts with init containers", func() {
+			ginkgo.It("shouldn't restart init containers upon regular container restart", func(ctx context.Context) {
+				init1 := "init-1"
+				init2 := "init-2"
+				init3 := "init-3"
+				regular1 := "regular-1"
+
+				podSpec := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "initcontainer-test-pod",
+					},
+					Spec: v1.PodSpec{
+						RestartPolicy: v1.RestartPolicyAlways,
+						InitContainers: []v1.Container{
+							{
+								Name:  init1,
+								Image: busyboxImage,
+								Command: ExecCommand(init1, execCommand{
+									Delay:    1,
+									ExitCode: 0,
+								}),
+							},
+							{
+								Name:  init2,
+								Image: busyboxImage,
+								Command: ExecCommand(init2, execCommand{
+									Delay:    1,
+									ExitCode: 0,
+								}),
+							},
+							{
+								Name:  init3,
+								Image: busyboxImage,
+								Command: ExecCommand(init3, execCommand{
+									Delay:    1,
+									ExitCode: 0,
+								}),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									Delay:    10,
+									ExitCode: -1,
+								}),
+							},
+						},
+					},
+				}
+
+				preparePod(podSpec)
+
+				client := e2epod.NewPodClient(f)
+				podSpec = client.Create(ctx, podSpec)
+				ginkgo.By("Waiting for the pod to restart a few times")
+				err := WaitForPodContainerRestartCount(ctx, f.ClientSet, podSpec.Namespace, podSpec.Name, 0, 3, 2*time.Minute)
+				framework.ExpectNoError(err)
+
+				ginkgo.By("Parsing results")
+				podSpec, err = client.Get(context.Background(), podSpec.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err)
+				results := parseOutput(ctx, f, podSpec)
+
+				ginkgo.By("Analyzing results")
+				framework.ExpectNoError(results.StartsBefore(init1, init2))
+				framework.ExpectNoError(results.ExitsBefore(init1, init2))
+
+				framework.ExpectNoError(results.StartsBefore(init2, init3))
+				framework.ExpectNoError(results.ExitsBefore(init2, init3))
+
+				framework.ExpectNoError(results.StartsBefore(init3, regular1))
+				framework.ExpectNoError(results.ExitsBefore(init3, regular1))
+
+				// ensure that the init containers never restarted
+				framework.ExpectNoError(results.HasNotRestarted(init1))
+				framework.ExpectNoError(results.HasNotRestarted(init2))
+				framework.ExpectNoError(results.HasNotRestarted(init3))
+				// while the regular container did
+				framework.ExpectNoError(results.HasRestarted(regular1))
+			})
+		})
+
+		ginkgo.When("a pod cannot terminate gracefully", func() {
+			testPod := func(name string, gracePeriod int64) *v1.Pod {
+				return &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: name,
+					},
+					Spec: v1.PodSpec{
+						Containers: []v1.Container{
+							{
+								Name:  "busybox",
+								Image: imageutils.GetE2EImage(imageutils.BusyBox),
+								Command: []string{
+									"sleep",
+									"10000",
+								},
+							},
+						},
+						TerminationGracePeriodSeconds: &gracePeriod,
+					},
+				}
+			}
+
+			// To account for the time it takes to delete the pod, we add a buffer. Its sized
+			// so that we allow up to 2x the grace time to delete the pod. Its extra large to
+			// reduce test flakes.
+			bufferSeconds := int64(30)
+
+			f.It("should respect termination grace period seconds", f.WithNodeConformance(), func(ctx context.Context) {
+				client := e2epod.NewPodClient(f)
+				gracePeriod := int64(30)
+
+				ginkgo.By("creating a pod with a termination grace period seconds")
+				pod := testPod("pod-termination-grace-period", gracePeriod)
+				pod = client.Create(ctx, pod)
+
+				ginkgo.By("ensuring the pod is running")
+				err := e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, pod)
+				framework.ExpectNoError(err)
+
+				ginkgo.By("deleting the pod gracefully")
+				err = client.Delete(ctx, pod.Name, metav1.DeleteOptions{})
+				framework.ExpectNoError(err)
+
+				ginkgo.By("ensuring the pod is terminated within the grace period seconds + buffer seconds")
+				err = e2epod.WaitForPodNotFoundInNamespace(ctx, f.ClientSet, pod.Name, pod.Namespace, time.Duration(gracePeriod+bufferSeconds)*time.Second)
+				framework.ExpectNoError(err)
+			})
+
+			f.It("should respect termination grace period seconds with long-running preStop hook", f.WithNodeConformance(), func(ctx context.Context) {
+				client := e2epod.NewPodClient(f)
+				gracePeriod := int64(30)
+
+				ginkgo.By("creating a pod with a termination grace period seconds and long-running preStop hook")
+				pod := testPod("pod-termination-grace-period", gracePeriod)
+				pod.Spec.Containers[0].Lifecycle = &v1.Lifecycle{
+					PreStop: &v1.LifecycleHandler{
+						Exec: &v1.ExecAction{
+							Command: []string{
+								"sleep",
+								"10000",
+							},
+						},
+					},
+				}
+				pod = client.Create(ctx, pod)
+
+				ginkgo.By("ensuring the pod is running")
+				err := e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, pod)
+				framework.ExpectNoError(err)
+
+				ginkgo.By("deleting the pod gracefully")
+				err = client.Delete(ctx, pod.Name, metav1.DeleteOptions{})
+				framework.ExpectNoError(err)
+
+				ginkgo.By("ensuring the pod is terminated within the grace period seconds + buffer seconds")
+				err = e2epod.WaitForPodNotFoundInNamespace(ctx, f.ClientSet, pod.Name, pod.Namespace, time.Duration(gracePeriod+bufferSeconds)*time.Second)
+				framework.ExpectNoError(err)
+			})
+		})
+
+		ginkgo.When("A regular container has a PreStop hook", func() {
+			ginkgo.When("A regular container fails a startup probe", func() {
+				ginkgo.It("should call the container's preStop hook and terminate it if its startup probe fails", func(ctx context.Context) {
+					regular1 := "regular-1"
+
+					podSpec := &v1.Pod{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "test-pod",
+						},
+						Spec: v1.PodSpec{
+							RestartPolicy: v1.RestartPolicyNever,
+							Containers: []v1.Container{
+								{
+									Name:  regular1,
+									Image: busyboxImage,
+									Command: ExecCommand(regular1, execCommand{
+										Delay:              100,
+										TerminationSeconds: 15,
+										ExitCode:           0,
+									}),
+									StartupProbe: &v1.Probe{
+										ProbeHandler: v1.ProbeHandler{
+											Exec: &v1.ExecAction{
+												Command: []string{
+													"sh",
+													"-c",
+													"exit 1",
+												},
+											},
+										},
+										InitialDelaySeconds: 10,
+										FailureThreshold:    1,
+									},
+									Lifecycle: &v1.Lifecycle{
+										PreStop: &v1.LifecycleHandler{
+											Exec: &v1.ExecAction{
+												Command: ExecCommand(prefixedName(PreStopPrefix, regular1), execCommand{
+													Delay:         1,
+													ExitCode:      0,
+													ContainerName: regular1,
+												}),
+											},
+										},
+									},
+								},
+							},
+						},
+					}
+
+					preparePod(podSpec)
+
+					client := e2epod.NewPodClient(f)
+					podSpec = client.Create(ctx, podSpec)
+
+					ginkgo.By("Waiting for the pod to complete")
+					err := e2epod.WaitForPodNoLongerRunningInNamespace(ctx, f.ClientSet, podSpec.Name, podSpec.Namespace)
+					framework.ExpectNoError(err)
+
+					ginkgo.By("Parsing results")
+					podSpec, err = client.Get(ctx, podSpec.Name, metav1.GetOptions{})
+					framework.ExpectNoError(err)
+					results := parseOutput(ctx, f, podSpec)
+
+					ginkgo.By("Analyzing results")
+					framework.ExpectNoError(results.RunTogether(regular1, prefixedName(PreStopPrefix, regular1)))
+					framework.ExpectNoError(results.Starts(prefixedName(PreStopPrefix, regular1)))
+					framework.ExpectNoError(results.Exits(regular1))
+				})
+			})
+
+			ginkgo.When("A regular container fails a liveness probe", func() {
+				ginkgo.It("should call the container's preStop hook and terminate it if its liveness probe fails", func(ctx context.Context) {
+					regular1 := "regular-1"
+
+					podSpec := &v1.Pod{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "test-pod",
+						},
+						Spec: v1.PodSpec{
+							RestartPolicy: v1.RestartPolicyNever,
+							Containers: []v1.Container{
+								{
+									Name:  regular1,
+									Image: busyboxImage,
+									Command: ExecCommand(regular1, execCommand{
+										Delay:              100,
+										TerminationSeconds: 15,
+										ExitCode:           0,
+									}),
+									LivenessProbe: &v1.Probe{
+										ProbeHandler: v1.ProbeHandler{
+											Exec: &v1.ExecAction{
+												Command: []string{
+													"sh",
+													"-c",
+													"exit 1",
+												},
+											},
+										},
+										InitialDelaySeconds: 10,
+										FailureThreshold:    1,
+									},
+									Lifecycle: &v1.Lifecycle{
+										PreStop: &v1.LifecycleHandler{
+											Exec: &v1.ExecAction{
+												Command: ExecCommand(prefixedName(PreStopPrefix, regular1), execCommand{
+													Delay:         1,
+													ExitCode:      0,
+													ContainerName: regular1,
+												}),
+											},
+										},
+									},
+								},
+							},
+						},
+					}
+
+					preparePod(podSpec)
+
+					client := e2epod.NewPodClient(f)
+					podSpec = client.Create(ctx, podSpec)
+
+					ginkgo.By("Waiting for the pod to complete")
+					err := e2epod.WaitForPodNoLongerRunningInNamespace(ctx, f.ClientSet, podSpec.Name, podSpec.Namespace)
+					framework.ExpectNoError(err)
+
+					ginkgo.By("Parsing results")
+					podSpec, err = client.Get(ctx, podSpec.Name, metav1.GetOptions{})
+					framework.ExpectNoError(err)
+					results := parseOutput(ctx, f, podSpec)
+
+					ginkgo.By("Analyzing results")
+					framework.ExpectNoError(results.RunTogether(regular1, prefixedName(PreStopPrefix, regular1)))
+					framework.ExpectNoError(results.Starts(prefixedName(PreStopPrefix, regular1)))
+					framework.ExpectNoError(results.Exits(regular1))
+				})
+
+				ginkgo.When("a pod is terminating because its liveness probe fails", func() {
+					regular1 := "regular-1"
+
+					testPod := func() *v1.Pod {
+						return &v1.Pod{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "test-pod",
+							},
+							Spec: v1.PodSpec{
+								RestartPolicy:                 v1.RestartPolicyNever,
+								TerminationGracePeriodSeconds: ptr.To(int64(100)),
+								Containers: []v1.Container{
+									{
+										Name:  regular1,
+										Image: imageutils.GetE2EImage(imageutils.BusyBox),
+										Command: ExecCommand(regular1, execCommand{
+											Delay:              100,
+											TerminationSeconds: 15,
+											ExitCode:           0,
+										}),
+										LivenessProbe: &v1.Probe{
+											ProbeHandler: v1.ProbeHandler{
+												Exec: &v1.ExecAction{
+													Command: ExecCommand(prefixedName(LivenessPrefix, regular1), execCommand{
+														ExitCode:      1,
+														ContainerName: regular1,
+													}),
+												},
+											},
+											InitialDelaySeconds: 10,
+											PeriodSeconds:       1,
+											FailureThreshold:    1,
+										},
+									},
+								},
+							},
+						}
+					}
+
+					f.It("should execute readiness probe while in preStop, but not liveness", f.WithNodeConformance(), func(ctx context.Context) {
+						client := e2epod.NewPodClient(f)
+						podSpec := testPod()
+
+						ginkgo.By("creating a pod with a readiness probe and a preStop hook")
+						podSpec.Spec.Containers[0].Lifecycle = &v1.Lifecycle{
+							PreStop: &v1.LifecycleHandler{
 								Exec: &v1.ExecAction{
-									Command: ExecCommand(prefixedName(PostStartPrefix, regular1), execCommand{
-										Delay:         1,
+									Command: ExecCommand(prefixedName(PreStopPrefix, regular1), execCommand{
+										Delay:         10,
 										ExitCode:      0,
 										ContainerName: regular1,
 									}),
 								},
 							},
-						},
-					},
-				},
-			},
-		}
-
-		preparePod(podSpec)
-
-		client := e2epod.NewPodClient(f)
-		podSpec = client.Create(context.TODO(), podSpec)
-		ginkgo.By("Waiting for the pod to finish")
-		err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(context.TODO(), f.ClientSet, podSpec.Name, podSpec.Namespace, 1*time.Minute)
-		framework.ExpectNoError(err)
-
-		ginkgo.By("Parsing results")
-		podSpec, err = client.Get(context.Background(), podSpec.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-		results := parseOutput(context.TODO(), f, podSpec)
-
-		ginkgo.By("Analyzing results")
-		// init container should start and exit with an error, and the regular container should never start
-		framework.ExpectNoError(results.StartsBefore(init1, prefixedName(PostStartPrefix, regular1)))
-		framework.ExpectNoError(results.ExitsBefore(init1, prefixedName(PostStartPrefix, regular1)))
-
-		framework.ExpectNoError(results.RunTogether(regular1, prefixedName(PostStartPrefix, regular1)))
-	})
-
-	ginkgo.It("should restart failing container when pod restartPolicy is Always", func() {
-
-		regular1 := "regular-1"
-
-		podSpec := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "container-must-be-restarted",
-			},
-			Spec: v1.PodSpec{
-				RestartPolicy: v1.RestartPolicyAlways,
-				Containers: []v1.Container{
-					{
-						Name:  regular1,
-						Image: busyboxImage,
-						Command: ExecCommand(regular1, execCommand{
-							Delay:    1,
-							ExitCode: 1,
-						}),
-					},
-				},
-			},
-		}
-
-		preparePod(podSpec)
-
-		client := e2epod.NewPodClient(f)
-		podSpec = client.Create(context.TODO(), podSpec)
-		ginkgo.By("Waiting for the pod, it will not finish")
-		err := WaitForPodContainerRestartCount(context.TODO(), f.ClientSet, podSpec.Namespace, podSpec.Name, 0, 3, 2*time.Minute)
-		framework.ExpectNoError(err)
-
-		ginkgo.By("Parsing results")
-		podSpec, err = client.Get(context.Background(), podSpec.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-		results := parseOutput(context.TODO(), f, podSpec)
-
-		ginkgo.By("Analyzing results")
-		// container must be restarted
-		framework.ExpectNoError(results.Starts(regular1))
-		framework.ExpectNoError(results.StartsBefore(regular1, regular1))
-		framework.ExpectNoError(results.ExitsBefore(regular1, regular1))
-	})
-
-	ginkgo.It("should not launch second container before PostStart of the first container completed", func() {
-
-		regular1 := "regular-1"
-		regular2 := "regular-2"
-
-		podSpec := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "post-start-blocks-second-container",
-			},
-			Spec: v1.PodSpec{
-				RestartPolicy: v1.RestartPolicyNever,
-				Containers: []v1.Container{
-					{
-						Name:  regular1,
-						Image: busyboxImage,
-						Command: ExecCommand(regular1, execCommand{
-							// Allocate sufficient time for its postStart hook
-							// to complete.
-							// Note that we've observed approximately a 2s
-							// delay before the postStart hook is called.
-							// 10s > 1s + 2s(estimated maximum delay) + other possible delays
-							Delay:    10,
-							ExitCode: 0,
-						}),
-						Lifecycle: &v1.Lifecycle{
-							PostStart: &v1.LifecycleHandler{
+						}
+						podSpec.Spec.Containers[0].ReadinessProbe = &v1.Probe{
+							ProbeHandler: v1.ProbeHandler{
 								Exec: &v1.ExecAction{
-									Command: ExecCommand(prefixedName(PostStartPrefix, regular1), execCommand{
-										Delay:         1,
+									Command: ExecCommand(prefixedName(ReadinessPrefix, regular1), execCommand{
 										ExitCode:      0,
 										ContainerName: regular1,
 									}),
 								},
 							},
-						},
-					},
-					{
-						Name:  regular2,
-						Image: busyboxImage,
-						Command: ExecCommand(regular2, execCommand{
-							Delay:    1,
-							ExitCode: 0,
-						}),
-					},
-				},
-			},
-		}
+							InitialDelaySeconds: 1,
+							PeriodSeconds:       1,
+						}
 
-		preparePod(podSpec)
+						preparePod(podSpec)
 
-		client := e2epod.NewPodClient(f)
-		podSpec = client.Create(context.TODO(), podSpec)
-		ginkgo.By("Waiting for the pod to finish")
-		err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(context.TODO(), f.ClientSet, podSpec.Name, podSpec.Namespace, 1*time.Minute)
-		framework.ExpectNoError(err)
+						podSpec = client.Create(ctx, podSpec)
 
-		ginkgo.By("Parsing results")
-		podSpec, err = client.Get(context.Background(), podSpec.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-		results := parseOutput(context.TODO(), f, podSpec)
+						ginkgo.By("Waiting for the pod to complete")
+						err := e2epod.WaitForPodNoLongerRunningInNamespace(ctx, f.ClientSet, podSpec.Name, podSpec.Namespace)
+						framework.ExpectNoError(err)
 
-		ginkgo.By("Analyzing results")
-		// second container should not start before the PostStart of a first container completed
-		framework.ExpectNoError(results.StartsBefore(prefixedName(PostStartPrefix, regular1), regular2))
-		framework.ExpectNoError(results.ExitsBefore(prefixedName(PostStartPrefix, regular1), regular2))
+						ginkgo.By("Parsing results")
+						podSpec, err = client.Get(ctx, podSpec.Name, metav1.GetOptions{})
+						framework.ExpectNoError(err)
+						results := parseOutput(ctx, f, podSpec)
+
+						ginkgo.By("Analyzing results")
+						// readiness probes are called during pod termination
+						framework.ExpectNoError(results.RunTogetherLhsFirst(prefixedName(PreStopPrefix, regular1), prefixedName(ReadinessPrefix, regular1)))
+						// liveness probes are not called during pod termination
+						err = results.RunTogetherLhsFirst(prefixedName(PreStopPrefix, regular1), prefixedName(LivenessPrefix, regular1))
+						gomega.Expect(err).To(gomega.HaveOccurred())
+					})
+
+					f.It("should continue running liveness probes for restartable init containers and restart them while in preStop", f.WithNodeConformance(), func(ctx context.Context) {
+						client := e2epod.NewPodClient(f)
+						podSpec := testPod()
+						restartableInit1 := "restartable-init-1"
+
+						ginkgo.By("creating a pod with a restartable init container and a preStop hook")
+						podSpec.Spec.InitContainers = []v1.Container{{
+							RestartPolicy: &containerRestartPolicyAlways,
+							Name:          restartableInit1,
+							Image:         imageutils.GetE2EImage(imageutils.BusyBox),
+							Command: ExecCommand(restartableInit1, execCommand{
+								Delay:              100,
+								TerminationSeconds: 1,
+								ExitCode:           0,
+							}),
+							LivenessProbe: &v1.Probe{
+								ProbeHandler: v1.ProbeHandler{
+									Exec: &v1.ExecAction{
+										Command: ExecCommand(prefixedName(LivenessPrefix, restartableInit1), execCommand{
+											ExitCode:      1,
+											ContainerName: restartableInit1,
+										}),
+									},
+								},
+								InitialDelaySeconds: 1,
+								PeriodSeconds:       1,
+								FailureThreshold:    1,
+							},
+						}}
+						podSpec.Spec.Containers[0].Lifecycle = &v1.Lifecycle{
+							PreStop: &v1.LifecycleHandler{
+								Exec: &v1.ExecAction{
+									Command: ExecCommand(prefixedName(PreStopPrefix, regular1), execCommand{
+										Delay:         40,
+										ExitCode:      0,
+										ContainerName: regular1,
+									}),
+								},
+							},
+						}
+
+						preparePod(podSpec)
+
+						podSpec = client.Create(ctx, podSpec)
+
+						ginkgo.By("Waiting for the pod to complete")
+						err := e2epod.WaitForPodNoLongerRunningInNamespace(ctx, f.ClientSet, podSpec.Name, podSpec.Namespace)
+						framework.ExpectNoError(err)
+
+						ginkgo.By("Parsing results")
+						podSpec, err = client.Get(ctx, podSpec.Name, metav1.GetOptions{})
+						framework.ExpectNoError(err)
+						results := parseOutput(ctx, f, podSpec)
+
+						ginkgo.By("Analyzing results")
+						// FIXME ExpectNoError: this will be implemented in KEP 4438
+						// liveness probes are called for restartable init containers during pod termination
+						err = results.RunTogetherLhsFirst(prefixedName(PreStopPrefix, regular1), prefixedName(LivenessPrefix, restartableInit1))
+						gomega.Expect(err).To(gomega.HaveOccurred())
+						// FIXME ExpectNoError: this will be implemented in KEP 4438
+						// restartable init containers are restarted during pod termination
+						err = results.RunTogetherLhsFirst(prefixedName(PreStopPrefix, regular1), restartableInit1)
+						gomega.Expect(err).To(gomega.HaveOccurred())
+					})
+				})
+			})
+		})
 	})
+})
 
-	ginkgo.When("have init container in a Pod with restartPolicy=Never", func() {
+var _ = SIGDescribe(framework.WithSerial(), "Containers Lifecycle", func() {
+	f := framework.NewDefaultFramework("containers-lifecycle-test-serial")
+	addAfterEachForCleaningUpPods(f)
+	f.NamespacePodSecurityLevel = admissionapi.LevelPrivileged
 
-		ginkgo.When("an init container fails to start because of a bad image", ginkgo.Ordered, func() {
-
-			init1 := "init1-1"
+	ginkgo.When("A node reboots", func() {
+		ginkgo.It("should restart the containers in right order after the node reboot", func(ctx context.Context) {
+			init1 := "init-1"
+			init2 := "init-2"
+			init3 := "init-3"
 			regular1 := "regular-1"
 
-			podSpec := &v1.Pod{
+			podLabels := map[string]string{
+				"test":      "containers-lifecycle-test-serial",
+				"namespace": f.Namespace.Name,
+			}
+			pod := &v1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "bad-image",
+					Name:   "initialized-pod",
+					Labels: podLabels,
 				},
 				Spec: v1.PodSpec{
-					RestartPolicy: v1.RestartPolicyNever,
+					RestartPolicy: v1.RestartPolicyAlways,
 					InitContainers: []v1.Container{
 						{
 							Name:  init1,
-							Image: imageutils.GetE2EImage(imageutils.InvalidRegistryImage),
+							Image: busyboxImage,
 							Command: ExecCommand(init1, execCommand{
-								Delay:    600,
+								Delay:    5,
+								ExitCode: 0,
+							}),
+						},
+						{
+							Name:  init2,
+							Image: busyboxImage,
+							Command: ExecCommand(init2, execCommand{
+								Delay:    5,
+								ExitCode: 0,
+							}),
+						},
+						{
+							Name:  init3,
+							Image: busyboxImage,
+							Command: ExecCommand(init3, execCommand{
+								Delay:    5,
 								ExitCode: 0,
 							}),
 						},
@@ -420,477 +1004,451 @@ var _ = SIGDescribe(framework.WithNodeConformance(), "Containers Lifecycle", fun
 							Name:  regular1,
 							Image: busyboxImage,
 							Command: ExecCommand(regular1, execCommand{
-								Delay:    1,
+								Delay:    30,
 								ExitCode: 0,
 							}),
 						},
 					},
 				},
 			}
+			preparePod(pod)
 
-			preparePod(podSpec)
-			var results containerOutputList
+			client := e2epod.NewPodClient(f)
+			pod = client.Create(ctx, pod)
+			ginkgo.By("Waiting for the pod to be initialized and run")
+			err := e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, pod)
+			framework.ExpectNoError(err)
 
-			ginkgo.It("should mark a Pod as failed and produce log", func() {
-				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+			ginkgo.By("Getting the current pod sandbox ID")
+			rs, _, err := getCRIClient()
+			framework.ExpectNoError(err)
 
-				err := WaitForPodInitContainerToFail(context.TODO(), f.ClientSet, podSpec.Namespace, podSpec.Name, 0, "ImagePullBackOff", f.Timeouts.PodStart)
+			sandboxes, err := rs.ListPodSandbox(ctx, &runtimeapi.PodSandboxFilter{
+				LabelSelector: podLabels,
+			})
+			framework.ExpectNoError(err)
+			gomega.Expect(sandboxes).To(gomega.HaveLen(1))
+			podSandboxID := sandboxes[0].Id
+
+			ginkgo.By("Stopping the kubelet")
+			restartKubelet := stopKubelet()
+			gomega.Eventually(ctx, func() bool {
+				return kubeletHealthCheck(kubeletHealthCheckURL)
+			}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeFalseBecause("kubelet was expected to be stopped but it is still running"))
+
+			ginkgo.By("Stopping the pod sandbox to simulate the node reboot")
+			err = rs.StopPodSandbox(ctx, podSandboxID)
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Restarting the kubelet")
+			restartKubelet()
+			gomega.Eventually(ctx, func() bool {
+				return kubeletHealthCheck(kubeletHealthCheckURL)
+			}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeTrueBecause("kubelet was expected to be healthy"))
+
+			ginkgo.By("Waiting for the pod to be re-initialized and run")
+			err = e2epod.WaitForPodCondition(ctx, f.ClientSet, pod.Namespace, pod.Name, "re-initialized", f.Timeouts.PodStart, func(pod *v1.Pod) (bool, error) {
+				if pod.Status.ContainerStatuses[0].RestartCount < 2 {
+					return false, nil
+				}
+				if pod.Status.Phase != v1.PodRunning {
+					return false, nil
+				}
+				return true, nil
+			})
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Parsing results")
+			pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+			framework.ExpectNoError(err)
+			results := parseOutput(ctx, f, pod)
+
+			ginkgo.By("Analyzing results")
+			init1Started, err := results.FindIndex(init1, "Started", 0)
+			framework.ExpectNoError(err)
+			init2Started, err := results.FindIndex(init2, "Started", 0)
+			framework.ExpectNoError(err)
+			init3Started, err := results.FindIndex(init3, "Started", 0)
+			framework.ExpectNoError(err)
+			regular1Started, err := results.FindIndex(regular1, "Started", 0)
+			framework.ExpectNoError(err)
+
+			init1Restarted, err := results.FindIndex(init1, "Started", init1Started+1)
+			framework.ExpectNoError(err)
+			init2Restarted, err := results.FindIndex(init2, "Started", init2Started+1)
+			framework.ExpectNoError(err)
+			init3Restarted, err := results.FindIndex(init3, "Started", init3Started+1)
+			framework.ExpectNoError(err)
+			regular1Restarted, err := results.FindIndex(regular1, "Started", regular1Started+1)
+			framework.ExpectNoError(err)
+
+			framework.ExpectNoError(init1Started.IsBefore(init2Started))
+			framework.ExpectNoError(init2Started.IsBefore(init3Started))
+			framework.ExpectNoError(init3Started.IsBefore(regular1Started))
+
+			framework.ExpectNoError(init1Restarted.IsBefore(init2Restarted))
+			framework.ExpectNoError(init2Restarted.IsBefore(init3Restarted))
+			framework.ExpectNoError(init3Restarted.IsBefore(regular1Restarted))
+		})
+	})
+
+	ginkgo.When("The kubelet restarts", func() {
+		ginkgo.When("a Pod is initialized and running", func() {
+			var client *e2epod.PodClient
+			var err error
+			var pod *v1.Pod
+			init1 := "init-1"
+			init2 := "init-2"
+			init3 := "init-3"
+			regular1 := "regular-1"
+
+			ginkgo.BeforeEach(func(ctx context.Context) {
+				pod = &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "initialized-pod",
+					},
+					Spec: v1.PodSpec{
+						RestartPolicy: v1.RestartPolicyAlways,
+						InitContainers: []v1.Container{
+							{
+								Name:  init1,
+								Image: busyboxImage,
+								Command: ExecCommand(init1, execCommand{
+									Delay:    1,
+									ExitCode: 0,
+								}),
+							},
+							{
+								Name:  init2,
+								Image: busyboxImage,
+								Command: ExecCommand(init2, execCommand{
+									Delay:    1,
+									ExitCode: 0,
+								}),
+							},
+							{
+								Name:  init3,
+								Image: busyboxImage,
+								Command: ExecCommand(init3, execCommand{
+									Delay:    1,
+									ExitCode: 0,
+								}),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									Delay:    300,
+									ExitCode: 0,
+								}),
+							},
+						},
+					},
+				}
+				preparePod(pod)
+
+				client = e2epod.NewPodClient(f)
+				pod = client.Create(ctx, pod)
+				ginkgo.By("Waiting for the pod to be initialized and run")
+				err := e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, pod)
+				framework.ExpectNoError(err)
+			})
+
+			ginkgo.It("should not restart any completed init container after the kubelet restart", func(ctx context.Context) {
+				ginkgo.By("stopping the kubelet")
+				startKubelet := stopKubelet()
+				// wait until the kubelet health check will fail
+				gomega.Eventually(ctx, func() bool {
+					return kubeletHealthCheck(kubeletHealthCheckURL)
+				}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeFalseBecause("kubelet should be stopped"))
+
+				ginkgo.By("restarting the kubelet")
+				startKubelet()
+				// wait until the kubelet health check will succeed
+				gomega.Eventually(ctx, func() bool {
+					return kubeletHealthCheck(kubeletHealthCheckURL)
+				}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeTrueBecause("kubelet should be started"))
+
+				ginkgo.By("ensuring that no completed init container is restarted")
+				gomega.Consistently(ctx, func() bool {
+					pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+					framework.ExpectNoError(err)
+					for _, status := range pod.Status.InitContainerStatuses {
+						if status.State.Terminated == nil || status.State.Terminated.ExitCode != 0 {
+							continue
+						}
+
+						if status.RestartCount > 0 {
+							return false
+						}
+					}
+					return true
+				}, 1*time.Minute, f.Timeouts.Poll).Should(gomega.BeTrueBecause("no completed init container should be restarted"))
+
+				ginkgo.By("Parsing results")
+				pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err)
+				results := parseOutput(ctx, f, pod)
+
+				ginkgo.By("Analyzing results")
+				framework.ExpectNoError(results.StartsBefore(init1, init2))
+				framework.ExpectNoError(results.ExitsBefore(init1, init2))
+
+				framework.ExpectNoError(results.StartsBefore(init2, init3))
+				framework.ExpectNoError(results.ExitsBefore(init2, init3))
+
+				gomega.Expect(pod.Status.InitContainerStatuses[0].RestartCount).To(gomega.Equal(int32(0)))
+				gomega.Expect(pod.Status.InitContainerStatuses[1].RestartCount).To(gomega.Equal(int32(0)))
+				gomega.Expect(pod.Status.InitContainerStatuses[2].RestartCount).To(gomega.Equal(int32(0)))
+			})
+
+			ginkgo.It("should not restart any completed init container, even after the completed init container statuses have been removed and the kubelet restarted", func(ctx context.Context) {
+				ginkgo.By("stopping the kubelet")
+				startKubelet := stopKubelet()
+				// wait until the kubelet health check will fail
+				gomega.Eventually(ctx, func() bool {
+					return kubeletHealthCheck(kubeletHealthCheckURL)
+				}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeFalseBecause("kubelet should be stopped"))
+
+				ginkgo.By("removing the completed init container statuses from the container runtime")
+				rs, _, err := getCRIClient()
 				framework.ExpectNoError(err)
 
-				podSpec, err = client.Get(context.Background(), podSpec.Name, metav1.GetOptions{})
+				pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
-				results = parseOutput(context.TODO(), f, podSpec)
+
+				for _, c := range pod.Status.InitContainerStatuses {
+					if c.State.Terminated == nil || c.State.Terminated.ExitCode != 0 {
+						continue
+					}
+
+					tokens := strings.Split(c.ContainerID, "://")
+					gomega.Expect(tokens).To(gomega.HaveLen(2))
+
+					containerID := tokens[1]
+
+					err := rs.RemoveContainer(ctx, containerID)
+					framework.ExpectNoError(err)
+				}
+
+				ginkgo.By("restarting the kubelet")
+				startKubelet()
+				// wait until the kubelet health check will succeed
+				gomega.Eventually(ctx, func() bool {
+					return kubeletHealthCheck(kubeletHealthCheckURL)
+				}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeTrueBecause("kubelet should be restarted"))
+
+				ginkgo.By("ensuring that no completed init container is restarted")
+				gomega.Consistently(ctx, func() bool {
+					pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+					framework.ExpectNoError(err)
+					for _, status := range pod.Status.InitContainerStatuses {
+						if status.State.Terminated == nil || status.State.Terminated.ExitCode != 0 {
+							continue
+						}
+
+						if status.RestartCount > 0 {
+							return false
+						}
+					}
+					return true
+				}, 1*time.Minute, f.Timeouts.Poll).Should(gomega.BeTrueBecause("no completed init container should be restarted"))
+
+				ginkgo.By("Analyzing results")
+				// Cannot analyze the results with the container logs as the
+				// container statuses have been removed from container runtime.
+				gomega.Expect(pod.Status.InitContainerStatuses[0].RestartCount).To(gomega.Equal(int32(0)))
+				gomega.Expect(pod.Status.InitContainerStatuses[1].RestartCount).To(gomega.Equal(int32(0)))
+				gomega.Expect(pod.Status.InitContainerStatuses[2].RestartCount).To(gomega.Equal(int32(0)))
+				gomega.Expect(pod.Status.ContainerStatuses[0].State.Running).ToNot(gomega.BeNil())
 			})
-			ginkgo.It("should not start an init container", func() {
-				framework.ExpectNoError(results.DoesntStart(init1))
+		})
+
+		ginkgo.When("a Pod is initializing the long-running init container", func() {
+			var client *e2epod.PodClient
+			var err error
+			var pod *v1.Pod
+			init1 := "init-1"
+			init2 := "init-2"
+			longRunningInit3 := "long-running-init-3"
+			regular1 := "regular-1"
+
+			ginkgo.BeforeEach(func(ctx context.Context) {
+				pod = &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "initializing-long-running-init-container",
+					},
+					Spec: v1.PodSpec{
+						RestartPolicy: v1.RestartPolicyAlways,
+						InitContainers: []v1.Container{
+							{
+								Name:  init1,
+								Image: busyboxImage,
+								Command: ExecCommand(init1, execCommand{
+									Delay:    1,
+									ExitCode: 0,
+								}),
+							},
+							{
+								Name:  init2,
+								Image: busyboxImage,
+								Command: ExecCommand(init2, execCommand{
+									Delay:    1,
+									ExitCode: 0,
+								}),
+							},
+							{
+								Name:  longRunningInit3,
+								Image: busyboxImage,
+								Command: ExecCommand(longRunningInit3, execCommand{
+									Delay:    300,
+									ExitCode: 0,
+								}),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									Delay:    300,
+									ExitCode: 0,
+								}),
+							},
+						},
+					},
+				}
+				preparePod(pod)
+
+				client = e2epod.NewPodClient(f)
+				pod = client.Create(ctx, pod)
+				ginkgo.By("Waiting for the pod to be initializing the long-running init container")
+				err := e2epod.WaitForPodCondition(ctx, f.ClientSet, pod.Namespace, pod.Name, "long-running init container initializing", 1*time.Minute, func(pod *v1.Pod) (bool, error) {
+					for _, c := range pod.Status.InitContainerStatuses {
+						if c.Name != longRunningInit3 {
+							continue
+						}
+						if c.State.Running != nil && (c.Started != nil && *c.Started == true) {
+							return true, nil
+						}
+					}
+					return false, nil
+				})
+				framework.ExpectNoError(err)
 			})
-			ginkgo.It("should not start a regular container", func() {
-				framework.ExpectNoError(results.DoesntStart(regular1))
+
+			ginkgo.It("should not restart any completed init container after the kubelet restart", func(ctx context.Context) {
+				ginkgo.By("stopping the kubelet")
+				startKubelet := stopKubelet()
+				// wait until the kubelet health check will fail
+				gomega.Eventually(ctx, func() bool {
+					return kubeletHealthCheck(kubeletHealthCheckURL)
+				}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeFalseBecause("kubelet should be stopped"))
+
+				ginkgo.By("restarting the kubelet")
+				startKubelet()
+				// wait until the kubelet health check will succeed
+				gomega.Eventually(ctx, func() bool {
+					return kubeletHealthCheck(kubeletHealthCheckURL)
+				}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeTrueBecause("kubelet should be restarted"))
+
+				ginkgo.By("ensuring that no completed init container is restarted")
+				gomega.Consistently(ctx, func() bool {
+					pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+					framework.ExpectNoError(err)
+					for _, status := range pod.Status.InitContainerStatuses {
+						if status.State.Terminated == nil || status.State.Terminated.ExitCode != 0 {
+							continue
+						}
+
+						if status.RestartCount > 0 {
+							return false
+						}
+					}
+					return true
+				}, 1*time.Minute, f.Timeouts.Poll).Should(gomega.BeTrueBecause("no completed init container should be restarted"))
+
+				ginkgo.By("Parsing results")
+				pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err)
+				results := parseOutput(ctx, f, pod)
+
+				ginkgo.By("Analyzing results")
+				framework.ExpectNoError(results.StartsBefore(init1, init2))
+				framework.ExpectNoError(results.ExitsBefore(init1, init2))
+
+				gomega.Expect(pod.Status.InitContainerStatuses[0].RestartCount).To(gomega.Equal(int32(0)))
+				gomega.Expect(pod.Status.InitContainerStatuses[1].RestartCount).To(gomega.Equal(int32(0)))
+			})
+
+			ginkgo.It("should not restart any completed init container, even after the completed init container statuses have been removed and the kubelet restarted", func(ctx context.Context) {
+				ginkgo.By("stopping the kubelet")
+				startKubelet := stopKubelet()
+				// wait until the kubelet health check will fail
+				gomega.Eventually(ctx, func() bool {
+					return kubeletHealthCheck(kubeletHealthCheckURL)
+				}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeFalseBecause("kubelet should be stopped"))
+
+				ginkgo.By("removing the completed init container statuses from the container runtime")
+				rs, _, err := getCRIClient()
+				framework.ExpectNoError(err)
+
+				pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err)
+
+				for _, c := range pod.Status.InitContainerStatuses {
+					if c.State.Terminated == nil || c.State.Terminated.ExitCode != 0 {
+						continue
+					}
+
+					tokens := strings.Split(c.ContainerID, "://")
+					gomega.Expect(tokens).To(gomega.HaveLen(2))
+
+					containerID := tokens[1]
+
+					err := rs.RemoveContainer(ctx, containerID)
+					framework.ExpectNoError(err)
+				}
+
+				ginkgo.By("restarting the kubelet")
+				startKubelet()
+				// wait until the kubelet health check will succeed
+				gomega.Eventually(ctx, func() bool {
+					return kubeletHealthCheck(kubeletHealthCheckURL)
+				}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeTrueBecause("kubelet should be restarted"))
+
+				ginkgo.By("ensuring that no completed init container is restarted")
+				gomega.Consistently(ctx, func() bool {
+					pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+					framework.ExpectNoError(err)
+					for _, status := range pod.Status.InitContainerStatuses {
+						if status.State.Terminated == nil || status.State.Terminated.ExitCode != 0 {
+							continue
+						}
+
+						if status.RestartCount > 0 {
+							return false
+						}
+					}
+					return true
+				}, 1*time.Minute, f.Timeouts.Poll).Should(gomega.BeTrueBecause("no completed init container should be restarted"))
+
+				ginkgo.By("Analyzing results")
+				// Cannot analyze the results with the container logs as the
+				// container statuses have been removed from container runtime.
+				gomega.Expect(pod.Status.InitContainerStatuses[0].RestartCount).To(gomega.Equal(int32(0)))
+				gomega.Expect(pod.Status.InitContainerStatuses[1].RestartCount).To(gomega.Equal(int32(0)))
 			})
 		})
-	})
-
-	ginkgo.It("shouldn't restart init containers upon regular container restart", func() {
-		init1 := "init-1"
-		init2 := "init-2"
-		init3 := "init-3"
-		regular1 := "regular-1"
-
-		podSpec := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "initcontainer-test-pod",
-			},
-			Spec: v1.PodSpec{
-				RestartPolicy: v1.RestartPolicyAlways,
-				InitContainers: []v1.Container{
-					{
-						Name:  init1,
-						Image: busyboxImage,
-						Command: ExecCommand(init1, execCommand{
-							Delay:    1,
-							ExitCode: 0,
-						}),
-					},
-					{
-						Name:  init2,
-						Image: busyboxImage,
-						Command: ExecCommand(init2, execCommand{
-							Delay:    1,
-							ExitCode: 0,
-						}),
-					},
-					{
-						Name:  init3,
-						Image: busyboxImage,
-						Command: ExecCommand(init3, execCommand{
-							Delay:    1,
-							ExitCode: 0,
-						}),
-					},
-				},
-				Containers: []v1.Container{
-					{
-						Name:  regular1,
-						Image: busyboxImage,
-						Command: ExecCommand(regular1, execCommand{
-							Delay:    10,
-							ExitCode: -1,
-						}),
-					},
-				},
-			},
-		}
-
-		preparePod(podSpec)
-
-		client := e2epod.NewPodClient(f)
-		podSpec = client.Create(context.TODO(), podSpec)
-		ginkgo.By("Waiting for the pod to restart a few times")
-		err := WaitForPodContainerRestartCount(context.TODO(), f.ClientSet, podSpec.Namespace, podSpec.Name, 0, 3, 2*time.Minute)
-		framework.ExpectNoError(err)
-
-		ginkgo.By("Parsing results")
-		podSpec, err = client.Get(context.Background(), podSpec.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-		results := parseOutput(context.TODO(), f, podSpec)
-
-		ginkgo.By("Analyzing results")
-		framework.ExpectNoError(results.StartsBefore(init1, init2))
-		framework.ExpectNoError(results.ExitsBefore(init1, init2))
-
-		framework.ExpectNoError(results.StartsBefore(init2, init3))
-		framework.ExpectNoError(results.ExitsBefore(init2, init3))
-
-		framework.ExpectNoError(results.StartsBefore(init3, regular1))
-		framework.ExpectNoError(results.ExitsBefore(init3, regular1))
-
-		// ensure that the init containers never restarted
-		framework.ExpectNoError(results.HasNotRestarted(init1))
-		framework.ExpectNoError(results.HasNotRestarted(init2))
-		framework.ExpectNoError(results.HasNotRestarted(init3))
-		// while the regular container did
-		framework.ExpectNoError(results.HasRestarted(regular1))
-	})
-
-	ginkgo.When("a pod cannot terminate gracefully", func() {
-		testPod := func(name string, gracePeriod int64) *v1.Pod {
-			return &v1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: name,
-				},
-				Spec: v1.PodSpec{
-					Containers: []v1.Container{
-						{
-							Name:  "busybox",
-							Image: imageutils.GetE2EImage(imageutils.BusyBox),
-							Command: []string{
-								"sleep",
-								"10000",
-							},
-						},
-					},
-					TerminationGracePeriodSeconds: &gracePeriod,
-				},
-			}
-		}
-
-		// To account for the time it takes to delete the pod, we add a buffer. Its sized
-		// so that we allow up to 2x the grace time to delete the pod. Its extra large to
-		// reduce test flakes.
-		bufferSeconds := int64(30)
-
-		f.It("should respect termination grace period seconds", f.WithNodeConformance(), func() {
-			client := e2epod.NewPodClient(f)
-			gracePeriod := int64(30)
-
-			ginkgo.By("creating a pod with a termination grace period seconds")
-			pod := testPod("pod-termination-grace-period", gracePeriod)
-			pod = client.Create(context.TODO(), pod)
-
-			ginkgo.By("ensuring the pod is running")
-			err := e2epod.WaitForPodRunningInNamespace(context.TODO(), f.ClientSet, pod)
-			framework.ExpectNoError(err)
-
-			ginkgo.By("deleting the pod gracefully")
-			err = client.Delete(context.TODO(), pod.Name, metav1.DeleteOptions{})
-			framework.ExpectNoError(err)
-
-			ginkgo.By("ensuring the pod is terminated within the grace period seconds + buffer seconds")
-			err = e2epod.WaitForPodNotFoundInNamespace(context.TODO(), f.ClientSet, pod.Name, pod.Namespace, time.Duration(gracePeriod+bufferSeconds)*time.Second)
-			framework.ExpectNoError(err)
-		})
-
-		f.It("should respect termination grace period seconds with long-running preStop hook", f.WithNodeConformance(), func() {
-			client := e2epod.NewPodClient(f)
-			gracePeriod := int64(30)
-
-			ginkgo.By("creating a pod with a termination grace period seconds and long-running preStop hook")
-			pod := testPod("pod-termination-grace-period", gracePeriod)
-			pod.Spec.Containers[0].Lifecycle = &v1.Lifecycle{
-				PreStop: &v1.LifecycleHandler{
-					Exec: &v1.ExecAction{
-						Command: []string{
-							"sleep",
-							"10000",
-						},
-					},
-				},
-			}
-			pod = client.Create(context.TODO(), pod)
-
-			ginkgo.By("ensuring the pod is running")
-			err := e2epod.WaitForPodRunningInNamespace(context.TODO(), f.ClientSet, pod)
-			framework.ExpectNoError(err)
-
-			ginkgo.By("deleting the pod gracefully")
-			err = client.Delete(context.TODO(), pod.Name, metav1.DeleteOptions{})
-			framework.ExpectNoError(err)
-
-			ginkgo.By("ensuring the pod is terminated within the grace period seconds + buffer seconds")
-			err = e2epod.WaitForPodNotFoundInNamespace(context.TODO(), f.ClientSet, pod.Name, pod.Namespace, time.Duration(gracePeriod+bufferSeconds)*time.Second)
-			framework.ExpectNoError(err)
-		})
-	})
-
-	ginkgo.It("should call the container's preStop hook and terminate it if its startup probe fails", func() {
-		regular1 := "regular-1"
-
-		podSpec := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "test-pod",
-			},
-			Spec: v1.PodSpec{
-				RestartPolicy: v1.RestartPolicyNever,
-				Containers: []v1.Container{
-					{
-						Name:  regular1,
-						Image: busyboxImage,
-						Command: ExecCommand(regular1, execCommand{
-							Delay:              100,
-							TerminationSeconds: 15,
-							ExitCode:           0,
-						}),
-						StartupProbe: &v1.Probe{
-							ProbeHandler: v1.ProbeHandler{
-								Exec: &v1.ExecAction{
-									Command: []string{
-										"sh",
-										"-c",
-										"exit 1",
-									},
-								},
-							},
-							InitialDelaySeconds: 10,
-							FailureThreshold:    1,
-						},
-						Lifecycle: &v1.Lifecycle{
-							PreStop: &v1.LifecycleHandler{
-								Exec: &v1.ExecAction{
-									Command: ExecCommand(prefixedName(PreStopPrefix, regular1), execCommand{
-										Delay:         1,
-										ExitCode:      0,
-										ContainerName: regular1,
-									}),
-								},
-							},
-						},
-					},
-				},
-			},
-		}
-
-		preparePod(podSpec)
-
-		client := e2epod.NewPodClient(f)
-		podSpec = client.Create(context.TODO(), podSpec)
-
-		ginkgo.By("Waiting for the pod to complete")
-		err := e2epod.WaitForPodNoLongerRunningInNamespace(context.TODO(), f.ClientSet, podSpec.Name, podSpec.Namespace)
-		framework.ExpectNoError(err)
-
-		ginkgo.By("Parsing results")
-		podSpec, err = client.Get(context.TODO(), podSpec.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-		results := parseOutput(context.TODO(), f, podSpec)
-
-		ginkgo.By("Analyzing results")
-		framework.ExpectNoError(results.RunTogether(regular1, prefixedName(PreStopPrefix, regular1)))
-		framework.ExpectNoError(results.Starts(prefixedName(PreStopPrefix, regular1)))
-		framework.ExpectNoError(results.Exits(regular1))
-	})
-
-	ginkgo.It("should call the container's preStop hook and terminate it if its liveness probe fails", func() {
-		regular1 := "regular-1"
-
-		podSpec := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "test-pod",
-			},
-			Spec: v1.PodSpec{
-				RestartPolicy: v1.RestartPolicyNever,
-				Containers: []v1.Container{
-					{
-						Name:  regular1,
-						Image: busyboxImage,
-						Command: ExecCommand(regular1, execCommand{
-							Delay:              100,
-							TerminationSeconds: 15,
-							ExitCode:           0,
-						}),
-						LivenessProbe: &v1.Probe{
-							ProbeHandler: v1.ProbeHandler{
-								Exec: &v1.ExecAction{
-									Command: []string{
-										"sh",
-										"-c",
-										"exit 1",
-									},
-								},
-							},
-							InitialDelaySeconds: 10,
-							FailureThreshold:    1,
-						},
-						Lifecycle: &v1.Lifecycle{
-							PreStop: &v1.LifecycleHandler{
-								Exec: &v1.ExecAction{
-									Command: ExecCommand(prefixedName(PreStopPrefix, regular1), execCommand{
-										Delay:         1,
-										ExitCode:      0,
-										ContainerName: regular1,
-									}),
-								},
-							},
-						},
-					},
-				},
-			},
-		}
-
-		preparePod(podSpec)
-
-		client := e2epod.NewPodClient(f)
-		podSpec = client.Create(context.TODO(), podSpec)
-
-		ginkgo.By("Waiting for the pod to complete")
-		err := e2epod.WaitForPodNoLongerRunningInNamespace(context.TODO(), f.ClientSet, podSpec.Name, podSpec.Namespace)
-		framework.ExpectNoError(err)
-
-		ginkgo.By("Parsing results")
-		podSpec, err = client.Get(context.TODO(), podSpec.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-		results := parseOutput(context.TODO(), f, podSpec)
-
-		ginkgo.By("Analyzing results")
-		framework.ExpectNoError(results.RunTogether(regular1, prefixedName(PreStopPrefix, regular1)))
-		framework.ExpectNoError(results.Starts(prefixedName(PreStopPrefix, regular1)))
-		framework.ExpectNoError(results.Exits(regular1))
-	})
-})
-
-var _ = SIGDescribe(framework.WithSerial(), "Containers Lifecycle", func() {
-	f := framework.NewDefaultFramework("containers-lifecycle-test-serial")
-	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
-
-	ginkgo.It("should restart the containers in right order after the node reboot", func(ctx context.Context) {
-		init1 := "init-1"
-		init2 := "init-2"
-		init3 := "init-3"
-		regular1 := "regular-1"
-
-		podLabels := map[string]string{
-			"test":      "containers-lifecycle-test-serial",
-			"namespace": f.Namespace.Name,
-		}
-		pod := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   "initialized-pod",
-				Labels: podLabels,
-			},
-			Spec: v1.PodSpec{
-				RestartPolicy: v1.RestartPolicyAlways,
-				InitContainers: []v1.Container{
-					{
-						Name:  init1,
-						Image: busyboxImage,
-						Command: ExecCommand(init1, execCommand{
-							Delay:    5,
-							ExitCode: 0,
-						}),
-					},
-					{
-						Name:  init2,
-						Image: busyboxImage,
-						Command: ExecCommand(init2, execCommand{
-							Delay:    5,
-							ExitCode: 0,
-						}),
-					},
-					{
-						Name:  init3,
-						Image: busyboxImage,
-						Command: ExecCommand(init3, execCommand{
-							Delay:    5,
-							ExitCode: 0,
-						}),
-					},
-				},
-				Containers: []v1.Container{
-					{
-						Name:  regular1,
-						Image: busyboxImage,
-						Command: ExecCommand(regular1, execCommand{
-							Delay:    30,
-							ExitCode: 0,
-						}),
-					},
-				},
-			},
-		}
-		preparePod(pod)
-
-		client := e2epod.NewPodClient(f)
-		pod = client.Create(ctx, pod)
-		ginkgo.By("Waiting for the pod to be initialized and run")
-		err := e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, pod)
-		framework.ExpectNoError(err)
-
-		ginkgo.By("Getting the current pod sandbox ID")
-		rs, _, err := getCRIClient()
-		framework.ExpectNoError(err)
-
-		sandboxes, err := rs.ListPodSandbox(ctx, &runtimeapi.PodSandboxFilter{
-			LabelSelector: podLabels,
-		})
-		framework.ExpectNoError(err)
-		gomega.Expect(sandboxes).To(gomega.HaveLen(1))
-		podSandboxID := sandboxes[0].Id
-
-		ginkgo.By("Stopping the kubelet")
-		restartKubelet := stopKubelet()
-		gomega.Eventually(ctx, func() bool {
-			return kubeletHealthCheck(kubeletHealthCheckURL)
-		}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeFalse())
-
-		ginkgo.By("Stopping the pod sandbox to simulate the node reboot")
-		err = rs.StopPodSandbox(ctx, podSandboxID)
-		framework.ExpectNoError(err)
-
-		ginkgo.By("Restarting the kubelet")
-		restartKubelet()
-		gomega.Eventually(ctx, func() bool {
-			return kubeletHealthCheck(kubeletHealthCheckURL)
-		}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeTrue())
-
-		ginkgo.By("Waiting for the pod to be re-initialized and run")
-		err = e2epod.WaitForPodCondition(ctx, f.ClientSet, pod.Namespace, pod.Name, "re-initialized", f.Timeouts.PodStart, func(pod *v1.Pod) (bool, error) {
-			if pod.Status.ContainerStatuses[0].RestartCount < 2 {
-				return false, nil
-			}
-			if pod.Status.Phase != v1.PodRunning {
-				return false, nil
-			}
-			return true, nil
-		})
-		framework.ExpectNoError(err)
-
-		ginkgo.By("Parsing results")
-		pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-		results := parseOutput(context.TODO(), f, pod)
-
-		ginkgo.By("Analyzing results")
-		init1Started, err := results.FindIndex(init1, "Started", 0)
-		framework.ExpectNoError(err)
-		init2Started, err := results.FindIndex(init2, "Started", 0)
-		framework.ExpectNoError(err)
-		init3Started, err := results.FindIndex(init3, "Started", 0)
-		framework.ExpectNoError(err)
-		regular1Started, err := results.FindIndex(regular1, "Started", 0)
-		framework.ExpectNoError(err)
-
-		init1Restarted, err := results.FindIndex(init1, "Started", init1Started+1)
-		framework.ExpectNoError(err)
-		init2Restarted, err := results.FindIndex(init2, "Started", init2Started+1)
-		framework.ExpectNoError(err)
-		init3Restarted, err := results.FindIndex(init3, "Started", init3Started+1)
-		framework.ExpectNoError(err)
-		regular1Restarted, err := results.FindIndex(regular1, "Started", regular1Started+1)
-		framework.ExpectNoError(err)
-
-		framework.ExpectNoError(init1Started.IsBefore(init2Started))
-		framework.ExpectNoError(init2Started.IsBefore(init3Started))
-		framework.ExpectNoError(init3Started.IsBefore(regular1Started))
-
-		framework.ExpectNoError(init1Restarted.IsBefore(init2Restarted))
-		framework.ExpectNoError(init2Restarted.IsBefore(init3Restarted))
-		framework.ExpectNoError(init3Restarted.IsBefore(regular1Restarted))
 	})
 })
 
 var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func() {
 	f := framework.NewDefaultFramework("containers-lifecycle-test")
-	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
+	addAfterEachForCleaningUpPods(f)
+	f.NamespacePodSecurityLevel = admissionapi.LevelPrivileged
 
 	ginkgo.When("using a Pod with restartPolicy=Never, three init container and two restartable init containers", ginkgo.Ordered, func() {
 
@@ -967,11 +1525,11 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 		preparePod(podSpec)
 		var results containerOutputList
 
-		ginkgo.It("should finish and produce log", func() {
+		ginkgo.It("should finish and produce log", func(ctx context.Context) {
 			client := e2epod.NewPodClient(f)
-			podSpec = client.Create(context.TODO(), podSpec)
+			podSpec = client.Create(ctx, podSpec)
 
-			err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(context.TODO(), f.ClientSet, podSpec.Name, podSpec.Namespace, 5*time.Minute)
+			err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(ctx, f.ClientSet, podSpec.Name, podSpec.Namespace, 5*time.Minute)
 			framework.ExpectNoError(err)
 
 			podSpec, err := client.Get(context.Background(), podSpec.Name, metav1.GetOptions{})
@@ -980,7 +1538,7 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			// pod should exit successfully
 			gomega.Expect(podSpec.Status.Phase).To(gomega.Equal(v1.PodSucceeded))
 
-			results = parseOutput(context.TODO(), f, podSpec)
+			results = parseOutput(ctx, f, podSpec)
 		})
 
 		ginkgo.It("should run the first init container to completion before starting first restartable init container", func() {
@@ -988,12 +1546,8 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			framework.ExpectNoError(results.ExitsBefore(init1, restartableInit1))
 		})
 
-		ginkgo.It("should start first restartable init container before starting second init container", func() {
-			framework.ExpectNoError(results.StartsBefore(restartableInit1, init2))
-		})
-
 		ginkgo.It("should run first init container and first restartable init container together", func() {
-			framework.ExpectNoError(results.RunTogether(restartableInit1, init2))
+			framework.ExpectNoError(results.RunTogetherLhsFirst(restartableInit1, init2))
 		})
 
 		ginkgo.It("should run second init container to completion before starting second restartable init container", func() {
@@ -1006,7 +1560,7 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 		})
 
 		ginkgo.It("should run both restartable init containers and third init container together", func() {
-			framework.ExpectNoError(results.RunTogether(restartableInit2, restartableInit1))
+			framework.ExpectNoError(results.RunTogether(restartableInit1, restartableInit2))
 			framework.ExpectNoError(results.RunTogether(restartableInit1, init3))
 			framework.ExpectNoError(results.RunTogether(restartableInit2, init3))
 		})
@@ -1061,23 +1615,23 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			preparePod(podSpec)
 			var results containerOutputList
 
-			ginkgo.It("should complete a Pod successfully and produce log", func() {
+			ginkgo.It("should complete a Pod successfully and produce log", func(ctx context.Context) {
 				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+				podSpec = client.Create(ctx, podSpec)
 
-				err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(context.TODO(), f.ClientSet, podSpec.Name, podSpec.Namespace, 5*time.Minute)
+				err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(ctx, f.ClientSet, podSpec.Name, podSpec.Namespace, 5*time.Minute)
 				framework.ExpectNoError(err)
 
-				podSpec, err := client.Get(context.TODO(), podSpec.Name, metav1.GetOptions{})
+				podSpec, err := client.Get(ctx, podSpec.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
 
 				// pod should exit successfully
 				gomega.Expect(podSpec.Status.Phase).To(gomega.Equal(v1.PodSucceeded))
 
-				results = parseOutput(context.TODO(), f, podSpec)
+				results = parseOutput(ctx, f, podSpec)
 			})
 			ginkgo.It("should not restart a restartable init container", func() {
-				framework.ExpectNoError(results.DoesntStartAfter(restartableInit1, regular1))
+				framework.ExpectNoError(results.HasNotRestarted(restartableInit1))
 			})
 			ginkgo.It("should run a regular container to completion", func() {
 				framework.ExpectNoError(results.Exits(regular1))
@@ -1122,17 +1676,17 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			preparePod(podSpec)
 			var results containerOutputList
 
-			ginkgo.It("should mark a Pod as failed and produce log", func() {
+			ginkgo.It("should mark a Pod as failed and produce log", func(ctx context.Context) {
 				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+				podSpec = client.Create(ctx, podSpec)
 
 				// restartable init container should be in image pull backoff
-				err := WaitForPodInitContainerToFail(context.TODO(), f.ClientSet, podSpec.Namespace, podSpec.Name, 0, "ImagePullBackOff", f.Timeouts.PodStart)
+				err := WaitForPodInitContainerToFail(ctx, f.ClientSet, podSpec.Namespace, podSpec.Name, 0, "ImagePullBackOff", f.Timeouts.PodStart)
 				framework.ExpectNoError(err)
 
 				podSpec, err = client.Get(context.Background(), podSpec.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
-				results = parseOutput(context.TODO(), f, podSpec)
+				results = parseOutput(ctx, f, podSpec)
 			})
 			ginkgo.It("should not start a restartable init container", func() {
 				framework.ExpectNoError(results.DoesntStart(restartableInit1))
@@ -1161,7 +1715,7 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 							Name:  restartableInit1,
 							Image: busyboxImage,
 							Command: ExecCommand(restartableInit1, execCommand{
-								Delay:    1,
+								Delay:    5,
 								ExitCode: 0,
 							}),
 							RestartPolicy: &containerRestartPolicyAlways,
@@ -1191,19 +1745,19 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			preparePod(podSpec)
 			var results containerOutputList
 
-			ginkgo.It("should complete a Pod successfully and produce log", func() {
+			ginkgo.It("should complete a Pod successfully and produce log", func(ctx context.Context) {
 				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+				podSpec = client.Create(ctx, podSpec)
 
-				err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(context.TODO(), f.ClientSet, podSpec.Name, podSpec.Namespace, 5*time.Minute)
+				err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(ctx, f.ClientSet, podSpec.Name, podSpec.Namespace, 5*time.Minute)
 				framework.ExpectNoError(err)
 
-				podSpec, err := client.Get(context.TODO(), podSpec.Name, metav1.GetOptions{})
+				podSpec, err := client.Get(ctx, podSpec.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
 
 				// pod should exit successfully
 				gomega.Expect(podSpec.Status.Phase).To(gomega.Equal(v1.PodSucceeded))
-				results = parseOutput(context.TODO(), f, podSpec)
+				results = parseOutput(ctx, f, podSpec)
 			})
 			ginkgo.It("should restart a restartable init container before the regular container started", func() {
 				framework.ExpectNoError(results.StartsBefore(restartableInit1, regular1))
@@ -1232,7 +1786,7 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 							Name:  restartableInit1,
 							Image: busyboxImage,
 							Command: ExecCommand(restartableInit1, execCommand{
-								Delay:    1,
+								Delay:    5,
 								ExitCode: 1,
 							}),
 							RestartPolicy: &containerRestartPolicyAlways,
@@ -1262,20 +1816,20 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			preparePod(podSpec)
 			var results containerOutputList
 
-			ginkgo.It("should complete a Pod successfully and produce log", func() {
+			ginkgo.It("should complete a Pod successfully and produce log", func(ctx context.Context) {
 				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+				podSpec = client.Create(ctx, podSpec)
 
-				err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(context.TODO(), f.ClientSet, podSpec.Name, podSpec.Namespace, 5*time.Minute)
+				err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(ctx, f.ClientSet, podSpec.Name, podSpec.Namespace, 5*time.Minute)
 				framework.ExpectNoError(err)
 
-				podSpec, err := client.Get(context.TODO(), podSpec.Name, metav1.GetOptions{})
+				podSpec, err := client.Get(ctx, podSpec.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
 
 				// pod should exit successfully
 				gomega.Expect(podSpec.Status.Phase).To(gomega.Equal(v1.PodSucceeded))
 
-				results = parseOutput(context.TODO(), f, podSpec)
+				results = parseOutput(ctx, f, podSpec)
 			})
 			ginkgo.It("should restart a restartable init container before the regular container started", func() {
 				framework.ExpectNoError(results.StartsBefore(restartableInit1, regular1))
@@ -1335,16 +1889,16 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			preparePod(podSpec)
 			var results containerOutputList
 
-			ginkgo.It("should mark a Pod as failed and produce log", func() {
+			ginkgo.It("should mark a Pod as failed and produce log", func(ctx context.Context) {
 				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+				podSpec = client.Create(ctx, podSpec)
 
-				err := e2epod.WaitForPodFailedReason(context.TODO(), f.ClientSet, podSpec, "", 1*time.Minute)
+				err := e2epod.WaitForPodFailedReason(ctx, f.ClientSet, podSpec, "", 1*time.Minute)
 				framework.ExpectNoError(err)
 
-				podSpec, err := client.Get(context.TODO(), podSpec.Name, metav1.GetOptions{})
+				podSpec, err := client.Get(ctx, podSpec.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
-				results = parseOutput(context.TODO(), f, podSpec)
+				results = parseOutput(ctx, f, podSpec)
 			})
 			ginkgo.It("should mark an Init container as failed", func() {
 				framework.ExpectNoError(results.Exits(init1))
@@ -1371,7 +1925,7 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 							Name:  restartableInit1,
 							Image: busyboxImage,
 							Command: ExecCommand(restartableInit1, execCommand{
-								Delay:    1,
+								Delay:    5,
 								ExitCode: 1,
 							}),
 							RestartPolicy: &containerRestartPolicyAlways,
@@ -1401,16 +1955,16 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			preparePod(podSpec)
 			var results containerOutputList
 
-			ginkgo.It("should mark a Pod as failed and produce log", func() {
+			ginkgo.It("should mark a Pod as failed and produce log", func(ctx context.Context) {
 				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+				podSpec = client.Create(ctx, podSpec)
 
-				err := e2epod.WaitForPodFailedReason(context.TODO(), f.ClientSet, podSpec, "", 1*time.Minute)
+				err := e2epod.WaitForPodFailedReason(ctx, f.ClientSet, podSpec, "", 1*time.Minute)
 				framework.ExpectNoError(err)
 
-				podSpec, err := client.Get(context.TODO(), podSpec.Name, metav1.GetOptions{})
+				podSpec, err := client.Get(ctx, podSpec.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
-				results = parseOutput(context.TODO(), f, podSpec)
+				results = parseOutput(ctx, f, podSpec)
 			})
 			ginkgo.It("should mark an Init container as failed", func() {
 				framework.ExpectNoError(results.Exits(init1))
@@ -1463,23 +2017,23 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			preparePod(podSpec)
 			var results containerOutputList
 
-			ginkgo.It("should complete a Pod successfully and produce log", func() {
+			ginkgo.It("should complete a Pod successfully and produce log", func(ctx context.Context) {
 				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+				podSpec = client.Create(ctx, podSpec)
 
-				err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(context.TODO(), f.ClientSet, podSpec.Name, podSpec.Namespace, 5*time.Minute)
+				err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(ctx, f.ClientSet, podSpec.Name, podSpec.Namespace, 5*time.Minute)
 				framework.ExpectNoError(err)
 
-				podSpec, err := client.Get(context.TODO(), podSpec.Name, metav1.GetOptions{})
+				podSpec, err := client.Get(ctx, podSpec.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
 
 				// pod should exit successfully
 				gomega.Expect(podSpec.Status.Phase).To(gomega.Equal(v1.PodSucceeded))
 
-				results = parseOutput(context.TODO(), f, podSpec)
+				results = parseOutput(ctx, f, podSpec)
 			})
 			ginkgo.It("should not restart a restartable init container", func() {
-				framework.ExpectNoError(results.DoesntStartAfter(restartableInit1, regular1))
+				framework.ExpectNoError(results.HasNotRestarted(restartableInit1))
 			})
 			ginkgo.It("should run a regular container to completion", func() {
 				framework.ExpectNoError(results.Exits(regular1))
@@ -1524,17 +2078,17 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			preparePod(podSpec)
 			var results containerOutputList
 
-			ginkgo.It("should mark a Pod as failed and produce log", func() {
+			ginkgo.It("should mark a Pod as failed and produce log", func(ctx context.Context) {
 				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+				podSpec = client.Create(ctx, podSpec)
 
 				// restartable init container should be in image pull backoff
-				err := WaitForPodInitContainerToFail(context.TODO(), f.ClientSet, podSpec.Namespace, podSpec.Name, 0, "ImagePullBackOff", f.Timeouts.PodStart)
+				err := WaitForPodInitContainerToFail(ctx, f.ClientSet, podSpec.Namespace, podSpec.Name, 0, "ImagePullBackOff", f.Timeouts.PodStart)
 				framework.ExpectNoError(err)
 
 				podSpec, err = client.Get(context.Background(), podSpec.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
-				results = parseOutput(context.TODO(), f, podSpec)
+				results = parseOutput(ctx, f, podSpec)
 			})
 			ginkgo.It("should not start a restartable init container", func() {
 				framework.ExpectNoError(results.DoesntStart(restartableInit1))
@@ -1564,7 +2118,7 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 							Name:  restartableInit1,
 							Image: busyboxImage,
 							Command: ExecCommand(restartableInit1, execCommand{
-								Delay:    1,
+								Delay:    5,
 								ExitCode: 0,
 							}),
 							RestartPolicy: &containerRestartPolicyAlways,
@@ -1594,20 +2148,20 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			preparePod(podSpec)
 			var results containerOutputList
 
-			ginkgo.It("should complete a Pod successfully and produce log", func() {
+			ginkgo.It("should complete a Pod successfully and produce log", func(ctx context.Context) {
 				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+				podSpec = client.Create(ctx, podSpec)
 
-				err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(context.TODO(), f.ClientSet, podSpec.Name, podSpec.Namespace, 5*time.Minute)
+				err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(ctx, f.ClientSet, podSpec.Name, podSpec.Namespace, 5*time.Minute)
 				framework.ExpectNoError(err)
 
-				podSpec, err := client.Get(context.TODO(), podSpec.Name, metav1.GetOptions{})
+				podSpec, err := client.Get(ctx, podSpec.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
 
 				// pod should exit successfully
 				gomega.Expect(podSpec.Status.Phase).To(gomega.Equal(v1.PodSucceeded))
 
-				results = parseOutput(context.TODO(), f, podSpec)
+				results = parseOutput(ctx, f, podSpec)
 			})
 			ginkgo.It("should restart a restartable init container before the regular container started", func() {
 				framework.ExpectNoError(results.StartsBefore(restartableInit1, regular1))
@@ -1638,7 +2192,7 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 							Name:  restartableInit1,
 							Image: busyboxImage,
 							Command: ExecCommand(restartableInit1, execCommand{
-								Delay:    1,
+								Delay:    5,
 								ExitCode: 1,
 							}),
 							RestartPolicy: &containerRestartPolicyAlways,
@@ -1668,20 +2222,20 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			preparePod(podSpec)
 			var results containerOutputList
 
-			ginkgo.It("should complete a Pod successfully and produce log", func() {
+			ginkgo.It("should complete a Pod successfully and produce log", func(ctx context.Context) {
 				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+				podSpec = client.Create(ctx, podSpec)
 
-				err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(context.TODO(), f.ClientSet, podSpec.Name, podSpec.Namespace, 5*time.Minute)
+				err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(ctx, f.ClientSet, podSpec.Name, podSpec.Namespace, 5*time.Minute)
 				framework.ExpectNoError(err)
 
-				podSpec, err := client.Get(context.TODO(), podSpec.Name, metav1.GetOptions{})
+				podSpec, err := client.Get(ctx, podSpec.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
 
 				// pod should exit successfully
 				gomega.Expect(podSpec.Status.Phase).To(gomega.Equal(v1.PodSucceeded))
 
-				results = parseOutput(context.TODO(), f, podSpec)
+				results = parseOutput(ctx, f, podSpec)
 			})
 			ginkgo.It("should restart a restartable init container before the regular container started", func() {
 				framework.ExpectNoError(results.StartsBefore(restartableInit1, regular1))
@@ -1741,11 +2295,11 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			preparePod(podSpec)
 			var results containerOutputList
 
-			ginkgo.It("should continuously run Pod keeping it Pending", func() {
+			ginkgo.It("should continuously run Pod keeping it Pending", func(ctx context.Context) {
 				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+				podSpec = client.Create(ctx, podSpec)
 
-				err := e2epod.WaitForPodCondition(context.TODO(), f.ClientSet, podSpec.Namespace, podSpec.Name, "pending and restarting 3 times", 5*time.Minute, func(pod *v1.Pod) (bool, error) {
+				err := e2epod.WaitForPodCondition(ctx, f.ClientSet, podSpec.Namespace, podSpec.Name, "pending and restarting 3 times", 5*time.Minute, func(pod *v1.Pod) (bool, error) {
 					if pod.Status.Phase != v1.PodPending {
 						return false, fmt.Errorf("pod should be in pending phase")
 					}
@@ -1757,9 +2311,9 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 				})
 				framework.ExpectNoError(err)
 
-				podSpec, err := client.Get(context.TODO(), podSpec.Name, metav1.GetOptions{})
+				podSpec, err := client.Get(ctx, podSpec.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
-				results = parseOutput(context.TODO(), f, podSpec)
+				results = parseOutput(ctx, f, podSpec)
 			})
 			ginkgo.It("should have Init container restartCount greater than 0", func() {
 				framework.ExpectNoError(results.HasRestarted(init1))
@@ -1786,7 +2340,7 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 							Name:  restartableInit1,
 							Image: busyboxImage,
 							Command: ExecCommand(restartableInit1, execCommand{
-								Delay:    1,
+								Delay:    5,
 								ExitCode: 1,
 							}),
 							RestartPolicy: &containerRestartPolicyAlways,
@@ -1816,11 +2370,11 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			preparePod(podSpec)
 			var results containerOutputList
 
-			ginkgo.It("should continuously run Pod keeping it Pending", func() {
+			ginkgo.It("should continuously run Pod keeping it Pending", func(ctx context.Context) {
 				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+				podSpec = client.Create(ctx, podSpec)
 
-				err := e2epod.WaitForPodCondition(context.TODO(), f.ClientSet, podSpec.Namespace, podSpec.Name, "pending and restarting 3 times", 5*time.Minute, func(pod *v1.Pod) (bool, error) {
+				err := e2epod.WaitForPodCondition(ctx, f.ClientSet, podSpec.Namespace, podSpec.Name, "pending and restarting 3 times", 5*time.Minute, func(pod *v1.Pod) (bool, error) {
 					if pod.Status.Phase != v1.PodPending {
 						return false, fmt.Errorf("pod should be in pending phase")
 					}
@@ -1832,9 +2386,9 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 				})
 				framework.ExpectNoError(err)
 
-				podSpec, err := client.Get(context.TODO(), podSpec.Name, metav1.GetOptions{})
+				podSpec, err := client.Get(ctx, podSpec.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
-				results = parseOutput(context.TODO(), f, podSpec)
+				results = parseOutput(ctx, f, podSpec)
 			})
 			ginkgo.It("should have Init container restartCount greater than 0", func() {
 				framework.ExpectNoError(results.HasRestarted(init1))
@@ -1887,20 +2441,20 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 
 			// regular container should exit at least once so we can get it's termination log
 			// this test case is different from restartPolicy=Never
-			ginkgo.It("should keep running a Pod continuously and produce log", func() { /* check the regular container restartCount > 0 */
+			ginkgo.It("should keep running a Pod continuously and produce log", func(ctx context.Context) { /* check the regular container restartCount > 0 */
 				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+				podSpec = client.Create(ctx, podSpec)
 
-				err := WaitForPodContainerRestartCount(context.TODO(), f.ClientSet, podSpec.Namespace, podSpec.Name, 0, 2, 2*time.Minute)
+				err := WaitForPodContainerRestartCount(ctx, f.ClientSet, podSpec.Namespace, podSpec.Name, 0, 2, 2*time.Minute)
 				framework.ExpectNoError(err)
 
-				podSpec, err := client.Get(context.TODO(), podSpec.Name, metav1.GetOptions{})
+				podSpec, err := client.Get(ctx, podSpec.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
-				results = parseOutput(context.TODO(), f, podSpec)
+				results = parseOutput(ctx, f, podSpec)
 			})
 
 			ginkgo.It("should not restart a restartable init container", func() {
-				framework.ExpectNoError(results.DoesntStartAfter(restartableInit1, regular1))
+				framework.ExpectNoError(results.HasNotRestarted(restartableInit1))
 			})
 			// this test case is different from restartPolicy=Never
 			ginkgo.It("should start a regular container", func() {
@@ -1946,17 +2500,17 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			preparePod(podSpec)
 			var results containerOutputList
 
-			ginkgo.It("should continuously run Pod keeping it Pending and produce log", func() {
+			ginkgo.It("should continuously run Pod keeping it Pending and produce log", func(ctx context.Context) {
 				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+				podSpec = client.Create(ctx, podSpec)
 
 				// restartable init container should be in image pull backoff
-				err := WaitForPodInitContainerToFail(context.TODO(), f.ClientSet, podSpec.Namespace, podSpec.Name, 0, "ImagePullBackOff", f.Timeouts.PodStart)
+				err := WaitForPodInitContainerToFail(ctx, f.ClientSet, podSpec.Namespace, podSpec.Name, 0, "ImagePullBackOff", f.Timeouts.PodStart)
 				framework.ExpectNoError(err)
 
 				podSpec, err = client.Get(context.Background(), podSpec.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
-				results = parseOutput(context.TODO(), f, podSpec)
+				results = parseOutput(ctx, f, podSpec)
 			})
 			ginkgo.It("should not start a restartable init container", func() {
 				framework.ExpectNoError(results.DoesntStart(restartableInit1))
@@ -1985,7 +2539,7 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 							Name:  restartableInit1,
 							Image: busyboxImage,
 							Command: ExecCommand(restartableInit1, execCommand{
-								Delay:    1,
+								Delay:    5,
 								ExitCode: 0,
 							}),
 							RestartPolicy: &containerRestartPolicyAlways,
@@ -2015,16 +2569,16 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			preparePod(podSpec)
 			var results containerOutputList
 
-			ginkgo.It("should keep running a Pod continuously and produce log", func() { /* check the regular container restartCount > 0 */
+			ginkgo.It("should keep running a Pod continuously and produce log", func(ctx context.Context) { /* check the regular container restartCount > 0 */
 				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+				podSpec = client.Create(ctx, podSpec)
 
-				err := WaitForPodContainerRestartCount(context.TODO(), f.ClientSet, podSpec.Namespace, podSpec.Name, 0, 1, 2*time.Minute)
+				err := WaitForPodContainerRestartCount(ctx, f.ClientSet, podSpec.Namespace, podSpec.Name, 0, 1, 2*time.Minute)
 				framework.ExpectNoError(err)
 
-				podSpec, err := client.Get(context.TODO(), podSpec.Name, metav1.GetOptions{})
+				podSpec, err := client.Get(ctx, podSpec.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
-				results = parseOutput(context.TODO(), f, podSpec)
+				results = parseOutput(ctx, f, podSpec)
 			})
 			ginkgo.It("should restart a restartable init container before the regular container started", func() {
 				framework.ExpectNoError(results.StartsBefore(restartableInit1, regular1))
@@ -2055,7 +2609,7 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 							Name:  restartableInit1,
 							Image: busyboxImage,
 							Command: ExecCommand(restartableInit1, execCommand{
-								Delay:    1,
+								Delay:    5,
 								ExitCode: 1,
 							}),
 							RestartPolicy: &containerRestartPolicyAlways,
@@ -2085,16 +2639,16 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			preparePod(podSpec)
 			var results containerOutputList
 
-			ginkgo.It("should keep running a Pod continuously and produce log", func() { /* check the regular container restartCount > 0 */
+			ginkgo.It("should keep running a Pod continuously and produce log", func(ctx context.Context) { /* check the regular container restartCount > 0 */
 				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+				podSpec = client.Create(ctx, podSpec)
 
-				err := WaitForPodContainerRestartCount(context.TODO(), f.ClientSet, podSpec.Namespace, podSpec.Name, 0, 1, 2*time.Minute)
+				err := WaitForPodContainerRestartCount(ctx, f.ClientSet, podSpec.Namespace, podSpec.Name, 0, 1, 2*time.Minute)
 				framework.ExpectNoError(err)
 
-				podSpec, err := client.Get(context.TODO(), podSpec.Name, metav1.GetOptions{})
+				podSpec, err := client.Get(ctx, podSpec.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
-				results = parseOutput(context.TODO(), f, podSpec)
+				results = parseOutput(ctx, f, podSpec)
 			})
 			ginkgo.It("should restart a restartable init container before the regular container started", func() {
 				framework.ExpectNoError(results.StartsBefore(restartableInit1, regular1))
@@ -2154,11 +2708,11 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			preparePod(podSpec)
 			var results containerOutputList
 
-			ginkgo.It("should continuously run Pod keeping it Pending", func() {
+			ginkgo.It("should continuously run Pod keeping it Pending", func(ctx context.Context) {
 				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+				podSpec = client.Create(ctx, podSpec)
 
-				err := e2epod.WaitForPodCondition(context.TODO(), f.ClientSet, podSpec.Namespace, podSpec.Name, "pending and restarting 3 times", 5*time.Minute, func(pod *v1.Pod) (bool, error) {
+				err := e2epod.WaitForPodCondition(ctx, f.ClientSet, podSpec.Namespace, podSpec.Name, "pending and restarting 3 times", 5*time.Minute, func(pod *v1.Pod) (bool, error) {
 					if pod.Status.Phase != v1.PodPending {
 						return false, fmt.Errorf("pod should be in pending phase")
 					}
@@ -2170,9 +2724,9 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 				})
 				framework.ExpectNoError(err)
 
-				podSpec, err := client.Get(context.TODO(), podSpec.Name, metav1.GetOptions{})
+				podSpec, err := client.Get(ctx, podSpec.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
-				results = parseOutput(context.TODO(), f, podSpec)
+				results = parseOutput(ctx, f, podSpec)
 			})
 			ginkgo.It("should have Init container restartCount greater than 0", func() {
 				framework.ExpectNoError(results.HasRestarted(init1))
@@ -2199,7 +2753,7 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 							Name:  restartableInit1,
 							Image: busyboxImage,
 							Command: ExecCommand(restartableInit1, execCommand{
-								Delay:    1,
+								Delay:    5,
 								ExitCode: 1,
 							}),
 							RestartPolicy: &containerRestartPolicyAlways,
@@ -2229,11 +2783,11 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 			preparePod(podSpec)
 			var results containerOutputList
 
-			ginkgo.It("should continuously run Pod keeping it Pending", func() {
+			ginkgo.It("should continuously run Pod keeping it Pending", func(ctx context.Context) {
 				client := e2epod.NewPodClient(f)
-				podSpec = client.Create(context.TODO(), podSpec)
+				podSpec = client.Create(ctx, podSpec)
 
-				err := e2epod.WaitForPodCondition(context.TODO(), f.ClientSet, podSpec.Namespace, podSpec.Name, "pending and restarting 3 times", 5*time.Minute, func(pod *v1.Pod) (bool, error) {
+				err := e2epod.WaitForPodCondition(ctx, f.ClientSet, podSpec.Namespace, podSpec.Name, "pending and restarting 3 times", 5*time.Minute, func(pod *v1.Pod) (bool, error) {
 					if pod.Status.Phase != v1.PodPending {
 						return false, fmt.Errorf("pod should be in pending phase")
 					}
@@ -2245,9 +2799,9 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 				})
 				framework.ExpectNoError(err)
 
-				podSpec, err := client.Get(context.TODO(), podSpec.Name, metav1.GetOptions{})
+				podSpec, err := client.Get(ctx, podSpec.Name, metav1.GetOptions{})
 				framework.ExpectNoError(err)
-				results = parseOutput(context.TODO(), f, podSpec)
+				results = parseOutput(ctx, f, podSpec)
 			})
 			ginkgo.It("should have Init container restartCount greater than 0", func() {
 				framework.ExpectNoError(results.HasRestarted(init1))
@@ -2259,846 +2813,1635 @@ var _ = SIGDescribe(nodefeature.SidecarContainers, "Containers Lifecycle", func(
 		})
 	})
 
-	ginkgo.It("should launch restartable init containers serially considering the startup probe", func() {
+	ginkgo.When("running restartable init containers with startup probes", func() {
+		ginkgo.It("should launch restartable init containers serially considering the startup probe", func(ctx context.Context) {
 
-		restartableInit1 := "restartable-init-1"
-		restartableInit2 := "restartable-init-2"
-		regular1 := "regular-1"
+			restartableInit1 := "restartable-init-1"
+			restartableInit2 := "restartable-init-2"
+			regular1 := "regular-1"
 
-		pod := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "restartable-init-containers-start-serially",
-			},
-			Spec: v1.PodSpec{
-				RestartPolicy: v1.RestartPolicyNever,
-				InitContainers: []v1.Container{
-					{
-						Name:  restartableInit1,
-						Image: busyboxImage,
-						Command: ExecCommand(restartableInit1, execCommand{
-							StartDelay: 10,
-							Delay:      600,
-							ExitCode:   0,
-						}),
-						StartupProbe: &v1.Probe{
-							ProbeHandler: v1.ProbeHandler{
-								Exec: &v1.ExecAction{
-									Command: []string{"test", "-f", "started"},
-								},
-							},
-						},
-						RestartPolicy: &containerRestartPolicyAlways,
-					},
-					{
-						Name:  restartableInit2,
-						Image: busyboxImage,
-						Command: ExecCommand(restartableInit2, execCommand{
-							StartDelay: 10,
-							Delay:      600,
-							ExitCode:   0,
-						}),
-						StartupProbe: &v1.Probe{
-							ProbeHandler: v1.ProbeHandler{
-								Exec: &v1.ExecAction{
-									Command: []string{"test", "-f", "started"},
-								},
-							},
-						},
-						RestartPolicy: &containerRestartPolicyAlways,
-					},
+			pod := &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "restartable-init-containers-start-serially",
 				},
-				Containers: []v1.Container{
-					{
-						Name:  regular1,
-						Image: busyboxImage,
-						Command: ExecCommand(regular1, execCommand{
-							Delay:    1,
-							ExitCode: 0,
-						}),
-					},
-				},
-			},
-		}
-
-		preparePod(pod)
-
-		client := e2epod.NewPodClient(f)
-		pod = client.Create(context.TODO(), pod)
-
-		ginkgo.By("Waiting for the pod to finish")
-		err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(context.TODO(), f.ClientSet, pod.Name, pod.Namespace, 5*time.Minute)
-		framework.ExpectNoError(err)
-
-		pod, err = client.Get(context.TODO(), pod.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-		results := parseOutput(context.TODO(), f, pod)
-
-		ginkgo.By("Analyzing results")
-		framework.ExpectNoError(results.StartsBefore(restartableInit1, restartableInit2))
-		framework.ExpectNoError(results.StartsBefore(restartableInit2, regular1))
-	})
-
-	ginkgo.It("should call the container's preStop hook and not launch next container if the restartable init container's startup probe fails", func() {
-
-		restartableInit1 := "restartable-init-1"
-		regular1 := "regular-1"
-
-		pod := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "restartable-init-container-failed-startup",
-			},
-			Spec: v1.PodSpec{
-				RestartPolicy: v1.RestartPolicyAlways,
-				InitContainers: []v1.Container{
-					{
-						Name:  restartableInit1,
-						Image: busyboxImage,
-						Command: ExecCommand(restartableInit1, execCommand{
-							Delay:              600,
-							TerminationSeconds: 15,
-							ExitCode:           0,
-						}),
-						StartupProbe: &v1.Probe{
-							InitialDelaySeconds: 5,
-							FailureThreshold:    1,
-							ProbeHandler: v1.ProbeHandler{
-								Exec: &v1.ExecAction{
-									Command: []string{
-										"sh",
-										"-c",
-										"exit 1",
+				Spec: v1.PodSpec{
+					RestartPolicy: v1.RestartPolicyNever,
+					InitContainers: []v1.Container{
+						{
+							Name:  restartableInit1,
+							Image: busyboxImage,
+							Command: ExecCommand(restartableInit1, execCommand{
+								StartDelay: 10,
+								Delay:      600,
+								ExitCode:   0,
+							}),
+							StartupProbe: &v1.Probe{
+								ProbeHandler: v1.ProbeHandler{
+									Exec: &v1.ExecAction{
+										Command: []string{"test", "-f", "started"},
 									},
 								},
 							},
+							RestartPolicy: &containerRestartPolicyAlways,
 						},
-						Lifecycle: &v1.Lifecycle{
-							PreStop: &v1.LifecycleHandler{
-								Exec: &v1.ExecAction{
-									Command: ExecCommand(prefixedName(PreStopPrefix, restartableInit1), execCommand{
-										Delay:         1,
-										ExitCode:      0,
-										ContainerName: restartableInit1,
-									}),
-								},
-							},
-						},
-						RestartPolicy: &containerRestartPolicyAlways,
-					},
-				},
-				Containers: []v1.Container{
-					{
-						Name:  regular1,
-						Image: busyboxImage,
-						Command: ExecCommand(regular1, execCommand{
-							Delay:    1,
-							ExitCode: 0,
-						}),
-					},
-				},
-			},
-		}
-
-		preparePod(pod)
-
-		client := e2epod.NewPodClient(f)
-		pod = client.Create(context.TODO(), pod)
-
-		ginkgo.By("Waiting for the restartable init container to restart")
-		err := WaitForPodInitContainerRestartCount(context.TODO(), f.ClientSet, pod.Namespace, pod.Name, 0, 2, 2*time.Minute)
-		framework.ExpectNoError(err)
-
-		pod, err = client.Get(context.TODO(), pod.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-
-		if pod.Status.Phase != v1.PodPending {
-			framework.Failf("pod %q is not pending, it's %q", pod.Name, pod.Status.Phase)
-		}
-
-		results := parseOutput(context.TODO(), f, pod)
-
-		ginkgo.By("Analyzing results")
-		framework.ExpectNoError(results.RunTogether(restartableInit1, prefixedName(PreStopPrefix, restartableInit1)))
-		framework.ExpectNoError(results.Starts(prefixedName(PreStopPrefix, restartableInit1)))
-		framework.ExpectNoError(results.Exits(restartableInit1))
-		framework.ExpectNoError(results.DoesntStart(regular1))
-	})
-
-	ginkgo.It("should call the container's preStop hook and start the next container if the restartable init container's liveness probe fails", func() {
-
-		restartableInit1 := "restartable-init-1"
-		regular1 := "regular-1"
-
-		pod := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "restartable-init-container-failed-startup",
-			},
-			Spec: v1.PodSpec{
-				RestartPolicy: v1.RestartPolicyAlways,
-				InitContainers: []v1.Container{
-					{
-						Name:  restartableInit1,
-						Image: busyboxImage,
-						Command: ExecCommand(restartableInit1, execCommand{
-							Delay:              600,
-							TerminationSeconds: 15,
-							ExitCode:           0,
-						}),
-						LivenessProbe: &v1.Probe{
-							InitialDelaySeconds: 5,
-							FailureThreshold:    1,
-							ProbeHandler: v1.ProbeHandler{
-								Exec: &v1.ExecAction{
-									Command: []string{
-										"sh",
-										"-c",
-										"exit 1",
+						{
+							Name:  restartableInit2,
+							Image: busyboxImage,
+							Command: ExecCommand(restartableInit2, execCommand{
+								StartDelay: 10,
+								Delay:      600,
+								ExitCode:   0,
+							}),
+							StartupProbe: &v1.Probe{
+								ProbeHandler: v1.ProbeHandler{
+									Exec: &v1.ExecAction{
+										Command: []string{"test", "-f", "started"},
 									},
 								},
 							},
+							RestartPolicy: &containerRestartPolicyAlways,
 						},
-						Lifecycle: &v1.Lifecycle{
-							PreStop: &v1.LifecycleHandler{
-								Exec: &v1.ExecAction{
-									Command: ExecCommand(prefixedName(PreStopPrefix, restartableInit1), execCommand{
-										Delay:         1,
-										ExitCode:      0,
-										ContainerName: restartableInit1,
-									}),
-								},
-							},
+					},
+					Containers: []v1.Container{
+						{
+							Name:  regular1,
+							Image: busyboxImage,
+							Command: ExecCommand(regular1, execCommand{
+								Delay:    1,
+								ExitCode: 0,
+							}),
 						},
-						RestartPolicy: &containerRestartPolicyAlways,
-					},
-				},
-				Containers: []v1.Container{
-					{
-						Name:  regular1,
-						Image: busyboxImage,
-						Command: ExecCommand(regular1, execCommand{
-							Delay:    1,
-							ExitCode: 0,
-						}),
-					},
-				},
-			},
-		}
-
-		preparePod(pod)
-
-		client := e2epod.NewPodClient(f)
-		pod = client.Create(context.TODO(), pod)
-
-		ginkgo.By("Waiting for the restartable init container to restart")
-		err := WaitForPodInitContainerRestartCount(context.TODO(), f.ClientSet, pod.Namespace, pod.Name, 0, 2, 2*time.Minute)
-		framework.ExpectNoError(err)
-
-		err = WaitForPodContainerRestartCount(context.TODO(), f.ClientSet, pod.Namespace, pod.Name, 0, 1, 2*time.Minute)
-		framework.ExpectNoError(err)
-
-		pod, err = client.Get(context.TODO(), pod.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-
-		results := parseOutput(context.TODO(), f, pod)
-
-		ginkgo.By("Analyzing results")
-		framework.ExpectNoError(results.RunTogether(restartableInit1, prefixedName(PreStopPrefix, restartableInit1)))
-		framework.ExpectNoError(results.Starts(prefixedName(PreStopPrefix, restartableInit1)))
-		framework.ExpectNoError(results.Exits(restartableInit1))
-		framework.ExpectNoError(results.Starts(regular1))
-	})
-
-	ginkgo.It("should terminate sidecars in reverse order after all main containers have exited", func() {
-		restartableInit1 := "restartable-init-1"
-		restartableInit2 := "restartable-init-2"
-		restartableInit3 := "restartable-init-3"
-		regular1 := "regular-1"
-
-		pod := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "serialize-termination",
-			},
-			Spec: v1.PodSpec{
-				RestartPolicy: v1.RestartPolicyNever,
-				InitContainers: []v1.Container{
-					{
-						Name:          restartableInit1,
-						Image:         busyboxImage,
-						RestartPolicy: &containerRestartPolicyAlways,
-						Command: ExecCommand(restartableInit1, execCommand{
-							Delay:              60,
-							TerminationSeconds: 5,
-							ExitCode:           0,
-						}),
-					},
-					{
-						Name:          restartableInit2,
-						Image:         busyboxImage,
-						RestartPolicy: &containerRestartPolicyAlways,
-						Command: ExecCommand(restartableInit2, execCommand{
-							Delay:              60,
-							TerminationSeconds: 5,
-							ExitCode:           0,
-						}),
-					},
-					{
-						Name:          restartableInit3,
-						Image:         busyboxImage,
-						RestartPolicy: &containerRestartPolicyAlways,
-						Command: ExecCommand(restartableInit3, execCommand{
-							Delay:              60,
-							TerminationSeconds: 5,
-							ExitCode:           0,
-						}),
-					},
-				},
-				Containers: []v1.Container{
-					{
-						Name:  regular1,
-						Image: busyboxImage,
-						Command: ExecCommand(regular1, execCommand{
-							Delay:    5,
-							ExitCode: 0,
-						}),
-					},
-				},
-			},
-		}
-
-		preparePod(pod)
-
-		client := e2epod.NewPodClient(f)
-		pod = client.Create(context.TODO(), pod)
-
-		err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(context.TODO(), f.ClientSet, pod.Name, pod.Namespace, 5*time.Minute)
-		framework.ExpectNoError(err)
-
-		pod, err = client.Get(context.TODO(), pod.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-
-		results := parseOutput(context.TODO(), f, pod)
-
-		ginkgo.By("Analyzing results")
-		framework.ExpectNoError(results.StartsBefore(restartableInit1, restartableInit2))
-		framework.ExpectNoError(results.StartsBefore(restartableInit1, restartableInit3))
-		framework.ExpectNoError(results.StartsBefore(restartableInit2, restartableInit3))
-		framework.ExpectNoError(results.StartsBefore(restartableInit1, regular1))
-		framework.ExpectNoError(results.StartsBefore(restartableInit2, regular1))
-		framework.ExpectNoError(results.StartsBefore(restartableInit3, regular1))
-
-		// main containers exit first
-		framework.ExpectNoError(results.ExitsBefore(regular1, restartableInit1))
-		framework.ExpectNoError(results.ExitsBefore(regular1, restartableInit2))
-		framework.ExpectNoError(results.ExitsBefore(regular1, restartableInit3))
-		// followed by sidecars in reverse order
-		framework.ExpectNoError(results.ExitsBefore(restartableInit3, restartableInit2))
-		framework.ExpectNoError(results.ExitsBefore(restartableInit2, restartableInit1))
-	})
-
-	ginkgo.It("should terminate sidecars simultaneously if prestop doesn't exit", func() {
-		restartableInit1 := "restartable-init-1"
-		restartableInit2 := "restartable-init-2"
-		restartableInit3 := "restartable-init-3"
-		regular1 := "regular-1"
-
-		makePrestop := func(containerName string) *v1.Lifecycle {
-			return &v1.Lifecycle{
-				PreStop: &v1.LifecycleHandler{
-					Exec: &v1.ExecAction{
-						Command: ExecCommand(prefixedName(PreStopPrefix, containerName), execCommand{
-							ExitCode:      0,
-							ContainerName: containerName,
-							LoopForever:   true,
-						}),
 					},
 				},
 			}
-		}
 
-		pod := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "serialize-termination",
-			},
-			Spec: v1.PodSpec{
-				RestartPolicy: v1.RestartPolicyNever,
-				InitContainers: []v1.Container{
-					{
-						Name:          restartableInit1,
-						Image:         busyboxImage,
-						RestartPolicy: &containerRestartPolicyAlways,
-						Command: ExecCommand(restartableInit1, execCommand{
-							Delay:              60,
-							TerminationSeconds: 5,
-							ExitCode:           0,
-						}),
-						Lifecycle: makePrestop(restartableInit1),
-					},
-					{
-						Name:          restartableInit2,
-						Image:         busyboxImage,
-						RestartPolicy: &containerRestartPolicyAlways,
-						Command: ExecCommand(restartableInit2, execCommand{
-							Delay:              60,
-							TerminationSeconds: 5,
-							ExitCode:           0,
-						}),
-						Lifecycle: makePrestop(restartableInit2),
-					},
-					{
-						Name:          restartableInit3,
-						Image:         busyboxImage,
-						RestartPolicy: &containerRestartPolicyAlways,
-						Command: ExecCommand(restartableInit3, execCommand{
-							Delay:              60,
-							TerminationSeconds: 5,
-							ExitCode:           0,
-						}),
-						Lifecycle: makePrestop(restartableInit3),
-					},
-				},
-				Containers: []v1.Container{
-					{
-						Name:  regular1,
-						Image: busyboxImage,
-						Command: ExecCommand(regular1, execCommand{
-							Delay:    5,
-							ExitCode: 0,
-						}),
-					},
-				},
-			},
-		}
+			preparePod(pod)
 
-		preparePod(pod)
+			client := e2epod.NewPodClient(f)
+			pod = client.Create(ctx, pod)
 
-		client := e2epod.NewPodClient(f)
-		pod = client.Create(context.TODO(), pod)
+			ginkgo.By("Waiting for the pod to finish")
+			err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(ctx, f.ClientSet, pod.Name, pod.Namespace, 5*time.Minute)
+			framework.ExpectNoError(err)
 
-		err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(context.TODO(), f.ClientSet, pod.Name, pod.Namespace, 5*time.Minute)
-		framework.ExpectNoError(err)
+			pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+			framework.ExpectNoError(err)
+			results := parseOutput(ctx, f, pod)
 
-		pod, err = client.Get(context.TODO(), pod.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-
-		results := parseOutput(context.TODO(), f, pod)
-
-		ginkgo.By("Analyzing results")
-		framework.ExpectNoError(results.StartsBefore(restartableInit1, restartableInit2))
-		framework.ExpectNoError(results.StartsBefore(restartableInit1, restartableInit3))
-		framework.ExpectNoError(results.StartsBefore(restartableInit2, restartableInit3))
-		framework.ExpectNoError(results.StartsBefore(restartableInit1, regular1))
-		framework.ExpectNoError(results.StartsBefore(restartableInit2, regular1))
-		framework.ExpectNoError(results.StartsBefore(restartableInit3, regular1))
-
-		ps1, err := results.TimeOfStart(prefixedName(PreStopPrefix, restartableInit1))
-		framework.ExpectNoError(err)
-		ps2, err := results.TimeOfStart(prefixedName(PreStopPrefix, restartableInit2))
-		framework.ExpectNoError(err)
-		ps3, err := results.TimeOfStart(prefixedName(PreStopPrefix, restartableInit3))
-		framework.ExpectNoError(err)
-
-		ps1Last, err := results.TimeOfLastLoop(prefixedName(PreStopPrefix, restartableInit1))
-		framework.ExpectNoError(err)
-		ps2Last, err := results.TimeOfLastLoop(prefixedName(PreStopPrefix, restartableInit2))
-		framework.ExpectNoError(err)
-		ps3Last, err := results.TimeOfLastLoop(prefixedName(PreStopPrefix, restartableInit3))
-		framework.ExpectNoError(err)
-
-		const simulToleration = 0.5
-		// should all end together since they loop infinitely and exceed their grace period
-		gomega.Expect(ps1Last-ps2Last).To(gomega.BeNumerically("~", 0, simulToleration),
-			fmt.Sprintf("expected PostStart 1 & PostStart 2 to be killed at the same time, got %s", results))
-		gomega.Expect(ps1Last-ps3Last).To(gomega.BeNumerically("~", 0, simulToleration),
-			fmt.Sprintf("expected PostStart 1 & PostStart 3 to be killed at the same time, got %s", results))
-		gomega.Expect(ps2Last-ps3Last).To(gomega.BeNumerically("~", 0, simulToleration),
-			fmt.Sprintf("expected PostStart 2 & PostStart 3 to be killed at the same time, got %s", results))
-
-		// 30 seconds + 2 second minimum grace for the SIGKILL
-		const lifetimeToleration = 1
-		gomega.Expect(ps1Last-ps1).To(gomega.BeNumerically("~", 32, lifetimeToleration),
-			fmt.Sprintf("expected PostStart 1 to live for ~32 seconds, got %s", results))
-		gomega.Expect(ps2Last-ps2).To(gomega.BeNumerically("~", 32, lifetimeToleration),
-			fmt.Sprintf("expected PostStart 2 to live for ~32 seconds, got %s", results))
-		gomega.Expect(ps3Last-ps3).To(gomega.BeNumerically("~", 32, lifetimeToleration),
-			fmt.Sprintf("expected PostStart 3 to live for ~32 seconds, got %s", results))
-
-	})
-
-	ginkgo.It("should call sidecar container PreStop hook simultaneously", func() {
-		restartableInit1 := "restartable-init-1"
-		restartableInit2 := "restartable-init-2"
-		restartableInit3 := "restartable-init-3"
-		regular1 := "regular-1"
-
-		makePrestop := func(containerName string) *v1.Lifecycle {
-			return &v1.Lifecycle{
-				PreStop: &v1.LifecycleHandler{
-					Exec: &v1.ExecAction{
-						Command: ExecCommand(prefixedName(PreStopPrefix, containerName), execCommand{
-							Delay:         1,
-							ExitCode:      0,
-							ContainerName: containerName,
-						}),
-					},
-				},
-			}
-		}
-
-		pod := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "serialize-termination-simul-prestop",
-			},
-			Spec: v1.PodSpec{
-				RestartPolicy: v1.RestartPolicyNever,
-				InitContainers: []v1.Container{
-					{
-						Name:          restartableInit1,
-						Image:         busyboxImage,
-						RestartPolicy: &containerRestartPolicyAlways,
-						Command: ExecCommand(restartableInit1, execCommand{
-							Delay:              60,
-							TerminationSeconds: 5,
-							ExitCode:           0,
-						}),
-						Lifecycle: makePrestop(restartableInit1),
-					},
-					{
-						Name:          restartableInit2,
-						Image:         busyboxImage,
-						RestartPolicy: &containerRestartPolicyAlways,
-						Command: ExecCommand(restartableInit2, execCommand{
-							Delay:              60,
-							TerminationSeconds: 5,
-							ExitCode:           0,
-						}),
-						Lifecycle: makePrestop(restartableInit2),
-					},
-					{
-						Name:          restartableInit3,
-						Image:         busyboxImage,
-						RestartPolicy: &containerRestartPolicyAlways,
-						Command: ExecCommand(restartableInit3, execCommand{
-							Delay:              60,
-							TerminationSeconds: 5,
-							ExitCode:           0,
-						}),
-						Lifecycle: makePrestop(restartableInit3),
-					},
-				},
-				Containers: []v1.Container{
-					{
-						Name:  regular1,
-						Image: busyboxImage,
-						Command: ExecCommand(regular1, execCommand{
-							Delay:    5,
-							ExitCode: 0,
-						}),
-					},
-				},
-			},
-		}
-
-		preparePod(pod)
-
-		client := e2epod.NewPodClient(f)
-		pod = client.Create(context.TODO(), pod)
-
-		err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(context.TODO(), f.ClientSet, pod.Name, pod.Namespace, 5*time.Minute)
-		framework.ExpectNoError(err)
-
-		pod, err = client.Get(context.TODO(), pod.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-
-		results := parseOutput(context.TODO(), f, pod)
-
-		ginkgo.By("Analyzing results")
-		framework.ExpectNoError(results.StartsBefore(restartableInit1, restartableInit2))
-		framework.ExpectNoError(results.StartsBefore(restartableInit1, restartableInit3))
-		framework.ExpectNoError(results.StartsBefore(restartableInit2, restartableInit3))
-		framework.ExpectNoError(results.StartsBefore(restartableInit1, regular1))
-		framework.ExpectNoError(results.StartsBefore(restartableInit2, regular1))
-		framework.ExpectNoError(results.StartsBefore(restartableInit3, regular1))
-
-		// main containers exit first
-		framework.ExpectNoError(results.ExitsBefore(regular1, restartableInit1))
-		framework.ExpectNoError(results.ExitsBefore(regular1, restartableInit2))
-		framework.ExpectNoError(results.ExitsBefore(regular1, restartableInit3))
-
-		// followed by sidecars in reverse order
-		framework.ExpectNoError(results.ExitsBefore(restartableInit3, restartableInit2))
-		framework.ExpectNoError(results.ExitsBefore(restartableInit2, restartableInit1))
-
-		// and the pre-stop hooks should have been called simultaneously
-		ps1, err := results.TimeOfStart(prefixedName(PreStopPrefix, restartableInit1))
-		framework.ExpectNoError(err)
-		ps2, err := results.TimeOfStart(prefixedName(PreStopPrefix, restartableInit2))
-		framework.ExpectNoError(err)
-		ps3, err := results.TimeOfStart(prefixedName(PreStopPrefix, restartableInit3))
-		framework.ExpectNoError(err)
-
-		const toleration = 0.5
-		gomega.Expect(ps1-ps2).To(gomega.BeNumerically("~", 0, toleration),
-			fmt.Sprintf("expected PostStart 1 & PostStart 2 to start at the same time, got %s", results))
-		gomega.Expect(ps1-ps3).To(gomega.BeNumerically("~", 0, toleration),
-			fmt.Sprintf("expected PostStart 1 & PostStart 3 to start at the same time, got %s", results))
-		gomega.Expect(ps2-ps3).To(gomega.BeNumerically("~", 0, toleration),
-			fmt.Sprintf("expected PostStart 2 & PostStart 3 to start at the same time, got %s", results))
-	})
-
-	ginkgo.It("should not hang in termination if terminated during initialization", func() {
-		startInit := "start-init"
-		restartableInit1 := "restartable-init-1"
-		restartableInit2 := "restartable-init-2"
-		restartableInit3 := "restartable-init-3"
-		regular1 := "regular-1"
-
-		makePrestop := func(containerName string) *v1.Lifecycle {
-			return &v1.Lifecycle{
-				PreStop: &v1.LifecycleHandler{
-					Exec: &v1.ExecAction{
-						Command: ExecCommand(prefixedName(PreStopPrefix, containerName), execCommand{
-							Delay:         1,
-							ExitCode:      0,
-							ContainerName: containerName,
-						}),
-					},
-				},
-			}
-		}
-
-		pod := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "dont-hang-if-terminated-in-init",
-			},
-			Spec: v1.PodSpec{
-				RestartPolicy: v1.RestartPolicyNever,
-				InitContainers: []v1.Container{
-					{
-						Name:  startInit,
-						Image: busyboxImage,
-						Command: ExecCommand(startInit, execCommand{
-							Delay:              300,
-							TerminationSeconds: 0,
-							ExitCode:           0,
-						}),
-					},
-					{
-						Name:          restartableInit1,
-						Image:         busyboxImage,
-						RestartPolicy: &containerRestartPolicyAlways,
-						Command: ExecCommand(restartableInit1, execCommand{
-							Delay:              60,
-							TerminationSeconds: 5,
-							ExitCode:           0,
-						}),
-						Lifecycle: makePrestop(restartableInit1),
-					},
-					{
-						Name:          restartableInit2,
-						Image:         busyboxImage,
-						RestartPolicy: &containerRestartPolicyAlways,
-						Command: ExecCommand(restartableInit2, execCommand{
-							Delay:              60,
-							TerminationSeconds: 5,
-							ExitCode:           0,
-						}),
-						Lifecycle: makePrestop(restartableInit2),
-					},
-					{
-						Name:          restartableInit3,
-						Image:         busyboxImage,
-						RestartPolicy: &containerRestartPolicyAlways,
-						Command: ExecCommand(restartableInit3, execCommand{
-							Delay:              60,
-							TerminationSeconds: 5,
-							ExitCode:           0,
-						}),
-						Lifecycle: makePrestop(restartableInit3),
-					},
-				},
-				Containers: []v1.Container{
-					{
-						Name:  regular1,
-						Image: busyboxImage,
-						Command: ExecCommand(regular1, execCommand{
-							Delay:    5,
-							ExitCode: 0,
-						}),
-					},
-				},
-			},
-		}
-
-		preparePod(pod)
-
-		client := e2epod.NewPodClient(f)
-		pod = client.Create(context.TODO(), pod)
-
-		err := e2epod.WaitForPodCondition(context.TODO(), f.ClientSet, pod.Namespace, pod.Name, "pod pending and init running", 2*time.Minute, func(pod *v1.Pod) (bool, error) {
-			if pod.Status.Phase != v1.PodPending {
-				return false, fmt.Errorf("pod should be in pending phase")
-			}
-			if len(pod.Status.InitContainerStatuses) < 1 {
-				return false, nil
-			}
-			containerStatus := pod.Status.InitContainerStatuses[0]
-			return *containerStatus.Started && containerStatus.State.Running != nil, nil
+			ginkgo.By("Analyzing results")
+			framework.ExpectNoError(results.StartsBefore(restartableInit1, restartableInit2))
+			framework.ExpectNoError(results.StartsBefore(restartableInit2, regular1))
 		})
-		framework.ExpectNoError(err)
 
-		// the init container is running, so we stop the pod before the sidecars even start
-		start := time.Now()
-		grace := int64(3)
-		ginkgo.By("deleting the pod")
-		err = client.Delete(context.TODO(), pod.Name, metav1.DeleteOptions{GracePeriodSeconds: &grace})
-		framework.ExpectNoError(err)
-		ginkgo.By("waiting for the pod to disappear")
-		err = e2epod.WaitForPodNotFoundInNamespace(context.TODO(), f.ClientSet, pod.Name, pod.Namespace, 120*time.Second)
-		framework.ExpectNoError(err)
+		ginkgo.When("using a PreStop hook", func() {
+			ginkgo.It("should call the container's preStop hook and not launch next container if the restartable init container's startup probe fails", func(ctx context.Context) {
 
-		buffer := int64(2)
-		deleteTime := time.Since(start).Seconds()
-		// should delete quickly and not try to start/wait on any sidecars since they never started
-		gomega.Expect(deleteTime).To(gomega.BeNumerically("<", grace+buffer), fmt.Sprintf("should delete in < %d seconds, took %f", grace+buffer, deleteTime))
+				restartableInit1 := "restartable-init-1"
+				regular1 := "regular-1"
+
+				pod := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "restartable-init-container-failed-startup",
+					},
+					Spec: v1.PodSpec{
+						RestartPolicy: v1.RestartPolicyAlways,
+						InitContainers: []v1.Container{
+							{
+								Name:  restartableInit1,
+								Image: busyboxImage,
+								Command: ExecCommand(restartableInit1, execCommand{
+									Delay:              600,
+									TerminationSeconds: 15,
+									ExitCode:           0,
+								}),
+								StartupProbe: &v1.Probe{
+									InitialDelaySeconds: 5,
+									FailureThreshold:    1,
+									ProbeHandler: v1.ProbeHandler{
+										Exec: &v1.ExecAction{
+											Command: []string{
+												"sh",
+												"-c",
+												"exit 1",
+											},
+										},
+									},
+								},
+								Lifecycle: &v1.Lifecycle{
+									PreStop: &v1.LifecycleHandler{
+										Exec: &v1.ExecAction{
+											Command: ExecCommand(prefixedName(PreStopPrefix, restartableInit1), execCommand{
+												Delay:         1,
+												ExitCode:      0,
+												ContainerName: restartableInit1,
+											}),
+										},
+									},
+								},
+								RestartPolicy: &containerRestartPolicyAlways,
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									Delay:    1,
+									ExitCode: 0,
+								}),
+							},
+						},
+					},
+				}
+
+				preparePod(pod)
+
+				client := e2epod.NewPodClient(f)
+				pod = client.Create(ctx, pod)
+
+				ginkgo.By("Waiting for the restartable init container to restart")
+				err := WaitForPodInitContainerRestartCount(ctx, f.ClientSet, pod.Namespace, pod.Name, 0, 2, 2*time.Minute)
+				framework.ExpectNoError(err)
+
+				pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err)
+
+				if pod.Status.Phase != v1.PodPending {
+					framework.Failf("pod %q is not pending, it's %q", pod.Name, pod.Status.Phase)
+				}
+
+				results := parseOutput(ctx, f, pod)
+
+				ginkgo.By("Analyzing results")
+				framework.ExpectNoError(results.RunTogether(restartableInit1, prefixedName(PreStopPrefix, restartableInit1)))
+				framework.ExpectNoError(results.Starts(prefixedName(PreStopPrefix, restartableInit1)))
+				framework.ExpectNoError(results.Exits(restartableInit1))
+				framework.ExpectNoError(results.DoesntStart(regular1))
+			})
+		})
+	})
+
+	ginkgo.When("running restartable init containers with liveness probes", func() {
+		ginkgo.It("should call the container's preStop hook and start the next container if the restartable init container's liveness probe fails", func(ctx context.Context) {
+
+			restartableInit1 := "restartable-init-1"
+			regular1 := "regular-1"
+
+			pod := &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "restartable-init-container-failed-startup",
+				},
+				Spec: v1.PodSpec{
+					RestartPolicy: v1.RestartPolicyAlways,
+					InitContainers: []v1.Container{
+						{
+							Name:  restartableInit1,
+							Image: busyboxImage,
+							Command: ExecCommand(restartableInit1, execCommand{
+								Delay:              600,
+								TerminationSeconds: 15,
+								ExitCode:           0,
+							}),
+							LivenessProbe: &v1.Probe{
+								InitialDelaySeconds: 5,
+								FailureThreshold:    1,
+								ProbeHandler: v1.ProbeHandler{
+									Exec: &v1.ExecAction{
+										Command: []string{
+											"sh",
+											"-c",
+											"exit 1",
+										},
+									},
+								},
+							},
+							Lifecycle: &v1.Lifecycle{
+								PreStop: &v1.LifecycleHandler{
+									Exec: &v1.ExecAction{
+										Command: ExecCommand(prefixedName(PreStopPrefix, restartableInit1), execCommand{
+											Delay:         1,
+											ExitCode:      0,
+											ContainerName: restartableInit1,
+										}),
+									},
+								},
+							},
+							RestartPolicy: &containerRestartPolicyAlways,
+						},
+					},
+					Containers: []v1.Container{
+						{
+							Name:  regular1,
+							Image: busyboxImage,
+							Command: ExecCommand(regular1, execCommand{
+								Delay:    1,
+								ExitCode: 0,
+							}),
+						},
+					},
+				},
+			}
+
+			preparePod(pod)
+
+			client := e2epod.NewPodClient(f)
+			pod = client.Create(ctx, pod)
+
+			ginkgo.By("Waiting for the restartable init container to restart")
+			err := WaitForPodInitContainerRestartCount(ctx, f.ClientSet, pod.Namespace, pod.Name, 0, 2, 2*time.Minute)
+			framework.ExpectNoError(err)
+
+			err = WaitForPodContainerRestartCount(ctx, f.ClientSet, pod.Namespace, pod.Name, 0, 1, 2*time.Minute)
+			framework.ExpectNoError(err)
+
+			pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+			framework.ExpectNoError(err)
+
+			results := parseOutput(ctx, f, pod)
+
+			ginkgo.By("Analyzing results")
+			framework.ExpectNoError(results.RunTogether(restartableInit1, prefixedName(PreStopPrefix, restartableInit1)))
+			framework.ExpectNoError(results.Starts(prefixedName(PreStopPrefix, restartableInit1)))
+			framework.ExpectNoError(results.Exits(restartableInit1))
+			framework.ExpectNoError(results.Starts(regular1))
+		})
+	})
+
+	ginkgo.When("A pod with restartable init containers is terminating", func() {
+		ginkgo.When("The containers exit successfully", func() {
+			ginkgo.It("should terminate sidecars in reverse order after all main containers have exited", func(ctx context.Context) {
+				restartableInit1 := "restartable-init-1"
+				restartableInit2 := "restartable-init-2"
+				restartableInit3 := "restartable-init-3"
+				regular1 := "regular-1"
+
+				pod := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "serialize-termination",
+					},
+					Spec: v1.PodSpec{
+						RestartPolicy: v1.RestartPolicyNever,
+						InitContainers: []v1.Container{
+							{
+								Name:          restartableInit1,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit1, execCommand{
+									Delay:              60,
+									TerminationSeconds: 5,
+									ExitCode:           0,
+								}),
+							},
+							{
+								Name:          restartableInit2,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit2, execCommand{
+									Delay:              60,
+									TerminationSeconds: 5,
+									ExitCode:           0,
+								}),
+							},
+							{
+								Name:          restartableInit3,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit3, execCommand{
+									Delay:              60,
+									TerminationSeconds: 5,
+									ExitCode:           0,
+								}),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									Delay:    5,
+									ExitCode: 0,
+								}),
+							},
+						},
+					},
+				}
+
+				preparePod(pod)
+
+				client := e2epod.NewPodClient(f)
+				pod = client.Create(ctx, pod)
+
+				err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(ctx, f.ClientSet, pod.Name, pod.Namespace, 5*time.Minute)
+				framework.ExpectNoError(err)
+
+				pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err)
+
+				expectPodTerminationContainerStatuses(pod.Status.InitContainerStatuses, map[string]podTerminationContainerStatus{
+					restartableInit1: {exitCode: int32(0), reason: "Completed"},
+					restartableInit2: {exitCode: int32(0), reason: "Completed"},
+					restartableInit3: {exitCode: int32(0), reason: "Completed"},
+				})
+
+				results := parseOutput(ctx, f, pod)
+
+				ginkgo.By("Analyzing results")
+				framework.ExpectNoError(results.StartsBefore(restartableInit1, restartableInit2))
+				framework.ExpectNoError(results.StartsBefore(restartableInit1, restartableInit3))
+				framework.ExpectNoError(results.StartsBefore(restartableInit2, restartableInit3))
+				framework.ExpectNoError(results.StartsBefore(restartableInit1, regular1))
+				framework.ExpectNoError(results.StartsBefore(restartableInit2, regular1))
+				framework.ExpectNoError(results.StartsBefore(restartableInit3, regular1))
+
+				// main containers exit first
+				framework.ExpectNoError(results.ExitsBefore(regular1, restartableInit1))
+				framework.ExpectNoError(results.ExitsBefore(regular1, restartableInit2))
+				framework.ExpectNoError(results.ExitsBefore(regular1, restartableInit3))
+				// followed by sidecars in reverse order
+				framework.ExpectNoError(results.ExitsBefore(restartableInit3, restartableInit2))
+				framework.ExpectNoError(results.ExitsBefore(restartableInit2, restartableInit1))
+			})
+		})
+
+		ginkgo.When("The PreStop hooks don't exit", func() {
+			ginkgo.It("should terminate sidecars simultaneously if prestop doesn't exit", func(ctx context.Context) {
+				restartableInit1 := "restartable-init-1"
+				restartableInit2 := "restartable-init-2"
+				restartableInit3 := "restartable-init-3"
+				regular1 := "regular-1"
+
+				makePrestop := func(containerName string) *v1.Lifecycle {
+					return &v1.Lifecycle{
+						PreStop: &v1.LifecycleHandler{
+							Exec: &v1.ExecAction{
+								Command: ExecCommand(prefixedName(PreStopPrefix, containerName), execCommand{
+									ExitCode:      0,
+									ContainerName: containerName,
+									LoopForever:   true,
+								}),
+							},
+						},
+					}
+				}
+
+				pod := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "serialize-termination",
+					},
+					Spec: v1.PodSpec{
+						RestartPolicy: v1.RestartPolicyNever,
+						InitContainers: []v1.Container{
+							{
+								Name:          restartableInit1,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit1, execCommand{
+									Delay:              60,
+									TerminationSeconds: 5,
+									ExitCode:           0,
+								}),
+								Lifecycle: makePrestop(restartableInit1),
+							},
+							{
+								Name:          restartableInit2,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit2, execCommand{
+									Delay:              60,
+									TerminationSeconds: 5,
+									ExitCode:           0,
+								}),
+								Lifecycle: makePrestop(restartableInit2),
+							},
+							{
+								Name:          restartableInit3,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit3, execCommand{
+									Delay:              60,
+									TerminationSeconds: 5,
+									ExitCode:           0,
+								}),
+								Lifecycle: makePrestop(restartableInit3),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									Delay:    5,
+									ExitCode: 0,
+								}),
+							},
+						},
+					},
+				}
+
+				preparePod(pod)
+
+				client := e2epod.NewPodClient(f)
+				pod = client.Create(ctx, pod)
+
+				err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(ctx, f.ClientSet, pod.Name, pod.Namespace, 5*time.Minute)
+				framework.ExpectNoError(err)
+
+				pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err)
+
+				// all restartable init containers are sigkilled with exit code 137
+				expectPodTerminationContainerStatuses(pod.Status.InitContainerStatuses, map[string]podTerminationContainerStatus{
+					restartableInit1: {exitCode: int32(137), reason: "Error"},
+					restartableInit2: {exitCode: int32(137), reason: "Error"},
+					restartableInit3: {exitCode: int32(137), reason: "Error"},
+				})
+
+				results := parseOutput(ctx, f, pod)
+
+				ginkgo.By("Analyzing results")
+				framework.ExpectNoError(results.StartsBefore(restartableInit1, restartableInit2))
+				framework.ExpectNoError(results.StartsBefore(restartableInit1, restartableInit3))
+				framework.ExpectNoError(results.StartsBefore(restartableInit2, restartableInit3))
+				framework.ExpectNoError(results.StartsBefore(restartableInit1, regular1))
+				framework.ExpectNoError(results.StartsBefore(restartableInit2, regular1))
+				framework.ExpectNoError(results.StartsBefore(restartableInit3, regular1))
+
+				ps1, err := results.TimeOfStart(prefixedName(PreStopPrefix, restartableInit1))
+				framework.ExpectNoError(err)
+				ps2, err := results.TimeOfStart(prefixedName(PreStopPrefix, restartableInit2))
+				framework.ExpectNoError(err)
+				ps3, err := results.TimeOfStart(prefixedName(PreStopPrefix, restartableInit3))
+				framework.ExpectNoError(err)
+
+				ps1Last, err := results.TimeOfLastLoop(prefixedName(PreStopPrefix, restartableInit1))
+				framework.ExpectNoError(err)
+				ps2Last, err := results.TimeOfLastLoop(prefixedName(PreStopPrefix, restartableInit2))
+				framework.ExpectNoError(err)
+				ps3Last, err := results.TimeOfLastLoop(prefixedName(PreStopPrefix, restartableInit3))
+				framework.ExpectNoError(err)
+
+				const simulToleration = 500 // milliseconds
+				// should all end together since they loop infinitely and exceed their grace period
+				gomega.Expect(ps1Last-ps2Last).To(gomega.BeNumerically("~", 0, simulToleration),
+					fmt.Sprintf("expected PostStart 1 & PostStart 2 to be killed at the same time, got %s", results))
+				gomega.Expect(ps1Last-ps3Last).To(gomega.BeNumerically("~", 0, simulToleration),
+					fmt.Sprintf("expected PostStart 1 & PostStart 3 to be killed at the same time, got %s", results))
+				gomega.Expect(ps2Last-ps3Last).To(gomega.BeNumerically("~", 0, simulToleration),
+					fmt.Sprintf("expected PostStart 2 & PostStart 3 to be killed at the same time, got %s", results))
+
+				// 30 seconds + 2 second minimum grace for the SIGKILL
+				const lifetimeToleration = 1000 // milliseconds
+				gomega.Expect(ps1Last-ps1).To(gomega.BeNumerically("~", 32000, lifetimeToleration),
+					fmt.Sprintf("expected PostStart 1 to live for ~32 seconds, got %s", results))
+				gomega.Expect(ps2Last-ps2).To(gomega.BeNumerically("~", 32000, lifetimeToleration),
+					fmt.Sprintf("expected PostStart 2 to live for ~32 seconds, got %s", results))
+				gomega.Expect(ps3Last-ps3).To(gomega.BeNumerically("~", 32000, lifetimeToleration),
+					fmt.Sprintf("expected PostStart 3 to live for ~32 seconds, got %s", results))
+
+			})
+		})
+
+		ginkgo.When("the restartable init containers have multiple PreStop hooks", func() {
+			ginkgo.It("should call sidecar container PreStop hook simultaneously", func(ctx context.Context) {
+				restartableInit1 := "restartable-init-1"
+				restartableInit2 := "restartable-init-2"
+				restartableInit3 := "restartable-init-3"
+				regular1 := "regular-1"
+
+				makePrestop := func(containerName string) *v1.Lifecycle {
+					return &v1.Lifecycle{
+						PreStop: &v1.LifecycleHandler{
+							Exec: &v1.ExecAction{
+								Command: ExecCommand(prefixedName(PreStopPrefix, containerName), execCommand{
+									Delay:         1,
+									ExitCode:      0,
+									ContainerName: containerName,
+								}),
+							},
+						},
+					}
+				}
+
+				pod := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "serialize-termination-simul-prestop",
+					},
+					Spec: v1.PodSpec{
+						RestartPolicy: v1.RestartPolicyNever,
+						InitContainers: []v1.Container{
+							{
+								Name:          restartableInit1,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit1, execCommand{
+									Delay:              60,
+									TerminationSeconds: 5,
+									ExitCode:           0,
+								}),
+								Lifecycle: makePrestop(restartableInit1),
+							},
+							{
+								Name:          restartableInit2,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit2, execCommand{
+									Delay:              60,
+									TerminationSeconds: 5,
+									ExitCode:           0,
+								}),
+								Lifecycle: makePrestop(restartableInit2),
+							},
+							{
+								Name:          restartableInit3,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit3, execCommand{
+									Delay:              60,
+									TerminationSeconds: 5,
+									ExitCode:           0,
+								}),
+								Lifecycle: makePrestop(restartableInit3),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									Delay:    5,
+									ExitCode: 0,
+								}),
+							},
+						},
+					},
+				}
+
+				preparePod(pod)
+
+				client := e2epod.NewPodClient(f)
+				pod = client.Create(ctx, pod)
+
+				err := e2epod.WaitTimeoutForPodNoLongerRunningInNamespace(ctx, f.ClientSet, pod.Name, pod.Namespace, 5*time.Minute)
+				framework.ExpectNoError(err)
+
+				pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err)
+
+				expectPodTerminationContainerStatuses(pod.Status.InitContainerStatuses, map[string]podTerminationContainerStatus{
+					restartableInit1: {exitCode: int32(0), reason: "Completed"},
+					restartableInit2: {exitCode: int32(0), reason: "Completed"},
+					restartableInit3: {exitCode: int32(0), reason: "Completed"},
+				})
+
+				results := parseOutput(ctx, f, pod)
+
+				ginkgo.By("Analyzing results")
+				framework.ExpectNoError(results.StartsBefore(restartableInit1, restartableInit2))
+				framework.ExpectNoError(results.StartsBefore(restartableInit1, restartableInit3))
+				framework.ExpectNoError(results.StartsBefore(restartableInit2, restartableInit3))
+				framework.ExpectNoError(results.StartsBefore(restartableInit1, regular1))
+				framework.ExpectNoError(results.StartsBefore(restartableInit2, regular1))
+				framework.ExpectNoError(results.StartsBefore(restartableInit3, regular1))
+
+				// main containers exit first
+				framework.ExpectNoError(results.ExitsBefore(regular1, restartableInit1))
+				framework.ExpectNoError(results.ExitsBefore(regular1, restartableInit2))
+				framework.ExpectNoError(results.ExitsBefore(regular1, restartableInit3))
+
+				// followed by sidecars in reverse order
+				framework.ExpectNoError(results.ExitsBefore(restartableInit3, restartableInit2))
+				framework.ExpectNoError(results.ExitsBefore(restartableInit2, restartableInit1))
+
+				// and the pre-stop hooks should have been called simultaneously
+				ps1, err := results.TimeOfStart(prefixedName(PreStopPrefix, restartableInit1))
+				framework.ExpectNoError(err)
+				ps2, err := results.TimeOfStart(prefixedName(PreStopPrefix, restartableInit2))
+				framework.ExpectNoError(err)
+				ps3, err := results.TimeOfStart(prefixedName(PreStopPrefix, restartableInit3))
+				framework.ExpectNoError(err)
+
+				const toleration = 500 // milliseconds
+				gomega.Expect(ps1-ps2).To(gomega.BeNumerically("~", 0, toleration),
+					fmt.Sprintf("expected PostStart 1 & PostStart 2 to start at the same time, got %s", results))
+				gomega.Expect(ps1-ps3).To(gomega.BeNumerically("~", 0, toleration),
+					fmt.Sprintf("expected PostStart 1 & PostStart 3 to start at the same time, got %s", results))
+				gomega.Expect(ps2-ps3).To(gomega.BeNumerically("~", 0, toleration),
+					fmt.Sprintf("expected PostStart 2 & PostStart 3 to start at the same time, got %s", results))
+			})
+		})
+
+		ginkgo.When("Restartable init containers are terminated during initialization", func() {
+			ginkgo.It("should not hang in termination if terminated during initialization", func(ctx context.Context) {
+				startInit := "start-init"
+				restartableInit1 := "restartable-init-1"
+				restartableInit2 := "restartable-init-2"
+				restartableInit3 := "restartable-init-3"
+				regular1 := "regular-1"
+
+				makePrestop := func(containerName string) *v1.Lifecycle {
+					return &v1.Lifecycle{
+						PreStop: &v1.LifecycleHandler{
+							Exec: &v1.ExecAction{
+								Command: ExecCommand(prefixedName(PreStopPrefix, containerName), execCommand{
+									Delay:         1,
+									ExitCode:      0,
+									ContainerName: containerName,
+								}),
+							},
+						},
+					}
+				}
+
+				pod := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "dont-hang-if-terminated-in-init",
+					},
+					Spec: v1.PodSpec{
+						RestartPolicy: v1.RestartPolicyNever,
+						InitContainers: []v1.Container{
+							{
+								Name:  startInit,
+								Image: busyboxImage,
+								Command: ExecCommand(startInit, execCommand{
+									Delay:              300,
+									TerminationSeconds: 0,
+									ExitCode:           0,
+								}),
+							},
+							{
+								Name:          restartableInit1,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit1, execCommand{
+									Delay:              60,
+									TerminationSeconds: 5,
+									ExitCode:           0,
+								}),
+								Lifecycle: makePrestop(restartableInit1),
+							},
+							{
+								Name:          restartableInit2,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit2, execCommand{
+									Delay:              60,
+									TerminationSeconds: 5,
+									ExitCode:           0,
+								}),
+								Lifecycle: makePrestop(restartableInit2),
+							},
+							{
+								Name:          restartableInit3,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit3, execCommand{
+									Delay:              60,
+									TerminationSeconds: 5,
+									ExitCode:           0,
+								}),
+								Lifecycle: makePrestop(restartableInit3),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									Delay:    5,
+									ExitCode: 0,
+								}),
+							},
+						},
+					},
+				}
+
+				preparePod(pod)
+
+				client := e2epod.NewPodClient(f)
+				pod = client.Create(ctx, pod)
+
+				err := e2epod.WaitForPodCondition(ctx, f.ClientSet, pod.Namespace, pod.Name, "pod pending and init running", 2*time.Minute, func(pod *v1.Pod) (bool, error) {
+					if pod.Status.Phase != v1.PodPending {
+						return false, fmt.Errorf("pod should be in pending phase")
+					}
+					if len(pod.Status.InitContainerStatuses) < 1 {
+						return false, nil
+					}
+					containerStatus := pod.Status.InitContainerStatuses[0]
+					return *containerStatus.Started && containerStatus.State.Running != nil, nil
+				})
+				framework.ExpectNoError(err)
+
+				// the init container is running, so we stop the pod before the sidecars even start
+				start := time.Now()
+				grace := int64(3)
+				ginkgo.By("deleting the pod")
+				err = client.Delete(ctx, pod.Name, metav1.DeleteOptions{GracePeriodSeconds: &grace})
+				framework.ExpectNoError(err)
+				ginkgo.By("waiting for the pod to disappear")
+				err = e2epod.WaitForPodNotFoundInNamespace(ctx, f.ClientSet, pod.Name, pod.Namespace, 120*time.Second)
+				framework.ExpectNoError(err)
+
+				buffer := int64(2)
+				deleteTime := time.Since(start).Seconds()
+				// should delete quickly and not try to start/wait on any sidecars since they never started
+				gomega.Expect(deleteTime).To(gomega.BeNumerically("<", grace+buffer), fmt.Sprintf("should delete in < %d seconds, took %f", grace+buffer, deleteTime))
+			})
+		})
+
+		ginkgo.When("there is a non-started restartable init container", func() {
+			f.It("should terminate restartable init containers gracefully if there is a non-started restartable init container", func(ctx context.Context) {
+				init1 := "init-1"
+				restartableInit2 := "restartable-init-2"
+				restartableInit3 := "restartable-init-3"
+				regular1 := "regular-1"
+
+				podTerminationGracePeriodSeconds := int64(180)
+				containerTerminationSeconds := 1
+
+				pod := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "terminate-restartable-init-gracefully",
+					},
+					Spec: v1.PodSpec{
+						TerminationGracePeriodSeconds: &podTerminationGracePeriodSeconds,
+						RestartPolicy:                 v1.RestartPolicyNever,
+						InitContainers: []v1.Container{
+							{
+								Name:  init1,
+								Image: busyboxImage,
+								Command: ExecCommand(init1, execCommand{
+									Delay:              1,
+									TerminationSeconds: 5,
+									ExitCode:           0,
+								}),
+							},
+							{
+								Name:  restartableInit2,
+								Image: busyboxImage,
+								Command: ExecCommand(restartableInit2, execCommand{
+									Delay:              600,
+									TerminationSeconds: containerTerminationSeconds,
+									ExitCode:           0,
+								}),
+								StartupProbe: &v1.Probe{
+									FailureThreshold: 600,
+									ProbeHandler: v1.ProbeHandler{
+										Exec: &v1.ExecAction{
+											Command: []string{"false"},
+										},
+									},
+								},
+								RestartPolicy: &containerRestartPolicyAlways,
+							},
+							{
+								Name:  restartableInit3,
+								Image: busyboxImage,
+								Command: ExecCommand(restartableInit3, execCommand{
+									Delay:              600,
+									TerminationSeconds: 1,
+									ExitCode:           0,
+								}),
+								RestartPolicy: &containerRestartPolicyAlways,
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									Delay:              600,
+									TerminationSeconds: 1,
+									ExitCode:           0,
+								}),
+							},
+						},
+					},
+				}
+
+				preparePod(pod)
+
+				client := e2epod.NewPodClient(f)
+				pod = client.Create(ctx, pod)
+
+				err := e2epod.WaitForPodCondition(ctx, f.ClientSet, pod.Namespace, pod.Name, "the second init container is running but not started", 2*time.Minute, func(pod *v1.Pod) (bool, error) {
+					if pod.Status.Phase != v1.PodPending {
+						return false, fmt.Errorf("pod should be in pending phase")
+					}
+					if len(pod.Status.InitContainerStatuses) != 3 {
+						return false, fmt.Errorf("pod should have the same number of statuses as init containers")
+					}
+					containerStatus := pod.Status.InitContainerStatuses[1]
+					return containerStatus.State.Running != nil &&
+						(containerStatus.Started == nil || *containerStatus.Started == false), nil
+				})
+				framework.ExpectNoError(err)
+
+				ginkgo.By("Deleting the pod")
+				err = client.Delete(ctx, pod.Name, metav1.DeleteOptions{GracePeriodSeconds: &podTerminationGracePeriodSeconds})
+				framework.ExpectNoError(err)
+
+				ginkgo.By("Waiting for the pod to terminate gracefully before its terminationGracePeriodSeconds")
+				err = e2epod.WaitForPodNotFoundInNamespace(ctx, f.ClientSet, pod.Name, pod.Namespace,
+					// The duration should be less than the pod's
+					// terminationGracePeriodSeconds while adding a buffer(60s) to the
+					// container termination seconds(1s) to account for the time it
+					// takes to delete the pod.
+					time.Duration(containerTerminationSeconds+60)*time.Second)
+				framework.ExpectNoError(err, "the pod should be deleted before its terminationGracePeriodSeconds if the restartalbe init containers get termination signal correctly")
+			})
+		})
+
+		ginkgo.When("The restartable init containers exit with non-zero exit code", func() {
+			ginkgo.It("should mark pod as succeeded if any of the restartable init containers have terminated with non-zero exit code", func(ctx context.Context) {
+				restartableInit1 := "restartable-init-1"
+				restartableInit2 := "restartable-init-2"
+				restartableInit3 := "restartable-init-3"
+				regular1 := "regular-1"
+
+				podTerminationGracePeriodSeconds := int64(30)
+
+				pod := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "restartable-init-terminated-with-non-zero-exit-code",
+						Finalizers: []string{testFinalizer},
+					},
+					Spec: v1.PodSpec{
+						RestartPolicy:                 v1.RestartPolicyNever,
+						TerminationGracePeriodSeconds: ptr.To(podTerminationGracePeriodSeconds),
+						InitContainers: []v1.Container{
+							{
+								Name:          restartableInit1,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit1, execCommand{
+									Delay:              600,
+									TerminationSeconds: 1,
+									ExitCode:           0,
+								}),
+							},
+							{
+								Name:          restartableInit2,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit2, execCommand{
+									Delay:              600,
+									TerminationSeconds: 1,
+									ExitCode:           1,
+								}),
+							},
+							{
+								Name:          restartableInit3,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit3, execCommand{
+									Delay:              600,
+									TerminationSeconds: 1,
+									ExitCode:           0,
+								}),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									Delay:              600,
+									TerminationSeconds: 1,
+									ExitCode:           0,
+								}),
+							},
+						},
+					},
+				}
+
+				preparePod(pod)
+
+				ginkgo.By("Creating the pod with finalizer")
+				client := e2epod.NewPodClient(f)
+				pod = client.Create(ctx, pod)
+				defer client.RemoveFinalizer(ctx, pod.Name, testFinalizer)
+
+				ginkgo.By("Waiting for the pod to be initialized and run")
+				err := e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, pod)
+				framework.ExpectNoError(err)
+
+				ginkgo.By("Deleting the pod")
+				err = client.Delete(ctx, pod.Name, metav1.DeleteOptions{GracePeriodSeconds: &podTerminationGracePeriodSeconds})
+				framework.ExpectNoError(err)
+
+				ginkgo.By(fmt.Sprintf("Waiting for the pod (%s/%s) to be transitioned into the Succeeded phase", pod.Namespace, pod.Name))
+				err = e2epod.WaitForPodSuccessInNamespace(ctx, f.ClientSet, pod.Name, f.Namespace.Name)
+				framework.ExpectNoError(err, "Failed to await for the pod to be terminated: %q", pod.Name)
+
+				ginkgo.By(fmt.Sprintf("Fetch the end state of the pod (%s/%s)", pod.Namespace, pod.Name))
+				pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err, "Failed to fetch the end state of the pod: %q", pod.Name)
+
+				// regular container is gracefully terminated
+				expectPodTerminationContainerStatuses(pod.Status.ContainerStatuses, map[string]podTerminationContainerStatus{
+					regular1: {exitCode: int32(0), reason: "Completed"},
+				})
+
+				// restartable-init-2 that terminated with non-zero exit code is marked as error
+				expectPodTerminationContainerStatuses(pod.Status.InitContainerStatuses, map[string]podTerminationContainerStatus{
+					restartableInit1: {exitCode: int32(0), reason: "Completed"},
+					restartableInit2: {exitCode: int32(1), reason: "Error"},
+					restartableInit3: {exitCode: int32(0), reason: "Completed"},
+				})
+			})
+		})
+
+		ginkgo.When("The restartable init containers exit with non-zero exit code by prestop hook", func() {
+			ginkgo.It("should mark pod as succeeded if any of the restartable init containers have terminated with non-zero exit code by prestop hook", func(ctx context.Context) {
+				restartableInit1 := "restartable-init-1"
+				restartableInit2 := "restartable-init-2"
+				restartableInit3 := "restartable-init-3"
+				regular1 := "regular-1"
+
+				podTerminationGracePeriodSeconds := int64(30)
+
+				makePrestop := func(containerName string, exitCode int) *v1.Lifecycle {
+					return &v1.Lifecycle{
+						PreStop: &v1.LifecycleHandler{
+							Exec: &v1.ExecAction{
+								Command: ExecCommand(containerName, execCommand{
+									Delay:    1,
+									ExitCode: exitCode,
+								}),
+							},
+						},
+					}
+				}
+
+				pod := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "restartable-init-terminated-with-non-zero-exit-code",
+						Finalizers: []string{testFinalizer},
+					},
+					Spec: v1.PodSpec{
+						RestartPolicy:                 v1.RestartPolicyNever,
+						TerminationGracePeriodSeconds: ptr.To(podTerminationGracePeriodSeconds),
+						InitContainers: []v1.Container{
+							{
+								Name:          restartableInit1,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit1, execCommand{
+									Delay:              600,
+									TerminationSeconds: 1,
+									ExitCode:           0,
+								}),
+								Lifecycle: makePrestop(restartableInit1, 0),
+							},
+							{
+								Name:          restartableInit2,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit2, execCommand{
+									Delay:              600,
+									TerminationSeconds: 1,
+									ExitCode:           0,
+								}),
+								Lifecycle: makePrestop(restartableInit2, 1),
+							},
+							{
+								Name:          restartableInit3,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit3, execCommand{
+									Delay:              600,
+									TerminationSeconds: 1,
+									ExitCode:           0,
+								}),
+								Lifecycle: makePrestop(restartableInit3, 0),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									Delay:              600,
+									TerminationSeconds: 1,
+									ExitCode:           0,
+								}),
+							},
+						},
+					},
+				}
+
+				preparePod(pod)
+
+				ginkgo.By("Creating the pod with finalizer")
+				client := e2epod.NewPodClient(f)
+				pod = client.Create(ctx, pod)
+				defer client.RemoveFinalizer(ctx, pod.Name, testFinalizer)
+
+				ginkgo.By("Waiting for the pod to be initialized and run")
+				err := e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, pod)
+				framework.ExpectNoError(err)
+
+				ginkgo.By("Deleting the pod")
+				err = client.Delete(ctx, pod.Name, metav1.DeleteOptions{GracePeriodSeconds: &podTerminationGracePeriodSeconds})
+				framework.ExpectNoError(err)
+
+				ginkgo.By(fmt.Sprintf("Waiting for the pod (%s/%s) to be transitioned into the Succeeded phase", pod.Namespace, pod.Name))
+				err = e2epod.WaitForPodSuccessInNamespace(ctx, f.ClientSet, pod.Name, f.Namespace.Name)
+				framework.ExpectNoError(err, "Failed to await for the pod to be terminated: %q", pod.Name)
+
+				ginkgo.By(fmt.Sprintf("Fetch the end state of the pod (%s/%s)", pod.Namespace, pod.Name))
+				pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err, "Failed to fetch the end state of the pod: %q", pod.Name)
+
+				// regular container is gracefully terminated
+				expectPodTerminationContainerStatuses(pod.Status.ContainerStatuses, map[string]podTerminationContainerStatus{
+					regular1: {exitCode: int32(0), reason: "Completed"},
+				})
+
+				// restartable init containers are marked as completed if their prestop hooks are failed
+				expectPodTerminationContainerStatuses(pod.Status.InitContainerStatuses, map[string]podTerminationContainerStatus{
+					restartableInit1: {exitCode: int32(0), reason: "Completed"},
+					restartableInit2: {exitCode: int32(0), reason: "Completed"},
+					restartableInit3: {exitCode: int32(0), reason: "Completed"},
+				})
+			})
+		})
+
+		ginkgo.When("The regular container has exceeded its termination grace period seconds", func() {
+			ginkgo.It("should mark pod as failed if regular container has exceeded its termination grace period seconds", func(ctx context.Context) {
+				restartableInit1 := "restartable-init-1"
+				restartableInit2 := "restartable-init-2"
+				restartableInit3 := "restartable-init-3"
+				regular1 := "regular-1"
+
+				podTerminationGracePeriodSeconds := int64(5)
+
+				pod := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "regular-exceeded-termination-grace-period",
+						Finalizers: []string{testFinalizer},
+					},
+					Spec: v1.PodSpec{
+						RestartPolicy:                 v1.RestartPolicyNever,
+						TerminationGracePeriodSeconds: ptr.To(podTerminationGracePeriodSeconds),
+						InitContainers: []v1.Container{
+							{
+								Name:          restartableInit1,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit1, execCommand{
+									Delay:              600,
+									TerminationSeconds: 20,
+									ExitCode:           0,
+								}),
+							},
+							{
+								Name:          restartableInit2,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit2, execCommand{
+									Delay: 600,
+									// SIGKILL won't be sent because it only gets triggered 2 seconds after SIGTERM.
+									TerminationSeconds: 1,
+									ExitCode:           0,
+								}),
+							},
+							{
+								Name:          restartableInit3,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit3, execCommand{
+									Delay:              600,
+									TerminationSeconds: 20,
+									ExitCode:           0,
+								}),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									Delay:              600,
+									TerminationSeconds: 20,
+									ExitCode:           0,
+								}),
+							},
+						},
+					},
+				}
+
+				preparePod(pod)
+
+				ginkgo.By("Creating the pod with finalizer")
+				client := e2epod.NewPodClient(f)
+				pod = client.Create(ctx, pod)
+				defer client.RemoveFinalizer(ctx, pod.Name, testFinalizer)
+
+				ginkgo.By("Waiting for the pod to be initialized and run")
+				err := e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, pod)
+				framework.ExpectNoError(err)
+
+				ginkgo.By("Deleting the pod")
+				err = client.Delete(ctx, pod.Name, metav1.DeleteOptions{GracePeriodSeconds: &podTerminationGracePeriodSeconds})
+				framework.ExpectNoError(err)
+
+				ginkgo.By(fmt.Sprintf("Waiting for the pod (%s/%s) to be transitioned into the Failed phase", pod.Namespace, pod.Name))
+				err = e2epod.WaitForPodTerminatedInNamespace(ctx, f.ClientSet, pod.Name, "", f.Namespace.Name)
+				framework.ExpectNoError(err, "Failed to await for the pod to be terminated: %q", pod.Name)
+
+				ginkgo.By(fmt.Sprintf("Fetch the end state of the pod (%s/%s)", pod.Namespace, pod.Name))
+				pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err, "Failed to fetch the end state of the pod: %q", pod.Name)
+
+				// regular container that exceeds its termination grace period seconds is sigkilled with exit code 137
+				expectPodTerminationContainerStatuses(pod.Status.ContainerStatuses, map[string]podTerminationContainerStatus{
+					regular1: {exitCode: int32(137), reason: "Error"},
+				})
+
+				// restartable-init-2 is gracefully terminated within 2 seconds after receiving SIGTERM.
+				// The other containers that exceed 2 seconds after receiving SIGTERM are sigkilled with exit code 137.
+				expectPodTerminationContainerStatuses(pod.Status.InitContainerStatuses, map[string]podTerminationContainerStatus{
+					restartableInit1: {exitCode: int32(137), reason: "Error"},
+					restartableInit2: {exitCode: int32(0), reason: "Completed"},
+					restartableInit3: {exitCode: int32(137), reason: "Error"},
+				})
+			})
+		})
+
+		ginkgo.When("The restartable init containers have exceeded its termination grace period seconds", func() {
+			ginkgo.It("should mark pod as succeeded if any of the restartable init containers have exceeded its termination grace period seconds", func(ctx context.Context) {
+				restartableInit1 := "restartable-init-1"
+				restartableInit2 := "restartable-init-2"
+				restartableInit3 := "restartable-init-3"
+				regular1 := "regular-1"
+
+				podTerminationGracePeriodSeconds := int64(5)
+
+				pod := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "restartable-init-exceeded-termination-grace-period",
+						Finalizers: []string{testFinalizer},
+					},
+					Spec: v1.PodSpec{
+						RestartPolicy:                 v1.RestartPolicyNever,
+						TerminationGracePeriodSeconds: ptr.To(podTerminationGracePeriodSeconds),
+						InitContainers: []v1.Container{
+							{
+								Name:          restartableInit1,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit1, execCommand{
+									Delay:              600,
+									TerminationSeconds: 1,
+									ExitCode:           0,
+								}),
+							},
+							{
+								Name:          restartableInit2,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit2, execCommand{
+									Delay:              600,
+									TerminationSeconds: 20,
+									ExitCode:           0,
+								}),
+							},
+							{
+								Name:          restartableInit3,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit3, execCommand{
+									Delay:              600,
+									TerminationSeconds: 1,
+									ExitCode:           0,
+								}),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									Delay:              600,
+									TerminationSeconds: 1,
+									ExitCode:           0,
+								}),
+							},
+						},
+					},
+				}
+
+				preparePod(pod)
+
+				ginkgo.By("Creating the pod with finalizer")
+				client := e2epod.NewPodClient(f)
+				pod = client.Create(ctx, pod)
+				defer client.RemoveFinalizer(ctx, pod.Name, testFinalizer)
+
+				ginkgo.By("Waiting for the pod to be initialized and run")
+				err := e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, pod)
+				framework.ExpectNoError(err)
+
+				ginkgo.By("Deleting the pod")
+				err = client.Delete(ctx, pod.Name, metav1.DeleteOptions{GracePeriodSeconds: &podTerminationGracePeriodSeconds})
+				framework.ExpectNoError(err)
+
+				ginkgo.By(fmt.Sprintf("Waiting for the pod (%s/%s) to be transitioned into the Succeeded phase", pod.Namespace, pod.Name))
+				err = e2epod.WaitForPodSuccessInNamespace(ctx, f.ClientSet, pod.Name, f.Namespace.Name)
+				framework.ExpectNoError(err, "Failed to await for the pod to be terminated: %q", pod.Name)
+
+				ginkgo.By(fmt.Sprintf("Fetch the end state of the pod (%s/%s)", pod.Namespace, pod.Name))
+				pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err, "Failed to fetch the end state of the pod: %q", pod.Name)
+
+				// regular container is gracefully terminated
+				expectPodTerminationContainerStatuses(pod.Status.ContainerStatuses, map[string]podTerminationContainerStatus{
+					regular1: {exitCode: int32(0), reason: "Completed"},
+				})
+
+				// restartable-init-2 that exceeds its termination grace period seconds is sigkilled with exit code 137.
+				// The other containers are gracefully terminated within 2 seconds after receiving SIGTERM
+				expectPodTerminationContainerStatuses(pod.Status.InitContainerStatuses, map[string]podTerminationContainerStatus{
+					restartableInit1: {exitCode: int32(0), reason: "Completed"},
+					restartableInit2: {exitCode: int32(137), reason: "Error"},
+					restartableInit3: {exitCode: int32(0), reason: "Completed"},
+				})
+			})
+		})
+
+		ginkgo.When("The regular containers have exceeded its termination grace period seconds by prestop hook", func() {
+			ginkgo.It("should mark pod as failed if any of the prestop hook in regular container has exceeded its termination grace period seconds", func(ctx context.Context) {
+				restartableInit1 := "restartable-init-1"
+				restartableInit2 := "restartable-init-2"
+				restartableInit3 := "restartable-init-3"
+				regular1 := "regular-1"
+
+				podTerminationGracePeriodSeconds := int64(5)
+
+				pod := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "regular-prestop-exceeded-termination-grace-period",
+						Finalizers: []string{testFinalizer},
+					},
+					Spec: v1.PodSpec{
+						RestartPolicy:                 v1.RestartPolicyNever,
+						TerminationGracePeriodSeconds: ptr.To(podTerminationGracePeriodSeconds),
+						InitContainers: []v1.Container{
+							{
+								Name:          restartableInit1,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit1, execCommand{
+									Delay:              600,
+									TerminationSeconds: 1,
+									ExitCode:           0,
+								}),
+							},
+							{
+								Name:          restartableInit2,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit2, execCommand{
+									Delay:              600,
+									TerminationSeconds: 20,
+									ExitCode:           0,
+								}),
+							},
+							{
+								Name:          restartableInit3,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit3, execCommand{
+									Delay:              600,
+									TerminationSeconds: 1,
+									ExitCode:           0,
+								}),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									Delay:              600,
+									TerminationSeconds: 20,
+									ExitCode:           0,
+								}),
+								Lifecycle: &v1.Lifecycle{
+									PreStop: &v1.LifecycleHandler{
+										Exec: &v1.ExecAction{
+											Command: ExecCommand(regular1, execCommand{
+												Delay:    20,
+												ExitCode: 0,
+											}),
+										},
+									},
+								},
+							},
+						},
+					},
+				}
+
+				preparePod(pod)
+
+				ginkgo.By("Creating the pod with finalizer")
+				client := e2epod.NewPodClient(f)
+				pod = client.Create(ctx, pod)
+				defer client.RemoveFinalizer(ctx, pod.Name, testFinalizer)
+
+				ginkgo.By("Waiting for the pod to be initialized and run")
+				err := e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, pod)
+				framework.ExpectNoError(err)
+
+				ginkgo.By("Deleting the pod")
+				err = client.Delete(ctx, pod.Name, metav1.DeleteOptions{GracePeriodSeconds: &podTerminationGracePeriodSeconds})
+				framework.ExpectNoError(err)
+
+				ginkgo.By(fmt.Sprintf("Waiting for the pod (%s/%s) to be transitioned into the Failed phase", pod.Namespace, pod.Name))
+				err = e2epod.WaitForPodTerminatedInNamespace(ctx, f.ClientSet, pod.Name, "", f.Namespace.Name)
+				framework.ExpectNoError(err, "Failed to await for the pod to be terminated: %q", pod.Name)
+
+				ginkgo.By(fmt.Sprintf("Fetch the end state of the pod (%s/%s)", pod.Namespace, pod.Name))
+				pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err, "Failed to fetch the end state of the pod: %q", pod.Name)
+
+				// regular container that exceeds its termination grace period seconds is sigkilled with exit code 137
+				expectPodTerminationContainerStatuses(pod.Status.ContainerStatuses, map[string]podTerminationContainerStatus{
+					regular1: {exitCode: int32(137), reason: "Error"},
+				})
+
+				// restartable-init-2 that exceed 2 seconds after receiving SIGTERM is sigkilled with exit code 137.
+				// The other containers are gracefully terminated within 2 seconds after receiving SIGTERM
+				expectPodTerminationContainerStatuses(pod.Status.InitContainerStatuses, map[string]podTerminationContainerStatus{
+					restartableInit1: {exitCode: int32(0), reason: "Completed"},
+					restartableInit2: {exitCode: int32(137), reason: "Error"},
+					restartableInit3: {exitCode: int32(0), reason: "Completed"},
+				})
+			})
+		})
+
+		ginkgo.When("The restartable init containers have exceeded its termination grace period seconds by prestop hook", func() {
+			ginkgo.It("should mark pod as succeeded if any of the prestop hook in restartable init containers have exceeded its termination grace period seconds", func(ctx context.Context) {
+				restartableInit1 := "restartable-init-1"
+				restartableInit2 := "restartable-init-2"
+				restartableInit3 := "restartable-init-3"
+				regular1 := "regular-1"
+
+				podTerminationGracePeriodSeconds := int64(5)
+
+				makePrestop := func(containerName string, delay int) *v1.Lifecycle {
+					return &v1.Lifecycle{
+						PreStop: &v1.LifecycleHandler{
+							Exec: &v1.ExecAction{
+								Command: ExecCommand(containerName, execCommand{
+									Delay:    delay,
+									ExitCode: 0,
+								}),
+							},
+						},
+					}
+				}
+
+				pod := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "restartable-init-prestop-exceeded-termination-grace-period",
+						Finalizers: []string{testFinalizer},
+					},
+					Spec: v1.PodSpec{
+						RestartPolicy:                 v1.RestartPolicyNever,
+						TerminationGracePeriodSeconds: ptr.To(podTerminationGracePeriodSeconds),
+						InitContainers: []v1.Container{
+							{
+								Name:          restartableInit1,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit1, execCommand{
+									Delay:              600,
+									TerminationSeconds: 1,
+									ExitCode:           0,
+								}),
+								Lifecycle: makePrestop(restartableInit1, 1),
+							},
+							{
+								Name:          restartableInit2,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit2, execCommand{
+									Delay:              600,
+									TerminationSeconds: 20,
+									ExitCode:           0,
+								}),
+								Lifecycle: makePrestop(restartableInit1, 30),
+							},
+							{
+								Name:          restartableInit3,
+								Image:         busyboxImage,
+								RestartPolicy: &containerRestartPolicyAlways,
+								Command: ExecCommand(restartableInit3, execCommand{
+									Delay:              600,
+									TerminationSeconds: 1,
+									ExitCode:           0,
+								}),
+								Lifecycle: makePrestop(restartableInit1, 1),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  regular1,
+								Image: busyboxImage,
+								Command: ExecCommand(regular1, execCommand{
+									Delay:              600,
+									TerminationSeconds: 1,
+									ExitCode:           0,
+								}),
+							},
+						},
+					},
+				}
+
+				preparePod(pod)
+
+				ginkgo.By("Creating the pod with finalizer")
+				client := e2epod.NewPodClient(f)
+				pod = client.Create(ctx, pod)
+				defer client.RemoveFinalizer(ctx, pod.Name, testFinalizer)
+
+				ginkgo.By("Waiting for the pod to be initialized and run")
+				err := e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, pod)
+				framework.ExpectNoError(err)
+
+				ginkgo.By("Deleting the pod")
+				err = client.Delete(ctx, pod.Name, metav1.DeleteOptions{GracePeriodSeconds: &podTerminationGracePeriodSeconds})
+				framework.ExpectNoError(err)
+
+				ginkgo.By(fmt.Sprintf("Waiting for the pod (%s/%s) to be transitioned into the Succeeded phase", pod.Namespace, pod.Name))
+				err = e2epod.WaitForPodSuccessInNamespace(ctx, f.ClientSet, pod.Name, f.Namespace.Name)
+				framework.ExpectNoError(err, "Failed to await for the pod to be terminated: %q", pod.Name)
+
+				ginkgo.By(fmt.Sprintf("Fetch the end state of the pod (%s/%s)", pod.Namespace, pod.Name))
+				pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+				framework.ExpectNoError(err, "Failed to fetch the end state of the pod: %q", pod.Name)
+
+				// regular container is gracefully terminated
+				expectPodTerminationContainerStatuses(pod.Status.ContainerStatuses, map[string]podTerminationContainerStatus{
+					regular1: {exitCode: int32(0), reason: "Completed"},
+				})
+
+				// restartable-init-2 that exceed its termination grace period seconds by prestop hook is sigkilled
+				// with exit code 137.
+				// The other containers are gracefully terminated within their termination grace period seconds
+				expectPodTerminationContainerStatuses(pod.Status.InitContainerStatuses, map[string]podTerminationContainerStatus{
+					restartableInit1: {exitCode: int32(0), reason: "Completed"},
+					restartableInit2: {exitCode: int32(137), reason: "Error"},
+					restartableInit3: {exitCode: int32(0), reason: "Completed"},
+				})
+			})
+		})
 	})
 })
 
 var _ = SIGDescribe(nodefeature.SidecarContainers, framework.WithSerial(), "Containers Lifecycle", func() {
 	f := framework.NewDefaultFramework("containers-lifecycle-test-serial")
-	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
+	addAfterEachForCleaningUpPods(f)
+	f.NamespacePodSecurityLevel = admissionapi.LevelPrivileged
 
-	ginkgo.It("should restart the containers in right order after the node reboot", func(ctx context.Context) {
-		init1 := "init-1"
-		restartableInit2 := "restartable-init-2"
-		init3 := "init-3"
-		regular1 := "regular-1"
+	ginkgo.When("A node running restartable init containers reboots", func() {
+		ginkgo.It("should restart the containers in right order after the node reboot", func(ctx context.Context) {
+			init1 := "init-1"
+			restartableInit2 := "restartable-init-2"
+			init3 := "init-3"
+			regular1 := "regular-1"
 
-		podLabels := map[string]string{
-			"test":      "containers-lifecycle-test-serial",
-			"namespace": f.Namespace.Name,
-		}
-		pod := &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   "initialized-pod",
-				Labels: podLabels,
-			},
-			Spec: v1.PodSpec{
-				RestartPolicy: v1.RestartPolicyAlways,
-				InitContainers: []v1.Container{
-					{
-						Name:  init1,
-						Image: busyboxImage,
-						Command: ExecCommand(init1, execCommand{
-							Delay:    5,
-							ExitCode: 0,
-						}),
+			podLabels := map[string]string{
+				"test":      "containers-lifecycle-test-serial",
+				"namespace": f.Namespace.Name,
+			}
+			pod := &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "initialized-pod",
+					Labels: podLabels,
+				},
+				Spec: v1.PodSpec{
+					RestartPolicy: v1.RestartPolicyAlways,
+					InitContainers: []v1.Container{
+						{
+							Name:  init1,
+							Image: busyboxImage,
+							Command: ExecCommand(init1, execCommand{
+								Delay:    5,
+								ExitCode: 0,
+							}),
+						},
+						{
+							Name:  restartableInit2,
+							Image: busyboxImage,
+							Command: ExecCommand(restartableInit2, execCommand{
+								Delay:    300,
+								ExitCode: 0,
+							}),
+							RestartPolicy: &containerRestartPolicyAlways,
+						},
+						{
+							Name:  init3,
+							Image: busyboxImage,
+							Command: ExecCommand(init3, execCommand{
+								Delay:    5,
+								ExitCode: 0,
+							}),
+						},
 					},
-					{
-						Name:  restartableInit2,
-						Image: busyboxImage,
-						Command: ExecCommand(restartableInit2, execCommand{
-							Delay:    300,
-							ExitCode: 0,
-						}),
-						RestartPolicy: &containerRestartPolicyAlways,
-					},
-					{
-						Name:  init3,
-						Image: busyboxImage,
-						Command: ExecCommand(init3, execCommand{
-							Delay:    5,
-							ExitCode: 0,
-						}),
+					Containers: []v1.Container{
+						{
+							Name:  regular1,
+							Image: busyboxImage,
+							Command: ExecCommand(regular1, execCommand{
+								Delay:    300,
+								ExitCode: 0,
+							}),
+						},
 					},
 				},
-				Containers: []v1.Container{
-					{
-						Name:  regular1,
-						Image: busyboxImage,
-						Command: ExecCommand(regular1, execCommand{
-							Delay:    300,
-							ExitCode: 0,
-						}),
-					},
-				},
-			},
-		}
-		preparePod(pod)
-
-		client := e2epod.NewPodClient(f)
-		pod = client.Create(ctx, pod)
-		ginkgo.By("Waiting for the pod to be initialized and run")
-		err := e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, pod)
-		framework.ExpectNoError(err)
-
-		ginkgo.By("Getting the current pod sandbox ID")
-		rs, _, err := getCRIClient()
-		framework.ExpectNoError(err)
-
-		sandboxes, err := rs.ListPodSandbox(ctx, &runtimeapi.PodSandboxFilter{
-			LabelSelector: podLabels,
-		})
-		framework.ExpectNoError(err)
-		gomega.Expect(sandboxes).To(gomega.HaveLen(1))
-		podSandboxID := sandboxes[0].Id
-
-		ginkgo.By("Stopping the kubelet")
-		restartKubelet := stopKubelet()
-		gomega.Eventually(ctx, func() bool {
-			return kubeletHealthCheck(kubeletHealthCheckURL)
-		}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeFalse())
-
-		ginkgo.By("Stopping the pod sandbox to simulate the node reboot")
-		err = rs.StopPodSandbox(ctx, podSandboxID)
-		framework.ExpectNoError(err)
-
-		ginkgo.By("Restarting the kubelet")
-		restartKubelet()
-		gomega.Eventually(ctx, func() bool {
-			return kubeletHealthCheck(kubeletHealthCheckURL)
-		}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeTrue())
-
-		ginkgo.By("Waiting for the pod to be re-initialized and run")
-		err = e2epod.WaitForPodCondition(ctx, f.ClientSet, pod.Namespace, pod.Name, "re-initialized", f.Timeouts.PodStart, func(pod *v1.Pod) (bool, error) {
-			if pod.Status.ContainerStatuses[0].RestartCount < 1 {
-				return false, nil
 			}
-			if pod.Status.Phase != v1.PodRunning {
-				return false, nil
-			}
-			return true, nil
+			preparePod(pod)
+
+			client := e2epod.NewPodClient(f)
+			pod = client.Create(ctx, pod)
+			ginkgo.By("Waiting for the pod to be initialized and run")
+			err := e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, pod)
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Getting the current pod sandbox ID")
+			rs, _, err := getCRIClient()
+			framework.ExpectNoError(err)
+
+			sandboxes, err := rs.ListPodSandbox(ctx, &runtimeapi.PodSandboxFilter{
+				LabelSelector: podLabels,
+			})
+			framework.ExpectNoError(err)
+			gomega.Expect(sandboxes).To(gomega.HaveLen(1))
+			podSandboxID := sandboxes[0].Id
+
+			ginkgo.By("Stopping the kubelet")
+			restartKubelet := stopKubelet()
+			gomega.Eventually(ctx, func() bool {
+				return kubeletHealthCheck(kubeletHealthCheckURL)
+			}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeFalseBecause("expected kubelet would have been stopped but it is still running"))
+
+			ginkgo.By("Stopping the pod sandbox to simulate the node reboot")
+			err = rs.StopPodSandbox(ctx, podSandboxID)
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Restarting the kubelet")
+			restartKubelet()
+			gomega.Eventually(ctx, func() bool {
+				return kubeletHealthCheck(kubeletHealthCheckURL)
+			}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeTrueBecause("kubelet was expected to be healthy"))
+
+			ginkgo.By("Waiting for the pod to be re-initialized and run")
+			err = e2epod.WaitForPodCondition(ctx, f.ClientSet, pod.Namespace, pod.Name, "re-initialized", f.Timeouts.PodStart, func(pod *v1.Pod) (bool, error) {
+				if pod.Status.ContainerStatuses[0].RestartCount < 1 {
+					return false, nil
+				}
+				if pod.Status.Phase != v1.PodRunning {
+					return false, nil
+				}
+				return true, nil
+			})
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Parsing results")
+			pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
+			framework.ExpectNoError(err)
+			results := parseOutput(ctx, f, pod)
+
+			ginkgo.By("Analyzing results")
+			init1Started, err := results.FindIndex(init1, "Started", 0)
+			framework.ExpectNoError(err)
+			restartableInit2Started, err := results.FindIndex(restartableInit2, "Started", 0)
+			framework.ExpectNoError(err)
+			init3Started, err := results.FindIndex(init3, "Started", 0)
+			framework.ExpectNoError(err)
+			regular1Started, err := results.FindIndex(regular1, "Started", 0)
+			framework.ExpectNoError(err)
+
+			init1Restarted, err := results.FindIndex(init1, "Started", init1Started+1)
+			framework.ExpectNoError(err)
+			restartableInit2Restarted, err := results.FindIndex(restartableInit2, "Started", restartableInit2Started+1)
+			framework.ExpectNoError(err)
+			init3Restarted, err := results.FindIndex(init3, "Started", init3Started+1)
+			framework.ExpectNoError(err)
+			regular1Restarted, err := results.FindIndex(regular1, "Started", regular1Started+1)
+			framework.ExpectNoError(err)
+
+			framework.ExpectNoError(init1Started.IsBefore(restartableInit2Started))
+			framework.ExpectNoError(restartableInit2Started.IsBefore(init3Started))
+			framework.ExpectNoError(init3Started.IsBefore(regular1Started))
+
+			framework.ExpectNoError(init1Restarted.IsBefore(restartableInit2Restarted))
+			framework.ExpectNoError(restartableInit2Restarted.IsBefore(init3Restarted))
+			framework.ExpectNoError(init3Restarted.IsBefore(regular1Restarted))
 		})
-		framework.ExpectNoError(err)
-
-		ginkgo.By("Parsing results")
-		pod, err = client.Get(ctx, pod.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
-		results := parseOutput(context.TODO(), f, pod)
-
-		ginkgo.By("Analyzing results")
-		init1Started, err := results.FindIndex(init1, "Started", 0)
-		framework.ExpectNoError(err)
-		restartableInit2Started, err := results.FindIndex(restartableInit2, "Started", 0)
-		framework.ExpectNoError(err)
-		init3Started, err := results.FindIndex(init3, "Started", 0)
-		framework.ExpectNoError(err)
-		regular1Started, err := results.FindIndex(regular1, "Started", 0)
-		framework.ExpectNoError(err)
-
-		init1Restarted, err := results.FindIndex(init1, "Started", init1Started+1)
-		framework.ExpectNoError(err)
-		restartableInit2Restarted, err := results.FindIndex(restartableInit2, "Started", restartableInit2Started+1)
-		framework.ExpectNoError(err)
-		init3Restarted, err := results.FindIndex(init3, "Started", init3Started+1)
-		framework.ExpectNoError(err)
-		regular1Restarted, err := results.FindIndex(regular1, "Started", regular1Started+1)
-		framework.ExpectNoError(err)
-
-		framework.ExpectNoError(init1Started.IsBefore(restartableInit2Started))
-		framework.ExpectNoError(restartableInit2Started.IsBefore(init3Started))
-		framework.ExpectNoError(init3Started.IsBefore(regular1Started))
-
-		framework.ExpectNoError(init1Restarted.IsBefore(restartableInit2Restarted))
-		framework.ExpectNoError(restartableInit2Restarted.IsBefore(init3Restarted))
-		framework.ExpectNoError(init3Restarted.IsBefore(regular1Restarted))
 	})
 })

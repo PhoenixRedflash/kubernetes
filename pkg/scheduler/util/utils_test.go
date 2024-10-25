@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -32,6 +33,7 @@ import (
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 	"k8s.io/klog/v2"
+	"k8s.io/klog/v2/ktesting"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 )
 
@@ -180,6 +182,7 @@ func TestRemoveNominatedNodeName(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			_, ctx := ktesting.NewTestContext(t)
 			actualPatchRequests := 0
 			var actualPatchData string
 			cs := &clientsetfake.Clientset{}
@@ -197,7 +200,7 @@ func TestRemoveNominatedNodeName(t *testing.T) {
 				Status:     v1.PodStatus{NominatedNodeName: test.currentNominatedNodeName},
 			}
 
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(ctx)
 			defer cancel()
 			if err := ClearNominatedNodeName(ctx, cs, pod); err != nil {
 				t.Fatalf("Error calling removeNominatedNodeName: %v", err)
@@ -226,7 +229,7 @@ func TestPatchPodStatus(t *testing.T) {
 	}{
 		{
 			name:   "Should update pod conditions successfully",
-			client: clientsetfake.NewSimpleClientset(),
+			client: clientsetfake.NewClientset(),
 			pod: v1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "ns",
@@ -250,7 +253,7 @@ func TestPatchPodStatus(t *testing.T) {
 			// which would fail the 2-way merge patch generation on Pod patches
 			// due to the mergeKey being the name field
 			name:   "Should update pod conditions successfully on a pod Spec with secrets with empty name",
-			client: clientsetfake.NewSimpleClientset(),
+			client: clientsetfake.NewClientset(),
 			pod: v1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "ns",
@@ -273,7 +276,7 @@ func TestPatchPodStatus(t *testing.T) {
 		{
 			name: "retry patch request when an 'connection refused' error is returned",
 			client: func() *clientsetfake.Clientset {
-				client := clientsetfake.NewSimpleClientset()
+				client := clientsetfake.NewClientset()
 
 				reqcount := 0
 				client.PrependReactor("patch", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
@@ -314,7 +317,7 @@ func TestPatchPodStatus(t *testing.T) {
 		{
 			name: "only 4 retries at most",
 			client: func() *clientsetfake.Clientset {
-				client := clientsetfake.NewSimpleClientset()
+				client := clientsetfake.NewClientset()
 
 				reqcount := 0
 				client.PrependReactor("patch", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
@@ -359,7 +362,8 @@ func TestPatchPodStatus(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			ctx, cancel := context.WithCancel(context.Background())
+			_, ctx := ktesting.NewTestContext(t)
+			ctx, cancel := context.WithCancel(ctx)
 			defer cancel()
 			err = PatchPodStatus(ctx, client, &tc.pod, &tc.statusToUpdate)
 			if err != nil && tc.validateErr == nil {

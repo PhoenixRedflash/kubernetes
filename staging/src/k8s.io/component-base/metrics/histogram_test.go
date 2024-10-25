@@ -22,6 +22,7 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	apimachineryversion "k8s.io/apimachinery/pkg/version"
 )
@@ -102,8 +103,8 @@ func TestHistogram(t *testing.T) {
 			}
 
 			ms, err := registry.Gather()
-			assert.Equalf(t, test.expectedMetricCount, len(ms), "Got %v metrics, Want: %v metrics", len(ms), test.expectedMetricCount)
-			assert.Nil(t, err, "Gather failed %v", err)
+			assert.Lenf(t, ms, test.expectedMetricCount, "Got %v metrics, Want: %v metrics", len(ms), test.expectedMetricCount)
+			require.NoError(t, err, "Gather failed %v", err)
 
 			for _, metric := range ms {
 				assert.Equalf(t, test.expectedHelp, metric.GetHelp(), "Got %s as help message, want %s", metric.GetHelp(), test.expectedHelp)
@@ -116,7 +117,7 @@ func TestHistogram(t *testing.T) {
 			c.Observe(1.5)
 			expected := 4
 			ms, err = registry.Gather()
-			assert.Nil(t, err, "Gather failed %v", err)
+			require.NoError(t, err, "Gather failed %v", err)
 
 			for _, mf := range ms {
 				for _, m := range mf.GetMetric() {
@@ -211,8 +212,8 @@ func TestHistogramVec(t *testing.T) {
 			}
 
 			ms, err := registry.Gather()
-			assert.Equalf(t, test.expectedMetricCount, len(ms), "Got %v metrics, Want: %v metrics", len(ms), test.expectedMetricCount)
-			assert.Nil(t, err, "Gather failed %v", err)
+			assert.Lenf(t, ms, test.expectedMetricCount, "Got %v metrics, Want: %v metrics", len(ms), test.expectedMetricCount)
+			require.NoError(t, err, "Gather failed %v", err)
 			for _, metric := range ms {
 				if metric.GetHelp() != test.expectedHelp {
 					assert.Equalf(t, test.expectedHelp, metric.GetHelp(), "Got %s as help message, want %s", metric.GetHelp(), test.expectedHelp)
@@ -223,10 +224,10 @@ func TestHistogramVec(t *testing.T) {
 			c.WithLabelValues("1", "3").Observe(1.0)
 			c.WithLabelValues("2", "3").Observe(1.0)
 			ms, err = registry.Gather()
-			assert.Nil(t, err, "Gather failed %v", err)
+			require.NoError(t, err, "Gather failed %v", err)
 
 			for _, mf := range ms {
-				assert.Equalf(t, 3, len(mf.GetMetric()), "Got %v metrics, wanted 3 as the count", len(mf.GetMetric()))
+				assert.Lenf(t, mf.GetMetric(), 3, "Got %v metrics, wanted 3 as the count", len(mf.GetMetric()))
 				for _, m := range mf.GetMetric() {
 					assert.Equalf(t, uint64(1), m.GetHistogram().GetSampleCount(), "Got %v metrics, expected histogram sample count to equal 1", m.GetHistogram().GetSampleCount())
 				}
@@ -270,7 +271,7 @@ func TestHistogramWithLabelValueAllowList(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
-			SetLabelAllowListFromCLI(labelAllowValues)
+			labelValueAllowLists = map[string]*MetricLabelAllowList{}
 			registry := newKubeRegistry(apimachineryversion.Info{
 				Major:      "1",
 				Minor:      "15",
@@ -278,12 +279,13 @@ func TestHistogramWithLabelValueAllowList(t *testing.T) {
 			})
 			c := NewHistogramVec(opts, labels)
 			registry.MustRegister(c)
+			SetLabelAllowListFromCLI(labelAllowValues)
 
 			for _, lv := range test.labelValues {
 				c.WithLabelValues(lv...).Observe(1.0)
 			}
 			mfs, err := registry.Gather()
-			assert.Nil(t, err, "Gather failed %v", err)
+			require.NoError(t, err, "Gather failed %v", err)
 
 			for _, mf := range mfs {
 				if *mf.Name != BuildFQName(opts.Namespace, opts.Subsystem, opts.Name) {

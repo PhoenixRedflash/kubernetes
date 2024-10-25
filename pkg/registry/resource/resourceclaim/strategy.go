@@ -53,7 +53,7 @@ func (resourceclaimStrategy) NamespaceScoped() bool {
 // status.
 func (resourceclaimStrategy) GetResetFields() map[fieldpath.APIVersion]*fieldpath.Set {
 	fields := map[fieldpath.APIVersion]*fieldpath.Set{
-		"resource.k8s.io/v1alpha2": fieldpath.NewSet(
+		"resource.k8s.io/v1alpha3": fieldpath.NewSet(
 			fieldpath.MakePathOrDie("status"),
 		),
 	}
@@ -65,11 +65,13 @@ func (resourceclaimStrategy) PrepareForCreate(ctx context.Context, obj runtime.O
 	claim := obj.(*resource.ResourceClaim)
 	// Status must not be set by user on create.
 	claim.Status = resource.ResourceClaimStatus{}
+
+	dropDisabledFields(claim, nil)
 }
 
 func (resourceclaimStrategy) Validate(ctx context.Context, obj runtime.Object) field.ErrorList {
 	claim := obj.(*resource.ResourceClaim)
-	return validation.ValidateClaim(claim)
+	return validation.ValidateResourceClaim(claim)
 }
 
 func (resourceclaimStrategy) WarningsOnCreate(ctx context.Context, obj runtime.Object) []string {
@@ -87,13 +89,15 @@ func (resourceclaimStrategy) PrepareForUpdate(ctx context.Context, obj, old runt
 	newClaim := obj.(*resource.ResourceClaim)
 	oldClaim := old.(*resource.ResourceClaim)
 	newClaim.Status = oldClaim.Status
+
+	dropDisabledFields(newClaim, oldClaim)
 }
 
 func (resourceclaimStrategy) ValidateUpdate(ctx context.Context, obj, old runtime.Object) field.ErrorList {
 	newClaim := obj.(*resource.ResourceClaim)
 	oldClaim := old.(*resource.ResourceClaim)
-	errorList := validation.ValidateClaim(newClaim)
-	return append(errorList, validation.ValidateClaimUpdate(newClaim, oldClaim)...)
+	errorList := validation.ValidateResourceClaim(newClaim)
+	return append(errorList, validation.ValidateResourceClaimUpdate(newClaim, oldClaim)...)
 }
 
 func (resourceclaimStrategy) WarningsOnUpdate(ctx context.Context, obj, old runtime.Object) []string {
@@ -114,7 +118,7 @@ var StatusStrategy = resourceclaimStatusStrategy{Strategy}
 // should not be modified by the user. For a status update that is the spec.
 func (resourceclaimStatusStrategy) GetResetFields() map[fieldpath.APIVersion]*fieldpath.Set {
 	fields := map[fieldpath.APIVersion]*fieldpath.Set{
-		"resource.k8s.io/v1alpha2": fieldpath.NewSet(
+		"resource.k8s.io/v1alpha3": fieldpath.NewSet(
 			fieldpath.MakePathOrDie("spec"),
 		),
 	}
@@ -127,12 +131,14 @@ func (resourceclaimStatusStrategy) PrepareForUpdate(ctx context.Context, obj, ol
 	oldClaim := old.(*resource.ResourceClaim)
 	newClaim.Spec = oldClaim.Spec
 	metav1.ResetObjectMetaForStatus(&newClaim.ObjectMeta, &oldClaim.ObjectMeta)
+
+	dropDisabledFields(newClaim, oldClaim)
 }
 
 func (resourceclaimStatusStrategy) ValidateUpdate(ctx context.Context, obj, old runtime.Object) field.ErrorList {
 	newClaim := obj.(*resource.ResourceClaim)
 	oldClaim := old.(*resource.ResourceClaim)
-	return validation.ValidateClaimStatusUpdate(newClaim, oldClaim)
+	return validation.ValidateResourceClaimStatusUpdate(newClaim, oldClaim)
 }
 
 // WarningsOnUpdate returns warnings for the given update.
@@ -162,4 +168,8 @@ func GetAttrs(obj runtime.Object) (labels.Set, fields.Set, error) {
 func toSelectableFields(claim *resource.ResourceClaim) fields.Set {
 	fields := generic.ObjectMetaFieldsSet(&claim.ObjectMeta, true)
 	return fields
+}
+
+// dropDisabledFields removes fields which are covered by a feature gate.
+func dropDisabledFields(newClaim, oldClaim *resource.ResourceClaim) {
 }

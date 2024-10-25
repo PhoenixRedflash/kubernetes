@@ -32,8 +32,8 @@ import (
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/klog/v2"
 
-	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
-	resourcehelper "k8s.io/kubernetes/pkg/api/v1/resource"
+	"k8s.io/apimachinery/pkg/api/resource"
+	resourcehelper "k8s.io/component-helpers/resource"
 	"k8s.io/kubernetes/pkg/features"
 	schedutil "k8s.io/kubernetes/pkg/scheduler/util"
 )
@@ -45,26 +45,110 @@ var generation int64
 type ActionType int64
 
 // Constants for ActionTypes.
+// Note: When you add a new ActionType, you must update the following:
+// - The list of basic, podOnly, and nodeOnly.
+// - String() method.
 const (
-	Add    ActionType = 1 << iota // 1
-	Delete                        // 10
-	// UpdateNodeXYZ is only applicable for Node events.
-	UpdateNodeAllocatable // 100
-	UpdateNodeLabel       // 1000
-	UpdateNodeTaint       // 10000
-	UpdateNodeCondition   // 100000
-	UpdateNodeAnnotation  // 1000000
+	Add ActionType = 1 << iota
+	Delete
 
-	All ActionType = 1<<iota - 1 // 1111111
+	// UpdateNodeXYZ is only applicable for Node events.
+	// If you use UpdateNodeXYZ,
+	// your plugin's QueueingHint is only executed for the specific sub-Update event.
+	// It's better to narrow down the scope of the event by using them instead of just using Update event
+	// for better performance in requeueing.
+	UpdateNodeAllocatable
+	UpdateNodeLabel
+	// UpdateNodeTaint is an update for node's taints or node.Spec.Unschedulable.
+	UpdateNodeTaint
+	UpdateNodeCondition
+	UpdateNodeAnnotation
+
+	// UpdatePodXYZ is only applicable for Pod events.
+	// If you use UpdatePodXYZ,
+	// your plugin's QueueingHint is only executed for the specific sub-Update event.
+	// It's better to narrow down the scope of the event by using them instead of Update event
+	// for better performance in requeueing.
+	UpdatePodLabel
+	// UpdatePodScaleDown is an update for pod's scale down (i.e., any resource request is reduced).
+	UpdatePodScaleDown
+	// UpdatePodTolerations is an addition for pod's tolerations.
+	// (Due to API validation, we can add, but cannot modify or remove tolerations.)
+	UpdatePodTolerations
+	// UpdatePodSchedulingGatesEliminated is an update for pod's scheduling gates, which eliminates all scheduling gates in the Pod.
+	UpdatePodSchedulingGatesEliminated
+	// UpdatePodGeneratedResourceClaim is an update of the list of ResourceClaims generated for the pod.
+	// Depends on the DynamicResourceAllocation feature gate.
+	UpdatePodGeneratedResourceClaim
+
+	// updatePodOther is a update for pod's other fields.
+	// It's used only for the internal event handling, and thus unexported.
+	updatePodOther
+
+	All ActionType = 1<<iota - 1
 
 	// Use the general Update type if you don't either know or care the specific sub-Update type to use.
-	Update = UpdateNodeAllocatable | UpdateNodeLabel | UpdateNodeTaint | UpdateNodeCondition | UpdateNodeAnnotation
+	Update = UpdateNodeAllocatable | UpdateNodeLabel | UpdateNodeTaint | UpdateNodeCondition | UpdateNodeAnnotation | UpdatePodLabel | UpdatePodScaleDown | UpdatePodTolerations | UpdatePodSchedulingGatesEliminated | UpdatePodGeneratedResourceClaim | updatePodOther
+	// none is a special ActionType that is only used internally.
+	none ActionType = 0
 )
 
-// GVK is short for group/version/kind, which can uniquely represent a particular API resource.
-type GVK string
+var (
+	// basicActionTypes is a list of basicActionTypes ActionTypes.
+	basicActionTypes = []ActionType{Add, Delete, Update}
+	// podActionTypes is a list of ActionTypes that are only applicable for Pod events.
+	podActionTypes = []ActionType{UpdatePodLabel, UpdatePodScaleDown, UpdatePodTolerations, UpdatePodSchedulingGatesEliminated, UpdatePodGeneratedResourceClaim}
+	// nodeActionTypes is a list of ActionTypes that are only applicable for Node events.
+	nodeActionTypes = []ActionType{UpdateNodeAllocatable, UpdateNodeLabel, UpdateNodeTaint, UpdateNodeCondition, UpdateNodeAnnotation}
+)
+
+func (a ActionType) String() string {
+	switch a {
+	case Add:
+		return "Add"
+	case Delete:
+		return "Delete"
+	case UpdateNodeAllocatable:
+		return "UpdateNodeAllocatable"
+	case UpdateNodeLabel:
+		return "UpdateNodeLabel"
+	case UpdateNodeTaint:
+		return "UpdateNodeTaint"
+	case UpdateNodeCondition:
+		return "UpdateNodeCondition"
+	case UpdateNodeAnnotation:
+		return "UpdateNodeAnnotation"
+	case UpdatePodLabel:
+		return "UpdatePodLabel"
+	case UpdatePodScaleDown:
+		return "UpdatePodScaleDown"
+	case UpdatePodTolerations:
+		return "UpdatePodTolerations"
+	case UpdatePodSchedulingGatesEliminated:
+		return "UpdatePodSchedulingGatesEliminated"
+	case UpdatePodGeneratedResourceClaim:
+		return "UpdatePodGeneratedResourceClaim"
+	case updatePodOther:
+		return "Update"
+	case All:
+		return "All"
+	case Update:
+		return "Update"
+	}
+
+	// Shouldn't reach here.
+	return ""
+}
+
+// EventResource is basically short for group/version/kind, which can uniquely represent a particular API resource.
+type EventResource string
 
 // Constants for GVKs.
+//
+// Note:
+// - UpdatePodXYZ or UpdateNodeXYZ: triggered by updating particular parts of a Pod or a Node, e.g. updatePodLabel.
+// Use specific events rather than general ones (updatePodLabel vs update) can make the requeueing process more efficient
+// and consume less memory as less events will be cached at scheduler.
 const (
 	// There are a couple of notes about how the scheduler notifies the events of Pods:
 	// - Add: add events could be triggered by either a newly created Pod or an existing Pod that is scheduled to a Node.
@@ -72,33 +156,76 @@ const (
 	//           - a Pod that is deleted
 	//           - a Pod that was assumed, but gets un-assumed due to some errors in the binding cycle.
 	//           - an existing Pod that was unscheduled but gets scheduled to a Node.
-	Pod                     GVK = "Pod"
-	Node                    GVK = "Node"
-	PersistentVolume        GVK = "PersistentVolume"
-	PersistentVolumeClaim   GVK = "PersistentVolumeClaim"
-	CSINode                 GVK = "storage.k8s.io/CSINode"
-	CSIDriver               GVK = "storage.k8s.io/CSIDriver"
-	CSIStorageCapacity      GVK = "storage.k8s.io/CSIStorageCapacity"
-	StorageClass            GVK = "storage.k8s.io/StorageClass"
-	PodSchedulingContext    GVK = "PodSchedulingContext"
-	ResourceClaim           GVK = "ResourceClaim"
-	ResourceClass           GVK = "ResourceClass"
-	ResourceClaimParameters GVK = "ResourceClaimParameters"
-	ResourceClassParameters GVK = "ResourceClassParameters"
+	//
+	// Note that the Pod event type includes the events for the unscheduled Pod itself.
+	// i.e., when unscheduled Pods are updated, the scheduling queue checks with Pod/Update QueueingHint(s) whether the update may make the pods schedulable,
+	// and requeues them to activeQ/backoffQ when at least one QueueingHint(s) return Queue.
+	// Plugins **have to** implement a QueueingHint for Pod/Update event
+	// if the rejection from them could be resolved by updating unscheduled Pods themselves.
+	// Example: Pods that require excessive resources may be rejected by the noderesources plugin,
+	// if this unscheduled pod is updated to require fewer resources,
+	// the previous rejection from noderesources plugin can be resolved.
+	// this plugin would implement QueueingHint for Pod/Update event
+	// that returns Queue when such label changes are made in unscheduled Pods.
+	Pod EventResource = "Pod"
 
-	// WildCard is a special GVK to match all resources.
+	// These assignedPod and unschedulablePod are internal resources that are used to represent the type of Pod.
+	// We don't expose them to the plugins deliberately because we don't publish Pod events with unschedulable Pods in the first place.
+	assignedPod      EventResource = "AssignedPod"
+	unschedulablePod EventResource = "UnschedulablePod"
+
+	// A note about NodeAdd event and UpdateNodeTaint event:
+	// When QHint is disabled, NodeAdd often isn't worked expectedly because of the internal feature called preCheck.
+	// It's definitely not something expected for plugin developers,
+	// and registering UpdateNodeTaint event is the only mitigation for now.
+	// So, kube-scheduler registers UpdateNodeTaint event for plugins that has NodeAdded event, but don't have UpdateNodeTaint event.
+	// It has a bad impact for the requeuing efficiency though, a lot better than some Pods being stuck in the
+	// unschedulable pod pool.
+	// This problematic preCheck feature is disabled when QHint is enabled,
+	// and eventually will be removed along with QHint graduation.
+	// See: https://github.com/kubernetes/kubernetes/issues/110175
+	Node                  EventResource = "Node"
+	PersistentVolume      EventResource = "PersistentVolume"
+	PersistentVolumeClaim EventResource = "PersistentVolumeClaim"
+	CSINode               EventResource = "storage.k8s.io/CSINode"
+	CSIDriver             EventResource = "storage.k8s.io/CSIDriver"
+	CSIStorageCapacity    EventResource = "storage.k8s.io/CSIStorageCapacity"
+	StorageClass          EventResource = "storage.k8s.io/StorageClass"
+	ResourceClaim         EventResource = "resource.k8s.io/ResourceClaim"
+	ResourceSlice         EventResource = "resource.k8s.io/ResourceSlice"
+	DeviceClass           EventResource = "resource.k8s.io/DeviceClass"
+
+	// WildCard is a special EventResource to match all resources.
 	// e.g., If you register `{Resource: "*", ActionType: All}` in EventsToRegister,
 	// all coming clusterEvents will be admitted. Be careful to register it, it will
 	// increase the computing pressure in requeueing unless you really need it.
 	//
 	// Meanwhile, if the coming clusterEvent is a wildcard one, all pods
 	// will be moved from unschedulablePod pool to activeQ/backoffQ forcibly.
-	WildCard GVK = "*"
+	WildCard EventResource = "*"
+)
+
+var (
+	// allResources is a list of all resources.
+	allResources = []EventResource{
+		Pod,
+		assignedPod,
+		unschedulablePod,
+		Node,
+		PersistentVolume,
+		PersistentVolumeClaim,
+		CSINode,
+		CSIDriver,
+		CSIStorageCapacity,
+		StorageClass,
+		ResourceClaim,
+		DeviceClass,
+	}
 )
 
 type ClusterEventWithHint struct {
 	Event ClusterEvent
-	// QueueingHintFn is executed for the plugin rejected by this plugin when the above Event happens,
+	// QueueingHintFn is executed for the Pod rejected by this plugin when the above Event happens,
 	// and filters out events to reduce useless retry of Pod's scheduling.
 	// It's an optional field. If not set,
 	// the scheduling of Pods will be always retried with backoff when this Event happens.
@@ -144,9 +271,42 @@ func (s QueueingHint) String() string {
 // Resource represents the standard API resources such as Pod, Node, etc.
 // ActionType denotes the specific change such as Add, Update or Delete.
 type ClusterEvent struct {
-	Resource   GVK
+	Resource   EventResource
 	ActionType ActionType
-	Label      string
+
+	// label describes this cluster event.
+	// It's an optional field to control String(), which is used in logging and metrics.
+	// Normally, it's not necessary to set this field; only used for special events like UnschedulableTimeout.
+	label string
+}
+
+// Label is used for logging and metrics.
+func (ce ClusterEvent) Label() string {
+	if ce.label != "" {
+		return ce.label
+	}
+
+	return fmt.Sprintf("%v%v", ce.Resource, ce.ActionType)
+}
+
+// AllClusterEventLabels returns all possible cluster event labels given to the metrics.
+func AllClusterEventLabels() []string {
+	labels := []string{EventUnschedulableTimeout.Label()}
+	for _, r := range allResources {
+		for _, a := range basicActionTypes {
+			labels = append(labels, ClusterEvent{Resource: r, ActionType: a}.Label())
+		}
+		if r == Pod {
+			for _, a := range podActionTypes {
+				labels = append(labels, ClusterEvent{Resource: r, ActionType: a}.Label())
+			}
+		} else if r == Node {
+			for _, a := range nodeActionTypes {
+				labels = append(labels, ClusterEvent{Resource: r, ActionType: a}.Label())
+			}
+		}
+	}
+	return labels
 }
 
 // IsWildCard returns true if ClusterEvent follows WildCard semantics
@@ -161,8 +321,19 @@ func (ce ClusterEvent) IsWildCard() bool {
 // Note: we have a special case here when the coming event is a wildcard event,
 // it will force all Pods to move to activeQ/backoffQ,
 // but we take it as an unmatched event unless the ce is also a wildcard one.
-func (ce ClusterEvent) Match(event ClusterEvent) bool {
-	return ce.IsWildCard() || (ce.Resource == WildCard || ce.Resource == event.Resource) && ce.ActionType&event.ActionType != 0
+func (ce ClusterEvent) Match(incomingEvent ClusterEvent) bool {
+	return ce.IsWildCard() || ce.Resource.match(incomingEvent.Resource) && ce.ActionType&incomingEvent.ActionType != 0
+}
+
+// match returns true if the resource is matched with the coming resource.
+func (r EventResource) match(resource EventResource) bool {
+	// WildCard matches all resources
+	return r == WildCard ||
+		// Exact match
+		r == resource ||
+		// Pod matches assignedPod and unscheduledPod.
+		// (assignedPod and unscheduledPod aren't exposed and hence only used for incoming events and never used in EventsToRegister)
+		r == Pod && (resource == assignedPod || resource == unschedulablePod)
 }
 
 func UnrollWildCardResource() []ClusterEventWithHint {
@@ -175,11 +346,8 @@ func UnrollWildCardResource() []ClusterEventWithHint {
 		{Event: ClusterEvent{Resource: CSIDriver, ActionType: All}},
 		{Event: ClusterEvent{Resource: CSIStorageCapacity, ActionType: All}},
 		{Event: ClusterEvent{Resource: StorageClass, ActionType: All}},
-		{Event: ClusterEvent{Resource: PodSchedulingContext, ActionType: All}},
 		{Event: ClusterEvent{Resource: ResourceClaim, ActionType: All}},
-		{Event: ClusterEvent{Resource: ResourceClass, ActionType: All}},
-		{Event: ClusterEvent{Resource: ResourceClaimParameters, ActionType: All}},
-		{Event: ClusterEvent{Resource: ResourceClassParameters, ActionType: All}},
+		{Event: ClusterEvent{Resource: DeviceClass, ActionType: All}},
 	}
 }
 
@@ -191,15 +359,19 @@ type QueuedPodInfo struct {
 	// The time pod added to the scheduling queue.
 	Timestamp time.Time
 	// Number of schedule attempts before successfully scheduled.
-	// It's used to record the # attempts metric.
+	// It's used to record the # attempts metric and calculate the backoff time this Pod is obliged to get before retrying.
 	Attempts int
 	// The time when the pod is added to the queue for the first time. The pod may be added
 	// back to the queue multiple times before it's successfully scheduled.
 	// It shouldn't be updated once initialized. It's used to record the e2e scheduling
 	// latency for a pod.
 	InitialAttemptTimestamp *time.Time
-	// UnschedulablePlugins records the plugin names that the Pod failed with Unschedulable or UnschedulableAndUnresolvable status.
-	// It's registered only when the Pod is rejected in PreFilter, Filter, Reserve, or Permit (WaitOnPermit).
+	// UnschedulablePlugins records the plugin names that the Pod failed with Unschedulable or UnschedulableAndUnresolvable status
+	// at specific extension points: PreFilter, Filter, Reserve, Permit (WaitOnPermit), or PreBind.
+	// If Pods are rejected at other extension points,
+	// they're assumed to be unexpected errors (e.g., temporal network issue, plugin implementation issue, etc)
+	// and retried soon after a backoff period.
+	// That is because such failures could be solved regardless of incoming cluster events (registered in EventsToRegister).
 	UnschedulablePlugins sets.Set[string]
 	// PendingPlugins records the plugin names that the Pod failed with Pending status.
 	PendingPlugins sets.Set[string]
@@ -215,6 +387,7 @@ func (pqi *QueuedPodInfo) DeepCopy() *QueuedPodInfo {
 		Attempts:                pqi.Attempts,
 		InitialAttemptTimestamp: pqi.InitialAttemptTimestamp,
 		UnschedulablePlugins:    pqi.UnschedulablePlugins.Clone(),
+		PendingPlugins:          pqi.PendingPlugins.Clone(),
 		Gated:                   pqi.Gated,
 	}
 }
@@ -263,12 +436,12 @@ func (pi *PodInfo) Update(pod *v1.Pod) error {
 
 	// Attempt to parse the affinity terms
 	var parseErrs []error
-	requiredAffinityTerms, err := getAffinityTerms(pod, getPodAffinityTerms(pod.Spec.Affinity))
+	requiredAffinityTerms, err := GetAffinityTerms(pod, GetPodAffinityTerms(pod.Spec.Affinity))
 	if err != nil {
 		parseErrs = append(parseErrs, fmt.Errorf("requiredAffinityTerms: %w", err))
 	}
-	requiredAntiAffinityTerms, err := getAffinityTerms(pod,
-		getPodAntiAffinityTerms(pod.Spec.Affinity))
+	requiredAntiAffinityTerms, err := GetAffinityTerms(pod,
+		GetPodAntiAffinityTerms(pod.Spec.Affinity))
 	if err != nil {
 		parseErrs = append(parseErrs, fmt.Errorf("requiredAntiAffinityTerms: %w", err))
 	}
@@ -316,10 +489,10 @@ const ExtenderName = "Extender"
 
 // Diagnosis records the details to diagnose a scheduling failure.
 type Diagnosis struct {
-	// NodeToStatusMap records the status of each node
+	// NodeToStatus records the status of nodes and generic status for absent ones.
 	// if they're rejected in PreFilter (via PreFilterResult) or Filter plugins.
 	// Nodes that pass PreFilter/Filter plugins are not included in this map.
-	NodeToStatusMap NodeToStatusMap
+	NodeToStatus *NodeToStatus
 	// UnschedulablePlugins are plugins that returns Unschedulable or UnschedulableAndUnresolvable.
 	UnschedulablePlugins sets.Set[string]
 	// UnschedulablePlugins are plugins that returns Pending.
@@ -379,9 +552,15 @@ func (f *FitError) Error() string {
 		// So, we shouldn't add the message from NodeToStatusMap when the PreFilter failed.
 		// Otherwise, we will have duplicated reasons in the error message.
 		reasons := make(map[string]int)
-		for _, status := range f.Diagnosis.NodeToStatusMap {
+		f.Diagnosis.NodeToStatus.ForEachExplicitNode(func(_ string, status *Status) {
 			for _, reason := range status.Reasons() {
 				reasons[reason]++
+			}
+		})
+		if f.Diagnosis.NodeToStatus.Len() < f.NumAllNodes {
+			// Adding predefined reasons for nodes that are absent in NodeToStatusMap
+			for _, reason := range f.Diagnosis.NodeToStatus.AbsentNodesStatus().Reasons() {
+				reasons[reason] += f.NumAllNodes - f.Diagnosis.NodeToStatus.Len()
 			}
 		}
 
@@ -424,9 +603,9 @@ func newAffinityTerm(pod *v1.Pod, term *v1.PodAffinityTerm) (*AffinityTerm, erro
 	return &AffinityTerm{Namespaces: namespaces, Selector: selector, TopologyKey: term.TopologyKey, NamespaceSelector: nsSelector}, nil
 }
 
-// getAffinityTerms receives a Pod and affinity terms and returns the namespaces and
+// GetAffinityTerms receives a Pod and affinity terms and returns the namespaces and
 // selectors of the terms.
-func getAffinityTerms(pod *v1.Pod, v1Terms []v1.PodAffinityTerm) ([]AffinityTerm, error) {
+func GetAffinityTerms(pod *v1.Pod, v1Terms []v1.PodAffinityTerm) ([]AffinityTerm, error) {
 	if v1Terms == nil {
 		return nil, nil
 	}
@@ -468,7 +647,7 @@ func NewPodInfo(pod *v1.Pod) (*PodInfo, error) {
 	return pInfo, err
 }
 
-func getPodAffinityTerms(affinity *v1.Affinity) (terms []v1.PodAffinityTerm) {
+func GetPodAffinityTerms(affinity *v1.Affinity) (terms []v1.PodAffinityTerm) {
 	if affinity != nil && affinity.PodAffinity != nil {
 		if len(affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution) != 0 {
 			terms = affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution
@@ -481,7 +660,7 @@ func getPodAffinityTerms(affinity *v1.Affinity) (terms []v1.PodAffinityTerm) {
 	return terms
 }
 
-func getPodAntiAffinityTerms(affinity *v1.Affinity) (terms []v1.PodAffinityTerm) {
+func GetPodAntiAffinityTerms(affinity *v1.Affinity) (terms []v1.PodAffinityTerm) {
 	if affinity != nil && affinity.PodAntiAffinity != nil {
 		if len(affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution) != 0 {
 			terms = affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
@@ -568,6 +747,21 @@ type NodeInfo struct {
 	// This is used to avoid cloning it if the object didn't change.
 	Generation int64
 }
+
+// NodeInfo implements KMetadata, so for example klog.KObjSlice(nodes) works
+// when nodes is a []*NodeInfo.
+var _ klog.KMetadata = &NodeInfo{}
+
+func (n *NodeInfo) GetName() string {
+	if n == nil {
+		return "<nil>"
+	}
+	if n.node == nil {
+		return "<no node>"
+	}
+	return n.node.Name
+}
+func (n *NodeInfo) GetNamespace() string { return "" }
 
 // nextGeneration: Let's make sure history never forgets the name...
 // Increments the generation number monotonically ensuring that generation numbers never collide.
@@ -854,40 +1048,24 @@ func (n *NodeInfo) update(pod *v1.Pod, sign int64) {
 }
 
 func calculateResource(pod *v1.Pod) (Resource, int64, int64) {
-	var non0InitCPU, non0InitMem int64
-	var non0CPU, non0Mem int64
 	requests := resourcehelper.PodRequests(pod, resourcehelper.PodResourcesOptions{
 		InPlacePodVerticalScalingEnabled: utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling),
-		ContainerFn: func(requests v1.ResourceList, containerType podutil.ContainerType) {
-			non0CPUReq, non0MemReq := schedutil.GetNonzeroRequests(&requests)
-			switch containerType {
-			case podutil.Containers:
-				non0CPU += non0CPUReq
-				non0Mem += non0MemReq
-			case podutil.InitContainers:
-				non0InitCPU = max(non0InitCPU, non0CPUReq)
-				non0InitMem = max(non0InitMem, non0MemReq)
-			}
+	})
+
+	non0Requests := resourcehelper.PodRequests(pod, resourcehelper.PodResourcesOptions{
+		InPlacePodVerticalScalingEnabled: utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling),
+		NonMissingContainerRequests: map[v1.ResourceName]resource.Quantity{
+			v1.ResourceCPU:    *resource.NewMilliQuantity(schedutil.DefaultMilliCPURequest, resource.DecimalSI),
+			v1.ResourceMemory: *resource.NewQuantity(schedutil.DefaultMemoryRequest, resource.DecimalSI),
 		},
 	})
 
-	non0CPU = max(non0CPU, non0InitCPU)
-	non0Mem = max(non0Mem, non0InitMem)
+	non0CPU := non0Requests[v1.ResourceCPU]
+	non0Mem := non0Requests[v1.ResourceMemory]
 
-	// If Overhead is being utilized, add to the non-zero cpu/memory tracking for the pod. It has already been added
-	// into ScalarResources since it is part of requests
-	if pod.Spec.Overhead != nil {
-		if _, found := pod.Spec.Overhead[v1.ResourceCPU]; found {
-			non0CPU += pod.Spec.Overhead.Cpu().MilliValue()
-		}
-
-		if _, found := pod.Spec.Overhead[v1.ResourceMemory]; found {
-			non0Mem += pod.Spec.Overhead.Memory().Value()
-		}
-	}
 	var res Resource
 	res.Add(requests)
-	return res, non0CPU, non0Mem
+	return res, non0CPU.MilliValue(), non0Mem.Value()
 }
 
 // updateUsedPorts updates the UsedPorts of NodeInfo.

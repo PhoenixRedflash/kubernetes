@@ -156,6 +156,9 @@ func testWebhookConverter(t *testing.T, watchCache bool) {
 		},
 	}
 
+	// KUBE_APISERVER_SERVE_REMOVED_APIS_FOR_ONE_RELEASE allows for APIs pending removal to not block tests
+	t.Setenv("KUBE_APISERVER_SERVE_REMOVED_APIS_FOR_ONE_RELEASE", "true")
+
 	// TODO: Added for integration testing of conversion webhooks, where decode errors due to conversion webhook failures need to be tested.
 	// Maybe we should identify conversion webhook related errors in decoding to avoid triggering this? Or maybe having this special casing
 	// of test cases in production code should be removed?
@@ -183,7 +186,7 @@ func testWebhookConverter(t *testing.T, watchCache bool) {
 	crd := multiVersionFixture.DeepCopy()
 
 	RESTOptionsGetter := serveroptions.NewCRDRESTOptionsGetter(*options.RecommendedOptions.Etcd, nil, nil)
-	restOptions, err := RESTOptionsGetter.GetRESTOptions(schema.GroupResource{Group: crd.Spec.Group, Resource: crd.Spec.Names.Plural})
+	restOptions, err := RESTOptionsGetter.GetRESTOptions(schema.GroupResource{Group: crd.Spec.Group, Resource: crd.Spec.Names.Plural}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -683,6 +686,7 @@ func expectConversionFailureMessage(id, message string) func(t *testing.T, ctc *
 		objv1beta2 := newConversionMultiVersionFixture(ns, id, "v1beta2")
 		meta, _, _ := unstructured.NestedFieldCopy(obj.Object, "metadata")
 		unstructured.SetNestedField(objv1beta2.Object, meta, "metadata")
+		lastRV := objv1beta2.GetResourceVersion()
 
 		for _, verb := range []string{"get", "list", "create", "update", "patch", "delete", "deletecollection"} {
 			t.Run(verb, func(t *testing.T) {
@@ -690,7 +694,10 @@ func expectConversionFailureMessage(id, message string) func(t *testing.T, ctc *
 				case "get":
 					_, err = clients["v1beta2"].Get(context.TODO(), obj.GetName(), metav1.GetOptions{})
 				case "list":
-					_, err = clients["v1beta2"].List(context.TODO(), metav1.ListOptions{})
+					// With ResilientWatchcCacheInitialization feature, List requests are rejected with 429 if watchcache is not initialized.
+					// However, in some of these tests that install faulty converter webhook, watchcache will never initialize by definition (as list will never succeed due to faulty converter webook).
+					// In such case, the returned error will differ from the one returned from the etcd, so we need to force the request to go to etcd.
+					_, err = clients["v1beta2"].List(context.TODO(), metav1.ListOptions{ResourceVersion: lastRV, ResourceVersionMatch: metav1.ResourceVersionMatchExact})
 				case "create":
 					_, err = clients["v1beta2"].Create(context.TODO(), newConversionMultiVersionFixture(ns, id, "v1beta2"), metav1.CreateOptions{})
 				case "update":

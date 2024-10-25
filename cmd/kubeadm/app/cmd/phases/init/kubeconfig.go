@@ -26,6 +26,7 @@ import (
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/phases/workflow"
 	cmdutil "k8s.io/kubernetes/cmd/kubeadm/app/cmd/util"
 	kubeadmconstants "k8s.io/kubernetes/cmd/kubeadm/app/constants"
+	"k8s.io/kubernetes/cmd/kubeadm/app/features"
 	kubeconfigphase "k8s.io/kubernetes/cmd/kubeadm/app/phases/kubeconfig"
 	kubeadmutil "k8s.io/kubernetes/cmd/kubeadm/app/util"
 )
@@ -73,7 +74,6 @@ func NewKubeConfigPhase() workflow.Phase {
 	return workflow.Phase{
 		Name:  "kubeconfig",
 		Short: "Generate all kubeconfig files necessary to establish the control plane and the admin kubeconfig file",
-		Long:  cmdutil.MacroCommandLongDescription,
 		Phases: []workflow.Phase{
 			{
 				Name:           "all",
@@ -157,7 +157,16 @@ func runKubeConfigFile(kubeConfigFileName string) func(workflow.RunData) error {
 		cfg.CertificatesDir = data.CertificateWriteDir()
 		defer func() { cfg.CertificatesDir = data.CertificateDir() }()
 
+		initConfiguration := data.Cfg().DeepCopy()
+
+		if features.Enabled(cfg.FeatureGates, features.ControlPlaneKubeletLocalMode) {
+			if kubeConfigFileName == kubeadmconstants.KubeletKubeConfigFileName {
+				// Unset the ControlPlaneEndpoint so the creation falls back to the LocalAPIEndpoint for the kubelet's kubeconfig.
+				initConfiguration.ControlPlaneEndpoint = ""
+			}
+		}
+
 		// creates the KubeConfig file (or use existing)
-		return kubeconfigphase.CreateKubeConfigFile(kubeConfigFileName, data.KubeConfigDir(), data.Cfg())
+		return kubeconfigphase.CreateKubeConfigFile(kubeConfigFileName, data.KubeConfigDir(), initConfiguration)
 	}
 }

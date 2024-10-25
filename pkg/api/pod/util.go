@@ -390,6 +390,7 @@ func GetValidationOptionsFromPodSpecAndMeta(podSpec, oldPodSpec *api.PodSpec, po
 	// If old spec uses relaxed validation or enabled the RelaxedEnvironmentVariableValidation feature gate,
 	// we must allow it
 	opts.AllowRelaxedEnvironmentVariableValidation = useRelaxedEnvironmentVariableValidation(podSpec, oldPodSpec)
+	opts.AllowRelaxedDNSSearchValidation = useRelaxedDNSSearchValidation(oldPodSpec)
 
 	if oldPodSpec != nil {
 		// if old spec has status.hostIPs downwardAPI set, we must allow it
@@ -444,6 +445,30 @@ func useRelaxedEnvironmentVariableValidation(podSpec, oldPodSpec *api.PodSpec) b
 		}
 	}
 
+	return false
+}
+
+func useRelaxedDNSSearchValidation(oldPodSpec *api.PodSpec) bool {
+	// Return true early if feature gate is enabled
+	if utilfeature.DefaultFeatureGate.Enabled(features.RelaxedDNSSearchValidation) {
+		return true
+	}
+
+	// Return false early if there is no DNSConfig or Searches.
+	if oldPodSpec == nil || oldPodSpec.DNSConfig == nil || oldPodSpec.DNSConfig.Searches == nil {
+		return false
+	}
+
+	return hasDotOrUnderscore(oldPodSpec.DNSConfig.Searches)
+}
+
+// Helper function to check if any domain is a dot or contains an underscore.
+func hasDotOrUnderscore(searches []string) bool {
+	for _, domain := range searches {
+		if domain == "." || strings.Contains(domain, "_") {
+			return true
+		}
+	}
 	return false
 }
 
@@ -627,31 +652,21 @@ func dropDisabledFields(
 		podSpec = &api.PodSpec{}
 	}
 
-	if !utilfeature.DefaultFeatureGate.Enabled(features.AppArmor) && !appArmorAnnotationsInUse(oldPodAnnotations) {
-		for k := range podAnnotations {
-			if strings.HasPrefix(k, api.DeprecatedAppArmorAnnotationKeyPrefix) {
-				delete(podAnnotations, k)
-			}
-		}
-	}
-	if (!utilfeature.DefaultFeatureGate.Enabled(features.AppArmor) || !utilfeature.DefaultFeatureGate.Enabled(features.AppArmorFields)) && !appArmorFieldsInUse(oldPodSpec) {
-		if podSpec.SecurityContext != nil {
-			podSpec.SecurityContext.AppArmorProfile = nil
-		}
-		VisitContainers(podSpec, AllContainers, func(c *api.Container, _ ContainerType) bool {
-			if c.SecurityContext != nil {
-				c.SecurityContext.AppArmorProfile = nil
-			}
-			return true
-		})
-	}
-
 	// If the feature is disabled and not in use, drop the hostUsers field.
 	if !utilfeature.DefaultFeatureGate.Enabled(features.UserNamespacesSupport) && !hostUsersInUse(oldPodSpec) {
 		// Drop the field in podSpec only if SecurityContext is not nil.
 		// If it is nil, there is no need to set hostUsers=nil (it will be nil too).
 		if podSpec.SecurityContext != nil {
 			podSpec.SecurityContext.HostUsers = nil
+		}
+	}
+
+	// If the feature is disabled and not in use, drop the SupplementalGroupsPolicy field.
+	if !utilfeature.DefaultFeatureGate.Enabled(features.SupplementalGroupsPolicy) && !supplementalGroupsPolicyInUse(oldPodSpec) {
+		// Drop the field in podSpec only if SecurityContext is not nil.
+		// If it is nil, there is no need to set supplementalGroupsPolicy=nil (it will be nil too).
+		if podSpec.SecurityContext != nil {
+			podSpec.SecurityContext.SupplementalGroupsPolicy = nil
 		}
 	}
 
@@ -704,6 +719,7 @@ func dropDisabledFields(
 	}
 
 	dropPodLifecycleSleepAction(podSpec, oldPodSpec)
+	dropImageVolumes(podSpec, oldPodSpec)
 }
 
 func dropPodLifecycleSleepAction(podSpec, oldPodSpec *api.PodSpec) {
@@ -819,6 +835,29 @@ func dropDisabledPodStatusFields(podStatus, oldPodStatus *api.PodStatus, podSpec
 		for i := range podStatus.EphemeralContainerStatuses {
 			podStatus.EphemeralContainerStatuses[i].VolumeMounts = nil
 		}
+	}
+
+	if !utilfeature.DefaultFeatureGate.Enabled(features.ResourceHealthStatus) {
+		setAllocatedResourcesStatusToNil := func(csl []api.ContainerStatus) {
+			for i := range csl {
+				csl[i].AllocatedResourcesStatus = nil
+			}
+		}
+		setAllocatedResourcesStatusToNil(podStatus.ContainerStatuses)
+		setAllocatedResourcesStatusToNil(podStatus.InitContainerStatuses)
+		setAllocatedResourcesStatusToNil(podStatus.EphemeralContainerStatuses)
+	}
+
+	// drop ContainerStatus.User field to empty (disable SupplementalGroupsPolicy)
+	if !utilfeature.DefaultFeatureGate.Enabled(features.SupplementalGroupsPolicy) && !supplementalGroupsPolicyInUse(oldPodSpec) {
+		dropUserField := func(csl []api.ContainerStatus) {
+			for i := range csl {
+				csl[i].User = nil
+			}
+		}
+		dropUserField(podStatus.InitContainerStatuses)
+		dropUserField(podStatus.ContainerStatuses)
+		dropUserField(podStatus.EphemeralContainerStatuses)
 	}
 }
 
@@ -1030,6 +1069,14 @@ func hostUsersInUse(podSpec *api.PodSpec) bool {
 	return false
 }
 
+func supplementalGroupsPolicyInUse(podSpec *api.PodSpec) bool {
+	if podSpec != nil && podSpec.SecurityContext != nil && podSpec.SecurityContext.SupplementalGroupsPolicy != nil {
+		return true
+	}
+
+	return false
+}
+
 // inPlacePodVerticalScalingInUse returns true if pod spec is non-nil and ResizePolicy is set
 func inPlacePodVerticalScalingInUse(podSpec *api.PodSpec) bool {
 	if podSpec == nil {
@@ -1230,4 +1277,57 @@ func MarkPodProposedForResize(oldPod, newPod *api.Pod) {
 			}
 		}
 	}
+}
+
+// KEP: https://kep.k8s.io/4639
+func dropImageVolumes(podSpec, oldPodSpec *api.PodSpec) {
+	if utilfeature.DefaultFeatureGate.Enabled(features.ImageVolume) || imageVolumesInUse(oldPodSpec) {
+		return
+	}
+
+	imageVolumeNames := sets.New[string]()
+	var newVolumes []api.Volume
+	for _, v := range podSpec.Volumes {
+		if v.Image != nil {
+			imageVolumeNames.Insert(v.Name)
+			continue
+		}
+		newVolumes = append(newVolumes, v)
+	}
+	podSpec.Volumes = newVolumes
+
+	dropVolumeMounts := func(givenMounts []api.VolumeMount) (newVolumeMounts []api.VolumeMount) {
+		for _, m := range givenMounts {
+			if !imageVolumeNames.Has(m.Name) {
+				newVolumeMounts = append(newVolumeMounts, m)
+			}
+		}
+		return newVolumeMounts
+	}
+
+	for i, c := range podSpec.Containers {
+		podSpec.Containers[i].VolumeMounts = dropVolumeMounts(c.VolumeMounts)
+	}
+
+	for i, c := range podSpec.InitContainers {
+		podSpec.InitContainers[i].VolumeMounts = dropVolumeMounts(c.VolumeMounts)
+	}
+
+	for i, c := range podSpec.EphemeralContainers {
+		podSpec.EphemeralContainers[i].VolumeMounts = dropVolumeMounts(c.VolumeMounts)
+	}
+}
+
+func imageVolumesInUse(podSpec *api.PodSpec) bool {
+	if podSpec == nil {
+		return false
+	}
+
+	for _, v := range podSpec.Volumes {
+		if v.Image != nil {
+			return true
+		}
+	}
+
+	return false
 }

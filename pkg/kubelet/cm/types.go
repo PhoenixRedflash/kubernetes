@@ -19,12 +19,15 @@ package cm
 import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/cpuset"
 )
 
 // ResourceConfig holds information about all the supported cgroup resource parameters.
 type ResourceConfig struct {
 	// Memory limit (in bytes).
 	Memory *int64
+	// CPU set (number of CPUs the cgroup has access to).
+	CPUSet cpuset.CPUSet
 	// CPU shares (relative weight vs. other containers).
 	CPUShares *uint64
 	// CPU hardcap limit (in usecs). Allowed cpu time in a given period.
@@ -88,6 +91,8 @@ type CgroupManager interface {
 	GetCgroupConfig(name CgroupName, resource v1.ResourceName) (*ResourceConfig, error)
 	// Set resource config for the specified resource type on the cgroup
 	SetCgroupConfig(name CgroupName, resource v1.ResourceName, resourceConfig *ResourceConfig) error
+	// Version of the cgroup implementation on the host
+	Version() int
 }
 
 // QOSContainersInfo stores the names of containers per qos

@@ -37,7 +37,6 @@ import (
 	cadvisorapiv2 "github.com/google/cadvisor/info/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	oteltrace "go.opentelemetry.io/otel/trace"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -51,7 +50,7 @@ import (
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 	statsapi "k8s.io/kubelet/pkg/apis/stats/v1alpha1"
 	api "k8s.io/kubernetes/pkg/apis/core"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 
 	// Do some initialization to decode the query parameters correctly.
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
@@ -90,10 +89,6 @@ type fakeKubelet struct {
 	loopEntryTime     time.Time
 	plegHealth        bool
 	streamingRuntime  streaming.Server
-}
-
-func (fk *fakeKubelet) ResyncInterval() time.Duration {
-	return fk.resyncInterval
 }
 
 func (fk *fakeKubelet) LatestLoopEntryTime() time.Time {
@@ -153,6 +148,19 @@ func (fk *fakeKubelet) ListMetricDescriptors(ctx context.Context) ([]*runtimeapi
 
 func (fk *fakeKubelet) ListPodSandboxMetrics(ctx context.Context) ([]*runtimeapi.PodSandboxMetrics, error) {
 	return nil, nil
+}
+
+func (fk *fakeKubelet) SyncLoopHealthCheck(req *http.Request) error {
+	duration := fk.resyncInterval * 2
+	minDuration := time.Minute * 5
+	if duration < minDuration {
+		duration = minDuration
+	}
+	enterLoopTime := fk.LatestLoopEntryTime()
+	if !enterLoopTime.IsZero() && time.Now().After(enterLoopTime.Add(duration)) {
+		return fmt.Errorf("sync Loop took longer than expected")
+	}
+	return nil
 }
 
 type fakeRuntime struct {
@@ -292,14 +300,14 @@ func (*fakeKubelet) GetCgroupCPUAndMemoryStats(cgroupName string, updateStats bo
 
 type fakeAuth struct {
 	authenticateFunc func(*http.Request) (*authenticator.Response, bool, error)
-	attributesFunc   func(user.Info, *http.Request) authorizer.Attributes
+	attributesFunc   func(user.Info, *http.Request) []authorizer.Attributes
 	authorizeFunc    func(authorizer.Attributes) (authorized authorizer.Decision, reason string, err error)
 }
 
 func (f *fakeAuth) AuthenticateRequest(req *http.Request) (*authenticator.Response, bool, error) {
 	return f.authenticateFunc(req)
 }
-func (f *fakeAuth) GetRequestAttributes(u user.Info, req *http.Request) authorizer.Attributes {
+func (f *fakeAuth) GetRequestAttributes(u user.Info, req *http.Request) []authorizer.Attributes {
 	return f.attributesFunc(u, req)
 }
 func (f *fakeAuth) Authorize(ctx context.Context, a authorizer.Attributes) (authorized authorizer.Decision, reason string, err error) {
@@ -350,8 +358,8 @@ func newServerTestWithDebuggingHandlers(kubeCfg *kubeletconfiginternal.KubeletCo
 		authenticateFunc: func(req *http.Request) (*authenticator.Response, bool, error) {
 			return &authenticator.Response{User: &user.DefaultInfo{Name: "test"}}, true, nil
 		},
-		attributesFunc: func(u user.Info, req *http.Request) authorizer.Attributes {
-			return &authorizer.AttributesRecord{User: u}
+		attributesFunc: func(u user.Info, req *http.Request) []authorizer.Attributes {
+			return []authorizer.Attributes{&authorizer.AttributesRecord{User: u}}
 		},
 		authorizeFunc: func(a authorizer.Attributes) (decision authorizer.Decision, reason string, err error) {
 			return authorizer.DecisionAllow, "", nil
@@ -361,7 +369,6 @@ func newServerTestWithDebuggingHandlers(kubeCfg *kubeletconfiginternal.KubeletCo
 		fw.fakeKubelet,
 		stats.NewResourceAnalyzer(fw.fakeKubelet, time.Minute, &record.FakeRecorder{}),
 		fw.fakeAuth,
-		oteltrace.NewNoopTracerProvider(),
 		kubeCfg,
 	)
 	fw.serverUnderTest = &server
@@ -548,7 +555,7 @@ func TestAuthzCoverage(t *testing.T) {
 		}
 	}
 
-	for _, tc := range AuthzTestCases() {
+	for _, tc := range AuthzTestCases(false) {
 		expectedCases[tc.Method+":"+tc.Path] = true
 	}
 
@@ -561,14 +568,14 @@ func TestAuthzCoverage(t *testing.T) {
 
 func TestAuthFilters(t *testing.T) {
 	// Enable features.ContainerCheckpoint during test
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.ContainerCheckpoint, true)()
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.ContainerCheckpoint, true)
 
 	fw := newServerTest()
 	defer fw.testHTTPServer.Close()
 
 	attributesGetter := NewNodeAuthorizerAttributesGetter(authzTestNodeName)
 
-	for _, tc := range AuthzTestCases() {
+	for _, tc := range AuthzTestCases(false) {
 		t.Run(tc.Method+":"+tc.Path, func(t *testing.T) {
 			var (
 				expectedUser = AuthzTestUser()
@@ -582,14 +589,14 @@ func TestAuthFilters(t *testing.T) {
 				calledAuthenticate = true
 				return &authenticator.Response{User: expectedUser}, true, nil
 			}
-			fw.fakeAuth.attributesFunc = func(u user.Info, req *http.Request) authorizer.Attributes {
+			fw.fakeAuth.attributesFunc = func(u user.Info, req *http.Request) []authorizer.Attributes {
 				calledAttributes = true
 				require.Equal(t, expectedUser, u)
 				return attributesGetter.GetRequestAttributes(u, req)
 			}
 			fw.fakeAuth.authorizeFunc = func(a authorizer.Attributes) (decision authorizer.Decision, reason string, err error) {
 				calledAuthorize = true
-				tc.AssertAttributes(t, a)
+				tc.AssertAttributes(t, []authorizer.Attributes{a})
 				return authorizer.DecisionNoOpinion, "", nil
 			}
 
@@ -611,7 +618,7 @@ func TestAuthFilters(t *testing.T) {
 func TestAuthenticationError(t *testing.T) {
 	var (
 		expectedUser       = &user.DefaultInfo{Name: "test"}
-		expectedAttributes = &authorizer.AttributesRecord{User: expectedUser}
+		expectedAttributes = []authorizer.Attributes{&authorizer.AttributesRecord{User: expectedUser}}
 
 		calledAuthenticate = false
 		calledAuthorize    = false
@@ -624,7 +631,7 @@ func TestAuthenticationError(t *testing.T) {
 		calledAuthenticate = true
 		return &authenticator.Response{User: expectedUser}, true, nil
 	}
-	fw.fakeAuth.attributesFunc = func(u user.Info, req *http.Request) authorizer.Attributes {
+	fw.fakeAuth.attributesFunc = func(u user.Info, req *http.Request) []authorizer.Attributes {
 		calledAttributes = true
 		return expectedAttributes
 	}
@@ -649,7 +656,7 @@ func TestAuthenticationError(t *testing.T) {
 func TestAuthenticationFailure(t *testing.T) {
 	var (
 		expectedUser       = &user.DefaultInfo{Name: "test"}
-		expectedAttributes = &authorizer.AttributesRecord{User: expectedUser}
+		expectedAttributes = []authorizer.Attributes{&authorizer.AttributesRecord{User: expectedUser}}
 
 		calledAuthenticate = false
 		calledAuthorize    = false
@@ -662,7 +669,7 @@ func TestAuthenticationFailure(t *testing.T) {
 		calledAuthenticate = true
 		return nil, false, nil
 	}
-	fw.fakeAuth.attributesFunc = func(u user.Info, req *http.Request) authorizer.Attributes {
+	fw.fakeAuth.attributesFunc = func(u user.Info, req *http.Request) []authorizer.Attributes {
 		calledAttributes = true
 		return expectedAttributes
 	}
@@ -687,7 +694,7 @@ func TestAuthenticationFailure(t *testing.T) {
 func TestAuthorizationSuccess(t *testing.T) {
 	var (
 		expectedUser       = &user.DefaultInfo{Name: "test"}
-		expectedAttributes = &authorizer.AttributesRecord{User: expectedUser}
+		expectedAttributes = []authorizer.Attributes{&authorizer.AttributesRecord{User: expectedUser}}
 
 		calledAuthenticate = false
 		calledAuthorize    = false
@@ -700,7 +707,7 @@ func TestAuthorizationSuccess(t *testing.T) {
 		calledAuthenticate = true
 		return &authenticator.Response{User: expectedUser}, true, nil
 	}
-	fw.fakeAuth.attributesFunc = func(u user.Info, req *http.Request) authorizer.Attributes {
+	fw.fakeAuth.attributesFunc = func(u user.Info, req *http.Request) []authorizer.Attributes {
 		calledAttributes = true
 		return expectedAttributes
 	}
@@ -804,8 +811,8 @@ func TestContainerLogs(t *testing.T) {
 		podLogOption *v1.PodLogOptions
 	}{
 		"without tail":     {"", &v1.PodLogOptions{}},
-		"with tail":        {"?tailLines=5", &v1.PodLogOptions{TailLines: pointer.Int64(5)}},
-		"with legacy tail": {"?tail=5", &v1.PodLogOptions{TailLines: pointer.Int64(5)}},
+		"with tail":        {"?tailLines=5", &v1.PodLogOptions{TailLines: ptr.To[int64](5)}},
+		"with legacy tail": {"?tail=5", &v1.PodLogOptions{TailLines: ptr.To[int64](5)}},
 		"with tail all":    {"?tail=all", &v1.PodLogOptions{}},
 		"with follow":      {"?follow=1", &v1.PodLogOptions{Follow: true}},
 	}
@@ -864,7 +871,7 @@ func TestCheckpointContainer(t *testing.T) {
 
 	setupTest := func(featureGate bool) *serverTestFramework {
 		// Enable features.ContainerCheckpoint during test
-		defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.ContainerCheckpoint, featureGate)()
+		featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.ContainerCheckpoint, featureGate)
 
 		fw := newServerTest()
 		// GetPodByName() should always fail
@@ -920,9 +927,9 @@ func TestCheckpointContainer(t *testing.T) {
 			t.Errorf("Got error POSTing: %v", err)
 		}
 		defer resp.Body.Close()
-		assert.Equal(t, resp.StatusCode, 500)
+		assert.Equal(t, 500, resp.StatusCode)
 		body, _ := io.ReadAll(resp.Body)
-		assert.Equal(t, string(body), "checkpointing of other/foo/checkpointingFailure failed (Returning error for test)")
+		assert.Equal(t, "checkpointing of other/foo/checkpointingFailure failed (Returning error for test)", string(body))
 	})
 	// Now test a successful checkpoint succeeds
 	setPodByNameFunc(fw, podNamespace, podName, expectedContainerName)
@@ -931,7 +938,7 @@ func TestCheckpointContainer(t *testing.T) {
 		if err != nil {
 			t.Errorf("Got error POSTing: %v", err)
 		}
-		assert.Equal(t, resp.StatusCode, 200)
+		assert.Equal(t, 200, resp.StatusCode)
 	})
 
 	// Now test for 404 if checkpointing support is explicitly disabled.
@@ -1527,6 +1534,110 @@ func TestTrimURLPath(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		assert.Equal(t, test.expected, getURLRootPath(test.path), fmt.Sprintf("path is: %s", test.path))
+		assert.Equalf(t, test.expected, getURLRootPath(test.path), "path is: %s", test.path)
+	}
+}
+
+func TestFineGrainedAuthz(t *testing.T) {
+	// Enable features.ContainerCheckpoint during test
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.KubeletFineGrainedAuthz, true)
+
+	fw := newServerTest()
+	defer fw.testHTTPServer.Close()
+
+	attributesGetter := NewNodeAuthorizerAttributesGetter(authzTestNodeName)
+
+	testCases := []struct {
+		name                     string
+		path                     string
+		expectedSubResources     []string
+		authorizer               func(authorizer.Attributes) (authorized authorizer.Decision, reason string, err error)
+		wantStatusCode           int
+		wantCalledAuthorizeCount int
+	}{
+		{
+			name:                 "both subresources rejected",
+			path:                 "/configz",
+			expectedSubResources: []string{"configz", "proxy"},
+			authorizer: func(authorizer.Attributes) (authorized authorizer.Decision, reason string, err error) {
+				return authorizer.DecisionNoOpinion, "", nil
+			},
+			wantStatusCode:           403,
+			wantCalledAuthorizeCount: 2,
+		},
+		{
+			name:                 "fine grained rejected, proxy accepted",
+			path:                 "/configz",
+			expectedSubResources: []string{"configz", "proxy"},
+			authorizer: func(a authorizer.Attributes) (authorized authorizer.Decision, reason string, err error) {
+				switch a.GetSubresource() {
+				case "configz":
+					return authorizer.DecisionNoOpinion, "", nil
+				case "proxy":
+					return authorizer.DecisionAllow, "", nil
+				default:
+					return authorizer.DecisionNoOpinion, "", fmt.Errorf("unexpected subresource %v", a.GetSubresource())
+				}
+			},
+			wantStatusCode:           200,
+			wantCalledAuthorizeCount: 2,
+		},
+		{
+			name:                 "fine grained accepted",
+			path:                 "/configz",
+			expectedSubResources: []string{"configz", "proxy"},
+			authorizer: func(a authorizer.Attributes) (authorized authorizer.Decision, reason string, err error) {
+				switch a.GetSubresource() {
+				case "configz":
+					return authorizer.DecisionAllow, "", nil
+				case "proxy":
+					return authorizer.DecisionNoOpinion, "", fmt.Errorf("did not expect code to reach here")
+				default:
+					return authorizer.DecisionNoOpinion, "", fmt.Errorf("unexpected subresource %v", a.GetSubresource())
+				}
+			},
+			wantStatusCode:           200,
+			wantCalledAuthorizeCount: 1,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+
+			calledAuthenticate := false
+			calledAuthorizeCount := 0
+			calledAttributes := false
+
+			fw.fakeAuth.authenticateFunc = func(req *http.Request) (*authenticator.Response, bool, error) {
+				calledAuthenticate = true
+				return &authenticator.Response{User: AuthzTestUser()}, true, nil
+			}
+			fw.fakeAuth.attributesFunc = func(u user.Info, req *http.Request) []authorizer.Attributes {
+				calledAttributes = true
+				attrs := attributesGetter.GetRequestAttributes(u, req)
+				var gotSubresources []string
+				for _, attr := range attrs {
+					gotSubresources = append(gotSubresources, attr.GetSubresource())
+				}
+				require.Equal(t, tc.expectedSubResources, gotSubresources)
+				return attrs
+			}
+			fw.fakeAuth.authorizeFunc = func(a authorizer.Attributes) (authorized authorizer.Decision, reason string, err error) {
+				calledAuthorizeCount += 1
+				return tc.authorizer(a)
+			}
+
+			req, err := http.NewRequest("GET", fw.testHTTPServer.URL+tc.path, nil)
+			require.NoError(t, err)
+
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			assert.Equal(t, tc.wantStatusCode, resp.StatusCode)
+			assert.True(t, calledAuthenticate, "Authenticate was not called")
+			assert.True(t, calledAttributes, "Attributes were not called")
+			assert.Equal(t, tc.wantCalledAuthorizeCount, calledAuthorizeCount)
+		})
 	}
 }

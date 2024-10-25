@@ -17,13 +17,15 @@ limitations under the License.
 package benchmark
 
 import (
+	"flag"
+	"strings"
 	"testing"
 
-	utilfeature "k8s.io/apiserver/pkg/util/feature"
-	featuregatetesting "k8s.io/component-base/featuregate/testing"
-	"k8s.io/kubernetes/test/integration/framework"
-	"k8s.io/kubernetes/test/utils/ktesting"
+	"k8s.io/component-base/metrics/legacyregistry"
+	"k8s.io/kubernetes/pkg/features"
 )
+
+var testSchedulingLabelFilter = flag.String("test-scheduling-label-filter", "integration-test,-performance", "comma-separated list of labels which a testcase must have (no prefix or +) or must not have (-), used by TestScheduling")
 
 func TestScheduling(t *testing.T) {
 	testCases, err := getTestCases(configFile)
@@ -34,69 +36,34 @@ func TestScheduling(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Check for leaks at the very end.
-	framework.GoleakCheck(t)
-
-	// All integration test cases share the same etcd, similar to
-	// https://github.com/kubernetes/kubernetes/blob/18d05b646d09b2971dc5400bc288062b0414e8cf/test/integration/framework/etcd.go#L186-L222.
-	framework.StartEtcd(t, nil)
-
-	// Workloads with the same configuration share the same apiserver. For that
-	// we first need to determine what those different configs are.
-	var configs []schedulerConfig
-	for _, tc := range testCases {
-		tcEnabled := false
-		for _, w := range tc.Workloads {
-			if enabled(*testSchedulingLabelFilter, append(tc.Labels, w.Labels...)...) {
-				tcEnabled = true
-				break
-			}
-		}
-		if !tcEnabled {
-			continue
-		}
-		exists := false
-		for _, config := range configs {
-			if config.equals(tc) {
-				exists = true
-				break
-			}
-		}
-		if !exists {
-			configs = append(configs, schedulerConfig{schedulerConfigPath: tc.SchedulerConfigPath, featureGates: tc.FeatureGates})
-		}
+	if testing.Short() {
+		*testSchedulingLabelFilter += ",+short"
 	}
-	for _, config := range configs {
-		// Not a sub test because we don't have a good name for it.
-		func() {
-			tCtx := ktesting.Init(t)
 
-			// No timeout here because the `go test -timeout` will ensure that
-			// the test doesn't get stuck forever.
-
-			for feature, flag := range config.featureGates {
-				defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, feature, flag)()
-			}
-			informerFactory, tCtx := setupClusterForWorkload(tCtx, config.schedulerConfigPath, config.featureGates, nil)
-
-			for _, tc := range testCases {
-				if !config.equals(tc) {
-					// Runs with some other config.
-					continue
-				}
-
-				t.Run(tc.Name, func(t *testing.T) {
-					for _, w := range tc.Workloads {
-						t.Run(w.Name, func(t *testing.T) {
-							if !enabled(*testSchedulingLabelFilter, append(tc.Labels, w.Labels...)...) {
-								t.Skipf("disabled by label filter %q", *testSchedulingLabelFilter)
-							}
-							tCtx := ktesting.WithTB(tCtx, t)
-							runWorkload(tCtx, tc, w, informerFactory)
-						})
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			for _, w := range tc.Workloads {
+				t.Run(w.Name, func(t *testing.T) {
+					if !enabled(strings.Split(*testSchedulingLabelFilter, ","), append(tc.Labels, w.Labels...)...) {
+						t.Skipf("disabled by label filter %q", *testSchedulingLabelFilter)
 					}
+					featureGates := featureGatesMerge(tc.FeatureGates, w.FeatureGates)
+					informerFactory, tCtx := setupTestCase(t, tc, featureGates, nil, nil)
+
+					runWorkload(tCtx, tc, w, informerFactory)
+
+					if featureGates[features.SchedulerQueueingHints] {
+						// In any case, we should make sure InFlightEvents is empty after running the scenario.
+						if err = checkEmptyInFlightEvents(); err != nil {
+							tCtx.Errorf("%s: %s", w.Name, err)
+						}
+					}
+
+					// Reset metrics to prevent metrics generated in current workload gets
+					// carried over to the next workload.
+					legacyregistry.Reset()
 				})
 			}
-		}()
+		})
 	}
 }

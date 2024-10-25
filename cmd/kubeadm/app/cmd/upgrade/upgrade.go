@@ -54,8 +54,8 @@ func NewCmdUpgrade(out io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "upgrade",
 		Short: "Upgrade your cluster smoothly to a newer version with this command",
-		Run:   cmdutil.SubCmdRun(),
 	}
+	cmdutil.RequireSubcommand(cmd)
 
 	cmd.AddCommand(newCmdApply(flags))
 	cmd.AddCommand(newCmdPlan(flags))
@@ -71,6 +71,5 @@ func addApplyPlanFlags(fs *pflag.FlagSet, flags *applyPlanFlags) {
 	fs.BoolVar(&flags.allowExperimentalUpgrades, "allow-experimental-upgrades", flags.allowExperimentalUpgrades, "Show unstable versions of Kubernetes as an upgrade alternative and allow upgrading to an alpha/beta/release candidate versions of Kubernetes.")
 	fs.BoolVar(&flags.allowRCUpgrades, "allow-release-candidate-upgrades", flags.allowRCUpgrades, "Show release candidate versions of Kubernetes as an upgrade alternative and allow upgrading to a release candidate versions of Kubernetes.")
 	fs.BoolVar(&flags.printConfig, "print-config", flags.printConfig, "Specifies whether the configuration file that will be used in the upgrade should be printed or not.")
-	options.AddFeatureGatesStringFlag(fs, &flags.featureGatesString)
 	options.AddIgnorePreflightErrorsFlag(fs, &flags.ignorePreflightErrors)
 }

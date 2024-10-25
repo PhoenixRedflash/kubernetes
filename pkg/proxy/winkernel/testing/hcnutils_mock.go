@@ -23,7 +23,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Microsoft/hcsshim/hcn"
+	"github.com/Microsoft/hnslib/hcn"
 )
 
 var (
@@ -180,6 +180,15 @@ func (hcnObj HcnMock) CreateLoadBalancer(loadBalancer *hcn.HostComputeLoadBalanc
 	}
 	loadBalancer.Id = hcnObj.generateLoadbalancerGuid()
 	loadbalancerMap[loadBalancer.Id] = loadBalancer
+	return loadBalancer, nil
+}
+
+func (hcnObj HcnMock) UpdateLoadBalancer(loadBalancer *hcn.HostComputeLoadBalancer, hnsLbID string) (*hcn.HostComputeLoadBalancer, error) {
+	if _, ok := loadbalancerMap[hnsLbID]; !ok {
+		return nil, fmt.Errorf("LoadBalancer id %s Not Present", loadBalancer.Id)
+	}
+	loadBalancer.Id = hnsLbID
+	loadbalancerMap[hnsLbID] = loadBalancer
 	return loadBalancer, nil
 }
 

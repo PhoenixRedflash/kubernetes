@@ -86,6 +86,17 @@ issues:
       text: comment on exported (method|function|type|const)|should have( a package)? comment|comment should be of the form|comment on exported (method|function|type|const)|should have( a package)? comment|comment should be of the form|exported (.+) should have comment( \(or a comment on this block\))? or be unexported|package comment should be of the form "(.+)...|comment on exported (.+) should be of the form "(.+)...|should have a package comment
       path-except: cmd/kubeadm
 
+    # The unused linter that comes from staticcheck currently does not handle types which implement
+    # a generic interface. The linter incorrectly reports the implementations of unexported
+    # interface methods as unused. See https://github.com/dominikh/go-tools/issues/1294.
+    # Rather than exporting the interface methods, which makes the error go away but changes the
+    # semantics of the code, we ignore this error for affected files.
+    # This can be removed when the staticcheck implementation of this rule is fixed, which may
+    # depend on https://github.com/golang/go/issues/63982.
+    - linters:
+        - unused
+      path: staging/src/k8s.io/client-go/util/workqueue/metrics.go
+
     {{- if not .Hints}}
 
     # The following issues were deemed "might be worth fixing, needs to be
@@ -148,7 +159,11 @@ linters:
     - revive
     - staticcheck
     - stylecheck
+    - testifylint
     - unused
+  {{- if not .Base }}
+    - usestdlibvars
+  {{- end}}
   {{- if .Strict}}
   disable:
     # https://github.com/kubernetes/kubernetes/issues/117288#issuecomment-1507008359
@@ -200,9 +215,20 @@ linters-settings: # please keep this alphabetized
       {{- if .Base }}
       - "-SA1019"  # TODO(fix) Using a deprecated function, variable, constant or field
       - "-SA2002"  # TODO(fix) Called testing.T.FailNow or SkipNow in a goroutine, which isn’t allowed
+      - "-SA1006"  # TODO(fix) Using a printf-style function with a dynamic format string and no arguments can just use a print-style func
       {{- end}}
   {{- if .Base }}
   stylecheck:
     checks:
       - "ST1019"   # Importing the same package multiple times
   {{- end}}
+  testifylint:
+    enable-all: true
+    {{- if not .Hints }}
+    disable:  # TODO: remove each disabled rule and fix it
+      {{- if .Base }}
+      - float-compare
+      - go-require
+      {{- end}}
+      - require-error
+    {{- end}}

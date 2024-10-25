@@ -17,6 +17,7 @@ package embed
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	defaultLog "log"
@@ -217,26 +218,27 @@ func StartEtcd(inCfg *Config) (e *Etcd, err error) {
 		EnableLeaseCheckpoint:                    cfg.ExperimentalEnableLeaseCheckpoint,
 		LeaseCheckpointPersist:                   cfg.ExperimentalEnableLeaseCheckpointPersist,
 		CompactionBatchLimit:                     cfg.ExperimentalCompactionBatchLimit,
+		CompactionSleepInterval:                  cfg.ExperimentalCompactionSleepInterval,
 		WatchProgressNotifyInterval:              cfg.ExperimentalWatchProgressNotifyInterval,
 		DowngradeCheckTime:                       cfg.ExperimentalDowngradeCheckTime,
 		WarningApplyDuration:                     cfg.ExperimentalWarningApplyDuration,
 		ExperimentalMemoryMlock:                  cfg.ExperimentalMemoryMlock,
 		ExperimentalTxnModeWriteWithSharedBuffer: cfg.ExperimentalTxnModeWriteWithSharedBuffer,
+		ExperimentalStopGRPCServiceOnDefrag:      cfg.ExperimentalStopGRPCServiceOnDefrag,
 		ExperimentalBootstrapDefragThresholdMegabytes: cfg.ExperimentalBootstrapDefragThresholdMegabytes,
 		V2Deprecation: cfg.V2DeprecationEffective(),
 	}
 
 	if srvcfg.ExperimentalEnableDistributedTracing {
 		tctx := context.Background()
-		tracingExporter, opts, err := setupTracingExporter(tctx, cfg)
+		tracingExporter, err := newTracingExporter(tctx, cfg)
 		if err != nil {
 			return e, err
 		}
-		if tracingExporter == nil || len(opts) == 0 {
-			return e, fmt.Errorf("error setting up distributed tracing")
+		e.tracingExporterShutdown = func() {
+			tracingExporter.Close(tctx)
 		}
-		e.tracingExporterShutdown = func() { tracingExporter.Shutdown(tctx) }
-		srvcfg.ExperimentalTracerOptions = opts
+		srvcfg.ExperimentalTracerOptions = tracingExporter.opts
 
 		e.cfg.logger.Info("distributed tracing setup enabled")
 	}
@@ -534,6 +536,7 @@ func configurePeerListeners(cfg *Config) (peers []*peerListener, err error) {
 			transport.WithTimeout(rafthttp.ConnReadTimeout, rafthttp.ConnWriteTimeout),
 		)
 		if err != nil {
+			cfg.logger.Error("creating peer listener failed", zap.Error(err))
 			return nil, err
 		}
 		// once serve, overwrite with 'http.Server.Shutdown'
@@ -622,10 +625,10 @@ func configureClientListeners(cfg *Config) (sctxs map[string]*serveCtx, err erro
 	for _, u := range append(cfg.ListenClientUrls, cfg.ListenClientHttpUrls...) {
 		if u.Scheme == "http" || u.Scheme == "unix" {
 			if !cfg.ClientTLSInfo.Empty() {
-				cfg.logger.Warn("scheme is HTTP while key and cert files are present; ignoring key and cert files", zap.String("client-url", u.String()))
+				cfg.logger.Warn("scheme is http or unix while key and cert files are present; ignoring key and cert files", zap.String("client-url", u.String()))
 			}
 			if cfg.ClientTLSInfo.ClientCertAuth {
-				cfg.logger.Warn("scheme is HTTP while --client-cert-auth is enabled; ignoring client cert auth for this URL", zap.String("client-url", u.String()))
+				cfg.logger.Warn("scheme is http or unix while --client-cert-auth is enabled; ignoring client cert auth for this URL", zap.String("client-url", u.String()))
 			}
 		}
 		if (u.Scheme == "https" || u.Scheme == "unixs") && cfg.ClientTLSInfo.Empty() {
@@ -747,7 +750,8 @@ func (e *Etcd) serveClients() (err error) {
 	} else {
 		mux := http.NewServeMux()
 		etcdhttp.HandleBasic(e.cfg.logger, mux, e.Server)
-		etcdhttp.HandleMetricsHealthForV3(e.cfg.logger, mux, e.Server)
+		etcdhttp.HandleMetrics(mux)
+		etcdhttp.HandleHealth(e.cfg.logger, mux, e.Server)
 		h = mux
 	}
 
@@ -829,6 +833,24 @@ func (e *Etcd) pickGrpcGatewayServeContext(splitHttp bool) *serveCtx {
 	panic("Expect at least one context able to serve grpc")
 }
 
+var ErrMissingClientTLSInfoForMetricsURL = errors.New("client TLS key/cert (--cert-file, --key-file) must be provided for metrics secure url")
+
+func (e *Etcd) createMetricsListener(murl url.URL) (net.Listener, error) {
+	tlsInfo := &e.cfg.ClientTLSInfo
+	switch murl.Scheme {
+	case "http":
+		tlsInfo = nil
+	case "https", "unixs":
+		if e.cfg.ClientTLSInfo.Empty() {
+			return nil, ErrMissingClientTLSInfoForMetricsURL
+		}
+	}
+	return transport.NewListenerWithOpts(murl.Host, murl.Scheme,
+		transport.WithTLSInfo(tlsInfo),
+		transport.WithSocketOpts(&e.cfg.SocketOpts),
+	)
+}
+
 func (e *Etcd) serveMetrics() (err error) {
 	if e.cfg.Metrics == "extensive" {
 		grpc_prometheus.EnableHandlingTimeHistogram()
@@ -836,17 +858,11 @@ func (e *Etcd) serveMetrics() (err error) {
 
 	if len(e.cfg.ListenMetricsUrls) > 0 {
 		metricsMux := http.NewServeMux()
-		etcdhttp.HandleMetricsHealthForV3(e.cfg.logger, metricsMux, e.Server)
+		etcdhttp.HandleMetrics(metricsMux)
+		etcdhttp.HandleHealth(e.cfg.logger, metricsMux, e.Server)
 
 		for _, murl := range e.cfg.ListenMetricsUrls {
-			tlsInfo := &e.cfg.ClientTLSInfo
-			if murl.Scheme == "http" {
-				tlsInfo = nil
-			}
-			ml, err := transport.NewListenerWithOpts(murl.Host, murl.Scheme,
-				transport.WithTLSInfo(tlsInfo),
-				transport.WithSocketOpts(&e.cfg.SocketOpts),
-			)
+			ml, err := e.createMetricsListener(murl)
 			if err != nil {
 				return err
 			}

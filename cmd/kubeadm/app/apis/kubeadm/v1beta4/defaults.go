@@ -37,8 +37,6 @@ const (
 	DefaultClusterDNSIP = "10.96.0.10"
 	// DefaultKubernetesVersion defines default kubernetes version
 	DefaultKubernetesVersion = "stable-1"
-	// DefaultAPIBindPort defines default API port
-	DefaultAPIBindPort = 6443
 	// DefaultCertificatesDir defines default certificate directory
 	DefaultCertificatesDir = "/etc/kubernetes/pki"
 	// DefaultImageRepository defines default image registry
@@ -108,6 +106,17 @@ func SetDefaults_ClusterConfiguration(obj *ClusterConfiguration) {
 		obj.EncryptionAlgorithm = DefaultEncryptionAlgorithm
 	}
 
+	if obj.CertificateValidityPeriod == nil {
+		obj.CertificateValidityPeriod = &metav1.Duration{
+			Duration: constants.CertificateValidityPeriod,
+		}
+	}
+	if obj.CACertificateValidityPeriod == nil {
+		obj.CACertificateValidityPeriod = &metav1.Duration{
+			Duration: constants.CACertificateValidityPeriod,
+		}
+	}
+
 	SetDefaults_Etcd(obj)
 }
 
@@ -174,7 +183,7 @@ func SetDefaults_FileDiscovery(obj *FileDiscovery) {
 // layer, but set to a random value later at runtime if not set before.
 func SetDefaults_BootstrapTokens(obj *InitConfiguration) {
 
-	if obj.BootstrapTokens == nil || len(obj.BootstrapTokens) == 0 {
+	if len(obj.BootstrapTokens) == 0 {
 		obj.BootstrapTokens = []bootstraptokenv1.BootstrapToken{{}}
 	}
 
@@ -186,7 +195,7 @@ func SetDefaults_BootstrapTokens(obj *InitConfiguration) {
 // SetDefaults_APIEndpoint sets the defaults for the API server instance deployed on a node.
 func SetDefaults_APIEndpoint(obj *APIEndpoint) {
 	if obj.BindPort == 0 {
-		obj.BindPort = DefaultAPIBindPort
+		obj.BindPort = constants.KubeAPIServerPort
 	}
 }
 
@@ -267,18 +276,29 @@ func SetDefaults_UpgradeConfiguration(obj *UpgradeConfiguration) {
 	if obj.Node.EtcdUpgrade == nil {
 		obj.Node.EtcdUpgrade = ptr.To(true)
 	}
-
 	if obj.Node.CertificateRenewal == nil {
 		obj.Node.CertificateRenewal = ptr.To(true)
+	}
+	if len(obj.Node.ImagePullPolicy) == 0 {
+		obj.Node.ImagePullPolicy = DefaultImagePullPolicy
+	}
+	if obj.Node.ImagePullSerial == nil {
+		obj.Node.ImagePullSerial = ptr.To(true)
 	}
 
 	if obj.Apply.EtcdUpgrade == nil {
 		obj.Apply.EtcdUpgrade = ptr.To(true)
 	}
-
 	if obj.Apply.CertificateRenewal == nil {
 		obj.Apply.CertificateRenewal = ptr.To(true)
 	}
+	if len(obj.Apply.ImagePullPolicy) == 0 {
+		obj.Apply.ImagePullPolicy = DefaultImagePullPolicy
+	}
+	if obj.Apply.ImagePullSerial == nil {
+		obj.Apply.ImagePullSerial = ptr.To(true)
+	}
+
 	if obj.Timeouts == nil {
 		obj.Timeouts = &Timeouts{}
 	}

@@ -109,13 +109,13 @@ func TestNewControllerDescriptorsShouldNotPanic(t *testing.T) {
 }
 
 func TestNewControllerDescriptorsAlwaysReturnsDescriptorsForAllControllers(t *testing.T) {
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, "AllAlpha", false)()
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, "AllBeta", false)()
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, "AllAlpha", false)
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, "AllBeta", false)
 
 	controllersWithoutFeatureGates := KnownControllers()
 
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, "AllAlpha", true)()
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, "AllBeta", true)()
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, "AllAlpha", true)
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, "AllBeta", true)
 
 	controllersWithFeatureGates := KnownControllers()
 
@@ -188,7 +188,7 @@ func TestTaintEvictionControllerGating(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.SeparateTaintEvictionController, test.enableFeatureGate)()
+			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.SeparateTaintEvictionController, test.enableFeatureGate)
 			_, ctx := ktesting.NewTestContext(t)
 			ctx, cancel := context.WithCancel(ctx)
 			defer cancel()
@@ -217,5 +217,28 @@ func TestTaintEvictionControllerGating(t *testing.T) {
 				t.Errorf("TaintEvictionController healthCheck check failed: expected=%v, got=%v", expectHealthCheck, hasHealthCheck)
 			}
 		})
+	}
+}
+
+func TestNoCloudProviderControllerStarted(t *testing.T) {
+	_, ctx := ktesting.NewTestContext(t)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	controllerCtx := ControllerContext{}
+	controllerCtx.ComponentConfig.Generic.Controllers = []string{"*"}
+	for _, controller := range NewControllerDescriptors() {
+		if !controller.IsCloudProviderController() {
+			continue
+		}
+
+		controllerName := controller.Name()
+		checker, err := StartController(ctx, controllerCtx, controller, nil)
+		if err != nil {
+			t.Errorf("Error starting controller %q: %v", controllerName, err)
+		}
+		if checker != nil {
+			t.Errorf("Controller %q should not be started", controllerName)
+		}
 	}
 }

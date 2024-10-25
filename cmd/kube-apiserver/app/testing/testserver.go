@@ -32,6 +32,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"testing"
 	"time"
 
 	"github.com/spf13/pflag"
@@ -42,24 +43,29 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/apimachinery/pkg/util/wait"
 	serveroptions "k8s.io/apiserver/pkg/server/options"
 	"k8s.io/apiserver/pkg/storage/storagebackend"
 	"k8s.io/apiserver/pkg/storageversion"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	utilversion "k8s.io/apiserver/pkg/util/version"
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	clientgotransport "k8s.io/client-go/transport"
 	"k8s.io/client-go/util/cert"
 	"k8s.io/client-go/util/keyutil"
+	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	logsapi "k8s.io/component-base/logs/api/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/kube-aggregator/pkg/apiserver"
 	"k8s.io/kubernetes/pkg/features"
+	testutil "k8s.io/kubernetes/test/utils"
+	"k8s.io/kubernetes/test/utils/ktesting"
 
 	"k8s.io/kubernetes/cmd/kube-apiserver/app"
 	"k8s.io/kubernetes/cmd/kube-apiserver/app/options"
-	testutil "k8s.io/kubernetes/test/utils"
 )
 
 func init() {
@@ -96,6 +102,14 @@ type TestServerInstanceOptions struct {
 	// We specify this as on option to pass a common proxyCA to multiple apiservers to simulate
 	// an apiserver version skew scenario where all apiservers use the same proxyCA to verify client connections.
 	ProxyCA *ProxyCA
+	// Set the BinaryVersion of server effective version.
+	// If empty, effective version will default to version.DefaultKubeBinaryVersion.
+	BinaryVersion string
+	// Set the EmulationVersion of server effective version.
+	// If empty, emulation version will default to the effective version.
+	EmulationVersion string
+	// Set non-default request timeout in the server.
+	RequestTimeout time.Duration
 }
 
 // TestServer return values supplied by kube-test-ApiServer
@@ -139,7 +153,13 @@ func NewDefaultTestServerOptions() *TestServerInstanceOptions {
 // Note: we return a tear-down func instead of a stop channel because the later will leak temporary
 // files that because Golang testing's call to os.Exit will not give a stop channel go routine
 // enough time to remove temporary files.
-func StartTestServer(t Logger, instanceOptions *TestServerInstanceOptions, customFlags []string, storageConfig *storagebackend.Config) (result TestServer, err error) {
+func StartTestServer(t ktesting.TB, instanceOptions *TestServerInstanceOptions, customFlags []string, storageConfig *storagebackend.Config) (result TestServer, err error) {
+	// Some callers may have initialize ktesting already.
+	tCtx, ok := t.(ktesting.TContext)
+	if !ok {
+		tCtx = ktesting.Init(t)
+	}
+
 	if instanceOptions == nil {
 		instanceOptions = NewDefaultTestServerOptions()
 	}
@@ -149,12 +169,11 @@ func StartTestServer(t Logger, instanceOptions *TestServerInstanceOptions, custo
 		return result, fmt.Errorf("failed to create temp dir: %v", err)
 	}
 
-	stopCh := make(chan struct{})
 	var errCh chan error
 	tearDown := func() {
-		// Closing stopCh is stopping apiserver and cleaning up
+		// Cancel is stopping apiserver and cleaning up
 		// after itself, including shutting down its storage layer.
-		close(stopCh)
+		tCtx.Cancel("tearing down")
 
 		// If the apiserver was started, let's wait for it to
 		// shutdown clearly.
@@ -174,7 +193,25 @@ func StartTestServer(t Logger, instanceOptions *TestServerInstanceOptions, custo
 
 	fs := pflag.NewFlagSet("test", pflag.PanicOnError)
 
+	featureGate := utilfeature.DefaultMutableFeatureGate
+	featureGate.AddMetrics()
+	effectiveVersion := utilversion.DefaultKubeEffectiveVersion()
+	if instanceOptions.BinaryVersion != "" {
+		effectiveVersion = utilversion.NewEffectiveVersion(instanceOptions.BinaryVersion)
+	}
+	if instanceOptions.EmulationVersion != "" {
+		effectiveVersion.SetEmulationVersion(version.MustParse(instanceOptions.EmulationVersion))
+	}
+	// need to call SetFeatureGateEmulationVersionDuringTest to reset the feature gate emulation version at the end of the test.
+	featuregatetesting.SetFeatureGateEmulationVersionDuringTest(t, featureGate, effectiveVersion.EmulationVersion())
+	utilversion.DefaultComponentGlobalsRegistry.Reset()
+	utilruntime.Must(utilversion.DefaultComponentGlobalsRegistry.Register(utilversion.DefaultKubeComponent, effectiveVersion, featureGate))
+
 	s := options.NewServerRunOptions()
+	if instanceOptions.RequestTimeout > 0 {
+		s.GenericServerRunOptions.RequestTimeout = instanceOptions.RequestTimeout
+	}
+
 	for _, f := range s.Flags().FlagSets {
 		fs.AddFlagSet(f)
 	}
@@ -185,6 +222,7 @@ func StartTestServer(t Logger, instanceOptions *TestServerInstanceOptions, custo
 	}
 	s.SecureServing.ServerCert.CertDirectory = result.TmpDir
 
+	reqHeaderFromFlags := s.Authentication.RequestHeader
 	if instanceOptions.EnableCertAuth {
 		// set up default headers for request header auth
 		reqHeaders := serveroptions.NewDelegatingAuthenticationOptions()
@@ -318,6 +356,27 @@ func StartTestServer(t Logger, instanceOptions *TestServerInstanceOptions, custo
 		return result, err
 	}
 
+	// the RequestHeader options pointer gets replaced in the case of EnableCertAuth override
+	// and so flags are connected to a struct that no longer appears in the ServerOptions struct
+	// we're using.
+	// We still want to make it possible to configure the headers config for the RequestHeader authenticator.
+	if usernameHeaders := reqHeaderFromFlags.UsernameHeaders; len(usernameHeaders) > 0 {
+		s.Authentication.RequestHeader.UsernameHeaders = usernameHeaders
+	}
+	if uidHeaders := reqHeaderFromFlags.UIDHeaders; len(uidHeaders) > 0 {
+		s.Authentication.RequestHeader.UIDHeaders = uidHeaders
+	}
+	if groupHeaders := reqHeaderFromFlags.GroupHeaders; len(groupHeaders) > 0 {
+		s.Authentication.RequestHeader.GroupHeaders = groupHeaders
+	}
+	if extraHeaders := reqHeaderFromFlags.ExtraHeaderPrefixes; len(extraHeaders) > 0 {
+		s.Authentication.RequestHeader.ExtraHeaderPrefixes = extraHeaders
+	}
+
+	if err := utilversion.DefaultComponentGlobalsRegistry.Set(); err != nil {
+		return result, err
+	}
+
 	saSigningKeyFile, err := os.CreateTemp("/tmp", "insecure_test_key")
 	if err != nil {
 		t.Fatalf("create temp file failed: %v", err)
@@ -359,15 +418,15 @@ func StartTestServer(t Logger, instanceOptions *TestServerInstanceOptions, custo
 	}
 
 	errCh = make(chan error)
-	go func(stopCh <-chan struct{}) {
+	go func() {
 		defer close(errCh)
 		prepared, err := server.PrepareRun()
 		if err != nil {
 			errCh <- err
-		} else if err := prepared.Run(stopCh); err != nil {
+		} else if err := prepared.Run(tCtx); err != nil {
 			errCh <- err
 		}
-	}(stopCh)
+	}()
 
 	client, err := kubernetes.NewForConfig(server.GenericAPIServer.LoopbackClientConfig)
 	if err != nil {
@@ -465,7 +524,7 @@ func StartTestServer(t Logger, instanceOptions *TestServerInstanceOptions, custo
 }
 
 // StartTestServerOrDie calls StartTestServer t.Fatal if it does not succeed.
-func StartTestServerOrDie(t Logger, instanceOptions *TestServerInstanceOptions, flags []string, storageConfig *storagebackend.Config) *TestServer {
+func StartTestServerOrDie(t testing.TB, instanceOptions *TestServerInstanceOptions, flags []string, storageConfig *storagebackend.Config) *TestServer {
 	result, err := StartTestServer(t, instanceOptions, flags, storageConfig)
 	if err == nil {
 		return &result

@@ -41,6 +41,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
@@ -200,8 +201,6 @@ func (sf selectableFieldTestCase) Name() string {
 
 func TestSelectableFields(t *testing.T) {
 	_, ctx := ktesting.NewTestContext(t)
-
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, apiextensionsfeatures.CustomResourceFieldSelectors, true)()
 	tearDown, apiExtensionClient, dynamicClient, err := fixtures.StartDefaultServerWithClients(t)
 	if err != nil {
 		t.Fatal(err)
@@ -497,7 +496,6 @@ func testDeleteCollection(ctx context.Context, t *testing.T, tcs []selectableFie
 
 func TestFieldSelectorOpenAPI(t *testing.T) {
 	_, ctx := ktesting.NewTestContext(t)
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, apiextensionsfeatures.CustomResourceFieldSelectors, true)()
 	tearDown, config, _, err := fixtures.StartDefaultServer(t)
 	if err != nil {
 		t.Fatal(err)
@@ -595,6 +593,8 @@ func TestFieldSelectorOpenAPI(t *testing.T) {
 
 func TestFieldSelectorDropFields(t *testing.T) {
 	_, ctx := ktesting.NewTestContext(t)
+	featuregatetesting.SetFeatureGateEmulationVersionDuringTest(t, utilfeature.DefaultFeatureGate, version.MustParse("1.31"))
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, apiextensionsfeatures.CustomResourceFieldSelectors, false)
 	tearDown, apiExtensionClient, _, err := fixtures.StartDefaultServerWithClients(t)
 	if err != nil {
 		t.Fatal(err)
@@ -675,6 +675,7 @@ func TestFieldSelectorDropFields(t *testing.T) {
 }
 
 func TestFieldSelectorDisablement(t *testing.T) {
+	featuregatetesting.SetFeatureGateEmulationVersionDuringTest(t, utilfeature.DefaultFeatureGate, version.MustParse("1.31"))
 	_, ctx := ktesting.NewTestContext(t)
 	tearDown, config, _, err := fixtures.StartDefaultServer(t)
 	if err != nil {
@@ -700,12 +701,13 @@ func TestFieldSelectorDisablement(t *testing.T) {
 	crd := selectableFieldFixture.DeepCopy()
 	// Write a field that uses the feature while the feature gate is enabled
 	t.Run("CustomResourceFieldSelectors", func(t *testing.T) {
-		defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, apiextensionsfeatures.CustomResourceFieldSelectors, true)()
+		featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, apiextensionsfeatures.CustomResourceFieldSelectors, true)
 		crd, err = fixtures.CreateNewV1CustomResourceDefinition(crd, apiExtensionClient, dynamicClient)
 		if err != nil {
 			t.Fatal(err)
 		}
 	})
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, apiextensionsfeatures.CustomResourceFieldSelectors, false)
 
 	// Now that the feature gate is disabled again, update the CRD to trigger an openAPI update
 	crd, err = apiExtensionClient.ApiextensionsV1().CustomResourceDefinitions().Get(ctx, crd.Name, metav1.GetOptions{})

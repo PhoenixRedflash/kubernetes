@@ -374,12 +374,12 @@ type KubeletConfiguration struct {
 	// A set of ResourceName=ResourceQuantity (e.g. cpu=200m,memory=150G,ephemeral-storage=1G,pid=100) pairs
 	// that describe resources reserved for non-kubernetes components.
 	// Currently only cpu, memory and local ephemeral storage for root file system are supported.
-	// See http://kubernetes.io/docs/user-guide/compute-resources for more detail.
+	// See https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources for more detail.
 	SystemReserved map[string]string
 	// A set of ResourceName=ResourceQuantity (e.g. cpu=200m,memory=150G,ephemeral-storage=1G,pid=100) pairs
 	// that describe resources reserved for kubernetes system components.
 	// Currently only cpu, memory and local ephemeral storage for root file system are supported.
-	// See http://kubernetes.io/docs/user-guide/compute-resources for more detail.
+	// See https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources for more detail.
 	KubeReserved map[string]string
 	// This flag helps kubelet identify absolute name of top level cgroup used to enforce `SystemReserved` compute resource reservation for OS system daemons.
 	// Refer to [Node Allocatable](https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#node-allocatable) doc for more information.
@@ -494,6 +494,13 @@ type KubeletConfiguration struct {
 	// If not specified the default value is ContainerRuntimeEndpoint
 	// +optional
 	ImageServiceEndpoint string
+
+	// FailCgroupV1 prevents the kubelet from starting on hosts
+	// that use cgroup v1. By default, this is set to 'false', meaning
+	// the kubelet is allowed to start on cgroup v1 hosts unless this
+	// option is explicitly enabled.
+	// +optional
+	FailCgroupV1 bool
 }
 
 // KubeletAuthorizationMode denotes the authorization mode for the kubelet

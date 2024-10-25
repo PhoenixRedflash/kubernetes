@@ -54,6 +54,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/apimachinery/pkg/runtime/serializer/cbor"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/apimachinery/pkg/runtime/serializer/protobuf"
 	"k8s.io/apimachinery/pkg/runtime/serializer/versioning"
@@ -69,8 +70,10 @@ import (
 	"k8s.io/apiserver/pkg/endpoints/handlers/responsewriters"
 	"k8s.io/apiserver/pkg/endpoints/metrics"
 	apirequest "k8s.io/apiserver/pkg/endpoints/request"
+	"k8s.io/apiserver/pkg/features"
 	"k8s.io/apiserver/pkg/registry/generic"
 	genericfilters "k8s.io/apiserver/pkg/server/filters"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/apiserver/pkg/util/webhook"
 	"k8s.io/apiserver/pkg/warning"
 	"k8s.io/client-go/scale"
@@ -600,6 +603,20 @@ func (r *crdHandler) GetCustomResourceListerCollectionDeleter(crd *apiextensions
 	return info.storages[info.storageVersion].CustomResource, nil
 }
 
+func newCBORSerializerInfo(creater runtime.ObjectCreater, typer runtime.ObjectTyper) runtime.SerializerInfo {
+	return runtime.SerializerInfo{
+		MediaType:        "application/cbor",
+		MediaTypeType:    "application",
+		MediaTypeSubType: "cbor",
+		Serializer:       cbor.NewSerializer(creater, typer),
+		StrictSerializer: cbor.NewSerializer(creater, typer, cbor.Strict(true)),
+		StreamSerializer: &runtime.StreamSerializerInfo{
+			Framer:     cbor.NewFramer(),
+			Serializer: cbor.NewSerializer(creater, typer, cbor.Transcode(false)),
+		},
+	}
+}
+
 // getOrCreateServingInfoFor gets the CRD serving info for the given CRD UID if the key exists in the storage map.
 // Otherwise the function fetches the up-to-date CRD using the given CRD name and creates CRD serving info.
 func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crdInfo, error) {
@@ -858,14 +875,14 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
 					MediaTypeType:    "application",
 					MediaTypeSubType: "json",
 					EncodesAsText:    true,
-					Serializer:       json.NewSerializer(json.DefaultMetaFactory, creator, typer, false),
-					PrettySerializer: json.NewSerializer(json.DefaultMetaFactory, creator, typer, true),
+					Serializer:       json.NewSerializerWithOptions(json.DefaultMetaFactory, creator, typer, json.SerializerOptions{}),
+					PrettySerializer: json.NewSerializerWithOptions(json.DefaultMetaFactory, creator, typer, json.SerializerOptions{Pretty: true}),
 					StrictSerializer: json.NewSerializerWithOptions(json.DefaultMetaFactory, creator, typer, json.SerializerOptions{
 						Strict: true,
 					}),
 					StreamSerializer: &runtime.StreamSerializerInfo{
 						EncodesAsText: true,
-						Serializer:    json.NewSerializer(json.DefaultMetaFactory, creator, typer, false),
+						Serializer:    json.NewSerializerWithOptions(json.DefaultMetaFactory, creator, typer, json.SerializerOptions{}),
 						Framer:        json.Framer,
 					},
 				},
@@ -874,7 +891,7 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
 					MediaTypeType:    "application",
 					MediaTypeSubType: "yaml",
 					EncodesAsText:    true,
-					Serializer:       json.NewYAMLSerializer(json.DefaultMetaFactory, creator, typer),
+					Serializer:       json.NewSerializerWithOptions(json.DefaultMetaFactory, creator, typer, json.SerializerOptions{Yaml: true}),
 					StrictSerializer: json.NewSerializerWithOptions(json.DefaultMetaFactory, creator, typer, json.SerializerOptions{
 						Yaml:   true,
 						Strict: true,
@@ -892,6 +909,11 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
 				},
 			},
 		}
+
+		if utilfeature.TestOnlyFeatureGate.Enabled(features.TestOnlyCBORServingAndStorage) {
+			negotiatedSerializer.supportedMediaTypes = append(negotiatedSerializer.supportedMediaTypes, newCBORSerializerInfo(creator, typer))
+		}
+
 		var standardSerializers []runtime.SerializerInfo
 		for _, s := range negotiatedSerializer.SupportedMediaTypes() {
 			if s.MediaType == runtime.ContentTypeProtobuf {
@@ -955,7 +977,11 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
 		scaleScope := *requestScopes[v.Name]
 		scaleConverter := scale.NewScaleConverter()
 		scaleScope.Subresource = "scale"
-		scaleScope.Serializer = serializer.NewCodecFactory(scaleConverter.Scheme())
+		var opts []serializer.CodecFactoryOptionsMutator
+		if utilfeature.TestOnlyFeatureGate.Enabled(features.TestOnlyCBORServingAndStorage) {
+			opts = append(opts, serializer.WithSerializer(newCBORSerializerInfo))
+		}
+		scaleScope.Serializer = serializer.NewCodecFactory(scaleConverter.Scheme(), opts...)
 		scaleScope.Kind = autoscalingv1.SchemeGroupVersion.WithKind("Scale")
 		scaleScope.Namer = handlers.ContextBasedNaming{
 			Namer:         meta.NewAccessor(),
@@ -1178,8 +1204,9 @@ type crdConversionRESTOptionsGetter struct {
 	preserveUnknownFields bool
 }
 
-func (t crdConversionRESTOptionsGetter) GetRESTOptions(resource schema.GroupResource) (generic.RESTOptions, error) {
-	ret, err := t.RESTOptionsGetter.GetRESTOptions(resource)
+func (t crdConversionRESTOptionsGetter) GetRESTOptions(resource schema.GroupResource, example runtime.Object) (generic.RESTOptions, error) {
+	// Explicitly ignore example, we override storageconfig below
+	ret, err := t.RESTOptionsGetter.GetRESTOptions(resource, nil)
 	if err == nil {
 		d := schemaCoercingDecoder{delegate: ret.StorageConfig.Codec, validator: unstructuredSchemaCoercer{
 			// drop invalid fields while decoding old CRs (before we haven't had any ObjectMeta validation)

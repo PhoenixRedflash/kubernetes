@@ -26,9 +26,6 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
-	// ensure libs have a chance to initialize
-	_ "github.com/stretchr/testify/assert"
-
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -109,7 +106,7 @@ var _ = SIGDescribe("SchedulerPriorities", framework.WithSerial(), func() {
 
 		err = framework.CheckTestingNSDeletedExcept(ctx, cs, ns)
 		framework.ExpectNoError(err)
-		err = e2epod.WaitForPodsRunningReady(ctx, cs, metav1.NamespaceSystem, int32(systemPodsNo), 0, framework.PodReadyBeforeTimeout)
+		err = e2epod.WaitForPodsRunningReady(ctx, cs, metav1.NamespaceSystem, systemPodsNo, framework.PodReadyBeforeTimeout)
 		framework.ExpectNoError(err)
 
 		// skip if the most utilized node has less than the cri-o minMemLimit available
@@ -540,9 +537,10 @@ func getNonZeroRequests(pod *v1.Pod) Resource {
 	result := Resource{}
 	for i := range pod.Spec.Containers {
 		container := &pod.Spec.Containers[i]
-		cpu, memory := schedutil.GetNonzeroRequests(&container.Resources.Requests)
-		result.MilliCPU += cpu
-		result.Memory += memory
+		cpu := getNonZeroRequestForResource(v1.ResourceCPU, &container.Resources.Requests)
+		memory := getNonZeroRequestForResource(v1.ResourceMemory, &container.Resources.Requests)
+		result.MilliCPU += cpu.MilliValue()
+		result.Memory += memory.Value()
 	}
 	return result
 }
@@ -558,4 +556,32 @@ func getRandomTaint() v1.Taint {
 func addTaintToNode(ctx context.Context, cs clientset.Interface, nodeName string, testTaint v1.Taint) {
 	e2enode.AddOrUpdateTaintOnNode(ctx, cs, nodeName, testTaint)
 	e2enode.ExpectNodeHasTaint(ctx, cs, nodeName, &testTaint)
+}
+
+// getNonZeroRequestForResource returns the requested values,
+// if the resource has undefined request for CPU or memory, it returns a default value.
+func getNonZeroRequestForResource(resourceName v1.ResourceName, requests *v1.ResourceList) resource.Quantity {
+	if requests == nil {
+		return resource.Quantity{}
+	}
+	switch resourceName {
+	case v1.ResourceCPU:
+		// Override if un-set, but not if explicitly set to zero
+		if _, found := (*requests)[v1.ResourceCPU]; !found {
+			return *resource.NewMilliQuantity(schedutil.DefaultMilliCPURequest, resource.DecimalSI)
+		}
+		return requests.Cpu().DeepCopy()
+	case v1.ResourceMemory:
+		// Override if un-set, but not if explicitly set to zero
+		if _, found := (*requests)[v1.ResourceMemory]; !found {
+			return *resource.NewQuantity(schedutil.DefaultMemoryRequest, resource.DecimalSI)
+		}
+		return requests.Memory().DeepCopy()
+	default:
+		quantity, found := (*requests)[resourceName]
+		if !found {
+			return resource.Quantity{}
+		}
+		return quantity.DeepCopy()
+	}
 }

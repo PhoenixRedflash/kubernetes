@@ -35,7 +35,7 @@ cp -a "${DIFFROOT}"/* "${TMP_DIFFROOT}"
 "${SCRIPT_ROOT}/hack/update-codegen.sh"
 echo "diffing ${DIFFROOT} against freshly generated codegen"
 ret=0
-diff -Naupr "${DIFFROOT}" "${TMP_DIFFROOT}" || ret=$?
+diff -Naupr -x.gitignore "${DIFFROOT}" "${TMP_DIFFROOT}" || ret=$?
 if [[ $ret -eq 0 ]]; then
   echo "${DIFFROOT} up to date."
 else
@@ -47,6 +47,7 @@ fi
 echo "Smoke testing examples by compiling..."
 pushd "${SCRIPT_ROOT}"
   go build "k8s.io/code-generator/examples/crd/..."
+  go build "k8s.io/code-generator/examples/single/..."
   go build "k8s.io/code-generator/examples/apiserver/..."
   go build "k8s.io/code-generator/examples/MixedCase/..."
   go build "k8s.io/code-generator/examples/HyphenGroup/..."

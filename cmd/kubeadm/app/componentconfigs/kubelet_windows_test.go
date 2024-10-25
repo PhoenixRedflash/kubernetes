@@ -1,3 +1,6 @@
+//go:build windows
+// +build windows
+
 /*
 Copyright 2021 The Kubernetes Authors.
 
@@ -82,7 +85,7 @@ func TestMutatePaths(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			mutatePaths(test.cfg, drive)
 			if !reflect.DeepEqual(test.cfg, test.expected) {
-				t.Errorf("Missmatch between expected and got:\nExpected:\n%+v\n---\nGot:\n%+v",
+				t.Errorf("Mismatch between expected and got:\nExpected:\n%+v\n---\nGot:\n%+v",
 					test.expected, test.cfg)
 			}
 		})

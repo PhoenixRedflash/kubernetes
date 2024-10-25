@@ -214,7 +214,7 @@ func TestCopyShifting(t *testing.T) {
 
 func BenchmarkDelayingQueue_AddAfter(b *testing.B) {
 	fakeClock := testingclock.NewFakeClock(time.Now())
-	q := NewDelayingQueueWithConfig(DelayingQueueConfig{Clock: fakeClock})
+	q := NewTypedDelayingQueueWithConfig(TypedDelayingQueueConfig[string]{Clock: fakeClock})
 
 	// Add items
 	for n := 0; n < b.N; n++ {
@@ -241,7 +241,7 @@ func waitForAdded(q DelayingInterface, depth int) error {
 
 func waitForWaitingQueueToFill(q DelayingInterface) error {
 	return wait.Poll(1*time.Millisecond, 10*time.Second, func() (done bool, err error) {
-		if len(q.(*delayingType).waitingForAddCh) == 0 {
+		if len(q.(*delayingType[any]).waitingForAddCh) == 0 {
 			return true, nil
 		}
 

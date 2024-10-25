@@ -24,7 +24,7 @@ type Features struct {
 	EnableVolumeCapacityPriority                 bool
 	EnableNodeInclusionPolicyInPodTopologySpread bool
 	EnableMatchLabelKeysInPodTopologySpread      bool
-	EnablePodDisruptionConditions                bool
 	EnableInPlacePodVerticalScaling              bool
 	EnableSidecarContainers                      bool
+	EnableSchedulingQueueHint                    bool
 }

@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/fsnotify/fsnotify"
@@ -51,7 +53,7 @@ func TestProberExistingDriverBeforeInit(t *testing.T) {
 	// Assert
 	// Probe occurs, 1 plugin should be returned, and 2 watches (pluginDir and all its
 	// current subdirectories) registered.
-	assert.Equal(t, 1, len(events))
+	assert.Len(t, events, 1)
 	assert.Equal(t, volume.ProbeAddOrUpdate, events[0].Op)
 	plugDir := pluginDir
 	if goruntime.GOOS == "windows" {
@@ -66,7 +68,7 @@ func TestProberExistingDriverBeforeInit(t *testing.T) {
 	// Act
 	events, err = prober.Probe()
 	// Assert
-	assert.Equal(t, 0, len(events))
+	assert.Empty(t, events)
 	assert.NoError(t, err)
 }
 
@@ -77,7 +79,7 @@ func TestProberAddRemoveDriver(t *testing.T) {
 	prober.Probe()
 	events, err := prober.Probe()
 	assert.NoError(t, err)
-	assert.Equal(t, 0, len(events))
+	assert.Empty(t, events)
 
 	// Call probe after a file is added. Should return 1 event.
 
@@ -93,7 +95,7 @@ func TestProberAddRemoveDriver(t *testing.T) {
 	events, err = prober.Probe()
 
 	// Assert
-	assert.Equal(t, 1, len(events))
+	assert.Len(t, events, 1)
 	assert.Equal(t, volume.ProbeAddOrUpdate, events[0].Op)                   // 1 newly added
 	assertPathSuffix(t, driverPath, watcher.watches[len(watcher.watches)-1]) // Checks most recent watch
 	assert.NoError(t, err)
@@ -103,7 +105,7 @@ func TestProberAddRemoveDriver(t *testing.T) {
 	// Act
 	events, err = prober.Probe()
 	// Assert
-	assert.Equal(t, 0, len(events))
+	assert.Empty(t, events)
 	assert.NoError(t, err)
 
 	// Call probe after a non-driver file is added in a subdirectory. should return 1 event.
@@ -115,7 +117,7 @@ func TestProberAddRemoveDriver(t *testing.T) {
 	events, err = prober.Probe()
 
 	// Assert
-	assert.Equal(t, 1, len(events))
+	assert.Len(t, events, 1)
 	assert.Equal(t, volume.ProbeAddOrUpdate, events[0].Op)
 	assert.NoError(t, err)
 
@@ -123,7 +125,7 @@ func TestProberAddRemoveDriver(t *testing.T) {
 	// Act
 	events, err = prober.Probe()
 	// Assert
-	assert.Equal(t, 0, len(events))
+	assert.Empty(t, events)
 	assert.NoError(t, err)
 
 	// Call probe after a subdirectory is added in a driver directory. should return 1 event.
@@ -135,7 +137,7 @@ func TestProberAddRemoveDriver(t *testing.T) {
 	events, err = prober.Probe()
 
 	// Assert
-	assert.Equal(t, 1, len(events))
+	assert.Len(t, events, 1)
 	assert.Equal(t, volume.ProbeAddOrUpdate, events[0].Op)
 	assert.NoError(t, err)
 
@@ -143,7 +145,7 @@ func TestProberAddRemoveDriver(t *testing.T) {
 	// Act
 	events, err = prober.Probe()
 	// Assert
-	assert.Equal(t, 0, len(events))
+	assert.Empty(t, events)
 	assert.NoError(t, err)
 
 	// Call probe after a subdirectory is removed in a driver directory. should return 1 event.
@@ -154,7 +156,7 @@ func TestProberAddRemoveDriver(t *testing.T) {
 	events, err = prober.Probe()
 
 	// Assert
-	assert.Equal(t, 1, len(events))
+	assert.Len(t, events, 1)
 	assert.Equal(t, volume.ProbeAddOrUpdate, events[0].Op)
 	assert.NoError(t, err)
 
@@ -162,7 +164,7 @@ func TestProberAddRemoveDriver(t *testing.T) {
 	// Act
 	events, err = prober.Probe()
 	// Assert
-	assert.Equal(t, 0, len(events))
+	assert.Empty(t, events)
 	assert.NoError(t, err)
 
 	// Call probe after a driver executable and driver directory is remove. should return 1 event.
@@ -172,13 +174,13 @@ func TestProberAddRemoveDriver(t *testing.T) {
 	watcher.TriggerEvent(fsnotify.Remove, driverPath)
 	// Act and Assert: 1 ProbeRemove event
 	events, err = prober.Probe()
-	assert.Equal(t, 1, len(events))
+	assert.Len(t, events, 1)
 	assert.Equal(t, volume.ProbeRemove, events[0].Op)
 	assert.NoError(t, err)
 
 	// Act and Assert: 0 event
 	events, err = prober.Probe()
-	assert.Equal(t, 0, len(events))
+	assert.Empty(t, events)
 	assert.NoError(t, err)
 }
 
@@ -199,7 +201,7 @@ func TestEmptyPluginDir(t *testing.T) {
 	events, err := prober.Probe()
 
 	// Assert
-	assert.Equal(t, 0, len(events))
+	assert.Empty(t, events)
 	assert.NoError(t, err)
 }
 
@@ -216,7 +218,7 @@ func TestRemovePluginDir(t *testing.T) {
 	// Act: The handler triggered by the above events should have already handled the event appropriately.
 
 	// Assert
-	assert.Equal(t, 3, len(watcher.watches)) // 2 from initial setup, 1 from new watch.
+	assert.Len(t, watcher.watches, 3) // 2 from initial setup, 1 from new watch.
 	plugDir := pluginDir
 	if goruntime.GOOS == "windows" {
 		plugDir = "\\flexvolume"
@@ -229,7 +231,7 @@ func TestNestedDriverDir(t *testing.T) {
 	// Arrange
 	_, fs, watcher, _ := initTestEnvironment(t)
 	// Assert
-	assert.Equal(t, 2, len(watcher.watches)) // 2 from initial setup
+	assert.Len(t, watcher.watches, 2) // 2 from initial setup
 
 	// test add testDriverName
 	testDriverName := "testDriverName"
@@ -237,7 +239,7 @@ func TestNestedDriverDir(t *testing.T) {
 	fs.MkdirAll(testDriverPath, 0777)
 	watcher.TriggerEvent(fsnotify.Create, testDriverPath)
 	// Assert
-	assert.Equal(t, 3, len(watcher.watches)) // 2 from initial setup, 1 from new watch.
+	assert.Len(t, watcher.watches, 3) // 2 from initial setup, 1 from new watch.
 	assertPathSuffix(t, testDriverPath, watcher.watches[len(watcher.watches)-1])
 
 	// test add nested subdir inside testDriverName
@@ -248,7 +250,7 @@ func TestNestedDriverDir(t *testing.T) {
 		fs.MkdirAll(subdirPath, 0777)
 		watcher.TriggerEvent(fsnotify.Create, subdirPath)
 		// Assert
-		assert.Equal(t, 4+i, len(watcher.watches)) // 3 + newly added
+		assert.Len(t, watcher.watches, 4+i) // 3 + newly added
 		assertPathSuffix(t, subdirPath, watcher.watches[len(watcher.watches)-1])
 		basePath = subdirPath
 	}
@@ -272,13 +274,13 @@ func TestProberMultipleEvents(t *testing.T) {
 	events, err := prober.Probe()
 
 	// Assert
-	assert.Equal(t, 2, len(events))
+	assert.Len(t, events, 2)
 	assert.Equal(t, volume.ProbeAddOrUpdate, events[0].Op)
 	assert.Equal(t, volume.ProbeAddOrUpdate, events[1].Op)
 	assert.NoError(t, err)
 	for i := 0; i < iterations-1; i++ {
 		events, err = prober.Probe()
-		assert.Equal(t, 0, len(events))
+		assert.Empty(t, events)
 		assert.NoError(t, err)
 	}
 }
@@ -321,10 +323,51 @@ func TestProberSuccessAndError(t *testing.T) {
 	events, err := prober.Probe()
 
 	// Assert
-	assert.Equal(t, 1, len(events))
+	assert.Len(t, events, 1)
 	assert.Equal(t, volume.ProbeAddOrUpdate, events[0].Op)
 	assert.Equal(t, driverName, events[0].PluginName)
 	assert.Error(t, err)
+}
+
+// TestProberMultiThreaded tests the code path of many callers calling FindPluginBySpec/FindPluginByName
+// which then calls refreshProbedPlugins which then calls prober.Probe() and ensures that the prober is thread safe
+func TestProberMultiThreaded(t *testing.T) {
+	// Arrange
+	_, _, _, prober := initTestEnvironment(t)
+	totalEvents := atomic.Int32{}
+	totalErrors := atomic.Int32{}
+	pluginNameMutex := sync.RWMutex{}
+	var pluginName string
+	var wg sync.WaitGroup
+
+	// Act
+	for i := 0; i < 100; i++ {
+		go func() {
+			defer wg.Done()
+			events, err := prober.Probe()
+			for _, event := range events {
+				if event.Op == volume.ProbeAddOrUpdate {
+					pluginNameMutex.Lock()
+					pluginName = event.Plugin.GetPluginName()
+					pluginNameMutex.Unlock()
+				}
+			}
+			// this fails if ProbeAll is not complete before the next call comes in but we have assumed that it has
+			pluginNameMutex.RLock()
+			assert.Equal(t, "fake-driver", pluginName)
+			pluginNameMutex.RUnlock()
+			totalEvents.Add(int32(len(events)))
+			if err != nil {
+				totalErrors.Add(1)
+			}
+		}()
+		wg.Add(1)
+	}
+	wg.Wait()
+
+	// Assert
+	assert.Equal(t, int32(1), totalEvents.Load())
+	assert.Equal(t, int32(0), totalErrors.Load())
 }
 
 // Installs a mock driver (an empty file) in the mock fs.

@@ -25,10 +25,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+
+	"sigs.k8s.io/yaml"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -50,8 +53,8 @@ import (
 	"k8s.io/kubernetes/test/integration"
 	"k8s.io/kubernetes/test/integration/etcd"
 	"k8s.io/kubernetes/test/integration/framework"
+	"k8s.io/kubernetes/test/utils/ktesting"
 	"k8s.io/utils/pointer"
-	"sigs.k8s.io/yaml"
 )
 
 const (
@@ -75,7 +78,7 @@ const (
 type unSealSecret func(ctx context.Context, cipherText []byte, dataCtx value.Context, config apiserverv1.ProviderConfiguration) ([]byte, error)
 
 type transformTest struct {
-	logger            kubeapiservertesting.Logger
+	ktesting.TContext
 	storageConfig     *storagebackend.Config
 	configDir         string
 	transformerConfig string
@@ -85,12 +88,13 @@ type transformTest struct {
 	secret            *corev1.Secret
 }
 
-func newTransformTest(l kubeapiservertesting.Logger, transformerConfigYAML string, reload bool, configDir string, storageConfig *storagebackend.Config) (*transformTest, error) {
+func newTransformTest(tb testing.TB, transformerConfigYAML string, reload bool, configDir string, storageConfig *storagebackend.Config) (*transformTest, error) {
+	tCtx := ktesting.Init(tb)
 	if storageConfig == nil {
 		storageConfig = framework.SharedEtcd()
 	}
 	e := transformTest{
-		logger:            l,
+		TContext:          tCtx,
 		transformerConfig: transformerConfigYAML,
 		storageConfig:     storageConfig,
 	}
@@ -113,7 +117,9 @@ func newTransformTest(l kubeapiservertesting.Logger, transformerConfigYAML strin
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	if e.kubeAPIServer, err = kubeapiservertesting.StartTestServer(l, nil, e.getEncryptionOptions(reload), e.storageConfig); err != nil {
+	if e.kubeAPIServer, err = startTestServerLocked(
+		tb, nil,
+		e.getEncryptionOptions(reload), e.storageConfig); err != nil {
 		e.cleanUp()
 		return nil, fmt.Errorf("failed to start KubeAPI server: %w", err)
 	}
@@ -131,15 +137,24 @@ func newTransformTest(l kubeapiservertesting.Logger, transformerConfigYAML strin
 
 	if transformerConfigYAML != "" && reload {
 		// when reloading is enabled, this healthz endpoint is always present
-		mustBeHealthy(l, "/kms-providers", "ok", e.kubeAPIServer.ClientConfig)
-		mustNotHaveLivez(l, "/kms-providers", "404 page not found", e.kubeAPIServer.ClientConfig)
+		mustBeHealthy(tCtx, "/kms-providers", "ok", e.kubeAPIServer.ClientConfig)
+		mustNotHaveLivez(tCtx, "/kms-providers", "404 page not found", e.kubeAPIServer.ClientConfig)
 
 		// excluding healthz endpoints even if they do not exist should work
-		mustBeHealthy(l, "", `warn: some health checks cannot be excluded: no matches for "kms-provider-0","kms-provider-1","kms-provider-2","kms-provider-3"`,
+		mustBeHealthy(tCtx, "", `warn: some health checks cannot be excluded: no matches for "kms-provider-0","kms-provider-1","kms-provider-2","kms-provider-3"`,
 			e.kubeAPIServer.ClientConfig, "kms-provider-0", "kms-provider-1", "kms-provider-2", "kms-provider-3")
 	}
 
 	return &e, nil
+}
+
+var startTestServerLock sync.Mutex
+
+// startTestServerLocked prevents parallel calls to kubeapiservertesting.StartTestServer because it messes with global state.
+func startTestServerLocked(t ktesting.TB, instanceOptions *kubeapiservertesting.TestServerInstanceOptions, customFlags []string, storageConfig *storagebackend.Config) (result kubeapiservertesting.TestServer, err error) {
+	startTestServerLock.Lock()
+	defer startTestServerLock.Unlock()
+	return kubeapiservertesting.StartTestServer(t, instanceOptions, customFlags, storageConfig)
 }
 
 func (e *transformTest) cleanUp() {
@@ -530,7 +545,7 @@ func (e *transformTest) writeRawRecordToETCD(path string, data []byte) (*clientv
 }
 
 func (e *transformTest) printMetrics() error {
-	e.logger.Logf("Transformation Metrics:")
+	e.Logf("Transformation Metrics:")
 	metrics, err := legacyregistry.DefaultGatherer.Gather()
 	if err != nil {
 		return fmt.Errorf("failed to gather metrics: %s", err)
@@ -538,9 +553,9 @@ func (e *transformTest) printMetrics() error {
 
 	for _, mf := range metrics {
 		if strings.HasPrefix(*mf.Name, metricsPrefix) {
-			e.logger.Logf("%s", *mf.Name)
+			e.Logf("%s", *mf.Name)
 			for _, metric := range mf.GetMetric() {
-				e.logger.Logf("%v", metric)
+				e.Logf("%v", metric)
 			}
 		}
 	}

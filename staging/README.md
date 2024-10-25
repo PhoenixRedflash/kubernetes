@@ -19,6 +19,7 @@ Repositories currently staged here:
 - [`k8s.io/component-helpers`](https://github.com/kubernetes/component-helpers)
 - [`k8s.io/controller-manager`](https://github.com/kubernetes/controller-manager)
 - [`k8s.io/cri-api`](https://github.com/kubernetes/cri-api)
+- [`k8s.io/cri-client`](https://github.com/kubernetes/cri-client)
 - [`k8s.io/csi-translation-lib`](https://github.com/kubernetes/csi-translation-lib)
 - [`k8s.io/dynamic-resource-allocation`](https://github.com/kubernetes/dynamic-resource-allocation)
 - [`k8s.io/endpointslice`](https://github.com/kubernetes/endpointslice)
@@ -29,7 +30,6 @@ Repositories currently staged here:
 - [`k8s.io/kube-scheduler`](https://github.com/kubernetes/kube-scheduler)
 - [`k8s.io/kubectl`](https://github.com/kubernetes/kubectl)
 - [`k8s.io/kubelet`](https://github.com/kubernetes/kubelet)
-- [`k8s.io/legacy-cloud-providers`](https://github.com/kubernetes/legacy-cloud-providers)
 - [`k8s.io/metrics`](https://github.com/kubernetes/metrics)
 - [`k8s.io/mount-utils`](https://github.com/kubernetes/mount-utils)
 - [`k8s.io/pod-security-admission`](https://github.com/kubernetes/pod-security-admission)
@@ -87,12 +87,9 @@ import (
   ./hack/update-vendor.sh
 ```
 
-8. Run [`./hack/update-go-workspace.sh`](/hack/update-go-workspace.sh) to add
-   the module to the workspace.
-
 ### Creating the published repository
 
-1. Create an [issue](https://github.com/kubernetes/org/issues/new?template=repo-create.md)
+1. Create an [issue](https://github.com/kubernetes/org/issues/new?assignees=&labels=area%2Fgithub-repo&projects=&template=repo-create.yml&title=REQUEST%3A+%3CCreate+or+Migrate%3E+%3Cgithub+repo%3E)
 in the `kubernetes/org` repo to request creation of the respective published
 repository in the Kubernetes org. The published repository **must** have an
 initial empty commit. It also needs specific access rules and branch settings.

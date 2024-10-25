@@ -31,7 +31,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
-	utilnet "k8s.io/apimachinery/pkg/util/net"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	cloudprovider "k8s.io/cloud-provider"
 	cloudproviderapi "k8s.io/cloud-provider/api"
@@ -43,7 +42,6 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/cm"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	"k8s.io/kubernetes/pkg/kubelet/events"
-	"k8s.io/kubernetes/pkg/volume"
 	netutils "k8s.io/utils/net"
 
 	"k8s.io/klog/v2"
@@ -67,6 +65,7 @@ func NodeAddress(nodeIPs []net.IP, // typically Kubelet.nodeIPs
 	externalCloudProvider bool, // typically Kubelet.externalCloudProvider
 	cloud cloudprovider.Interface, // typically Kubelet.cloud
 	nodeAddressesFunc func() ([]v1.NodeAddress, error), // typically Kubelet.cloudResourceSyncManager.NodeAddresses
+	resolveAddressFunc func(net.IP) (net.IP, error), // typically k8s.io/apimachinery/pkg/util/net.ResolveBindAddress
 ) Setter {
 	var nodeIP, secondaryNodeIP net.IP
 	if len(nodeIPs) > 0 {
@@ -130,12 +129,18 @@ func NodeAddress(nodeIPs []net.IP, // typically Kubelet.nodeIPs
 			if len(node.Status.Addresses) > 0 {
 				return nil
 			}
-			// If nodeIPs are not specified wait for the external cloud-provider to set the node addresses.
+			// If nodeIPs are not set wait for the external cloud-provider to set the node addresses.
+			// If the nodeIP is the unspecified address 0.0.0.0 or ::, then use the IP of the default gateway of
+			// the corresponding IP family to bootstrap the node until the out-of-tree provider overrides it later.
+			// xref: https://github.com/kubernetes/kubernetes/issues/125348
 			// Otherwise uses them on the assumption that the installer/administrator has the previous knowledge
 			// required to ensure the external cloud provider will use the same addresses to avoid the issues explained
 			// in https://github.com/kubernetes/kubernetes/issues/120720.
 			// We are already hinting the external cloud provider via the annotation AnnotationAlphaProvidedIPAddr.
-			if !nodeIPSpecified {
+			if nodeIP == nil {
+				node.Status.Addresses = []v1.NodeAddress{
+					{Type: v1.NodeHostName, Address: hostname},
+				}
 				return nil
 			}
 		}
@@ -220,7 +225,7 @@ func NodeAddress(nodeIPs []net.IP, // typically Kubelet.nodeIPs
 				}
 
 				if ipAddr == nil {
-					ipAddr, err = utilnet.ResolveBindAddress(nodeIP)
+					ipAddr, err = resolveAddressFunc(nodeIP)
 				}
 			}
 
@@ -319,7 +324,6 @@ func MachineInfo(nodeName string,
 					node.Status.Capacity[v1.ResourceEphemeralStorage] = v
 				}
 			}
-			//}
 
 			devicePluginCapacity, devicePluginAllocatable, removedDevicePlugins = devicePluginResourceCapacityFunc()
 			for k, v := range devicePluginCapacity {
@@ -480,10 +484,27 @@ func GoRuntime() Setter {
 	}
 }
 
+// NodeFeatures returns a Setter that sets NodeFeatures on the node.
+func NodeFeatures(featuresGetter func() *kubecontainer.RuntimeFeatures) Setter {
+	return func(ctx context.Context, node *v1.Node) error {
+		if !utilfeature.DefaultFeatureGate.Enabled(features.SupplementalGroupsPolicy) {
+			return nil
+		}
+		features := featuresGetter()
+		if features == nil {
+			return nil
+		}
+		node.Status.Features = &v1.NodeFeatures{
+			SupplementalGroupsPolicy: &features.SupplementalGroupsPolicy,
+		}
+		return nil
+	}
+}
+
 // RuntimeHandlers returns a Setter that sets RuntimeHandlers on the node.
 func RuntimeHandlers(fn func() []kubecontainer.RuntimeHandler) Setter {
 	return func(ctx context.Context, node *v1.Node) error {
-		if !utilfeature.DefaultFeatureGate.Enabled(features.RecursiveReadOnlyMounts) {
+		if !utilfeature.DefaultFeatureGate.Enabled(features.RecursiveReadOnlyMounts) && !utilfeature.DefaultFeatureGate.Enabled(features.UserNamespacesSupport) {
 			return nil
 		}
 		handlers := fn()
@@ -493,6 +514,7 @@ func RuntimeHandlers(fn func() []kubecontainer.RuntimeHandler) Setter {
 				Name: h.Name,
 				Features: &v1.NodeRuntimeHandlerFeatures{
 					RecursiveReadOnlyMounts: &h.SupportsRecursiveReadOnlyMounts,
+					UserNamespaces:          &h.SupportsUserNamespaces,
 				},
 			}
 		}
@@ -775,33 +797,6 @@ func VolumesInUse(syncedFunc func() bool, // typically Kubelet.volumeManager.Rec
 		// Make sure to only update node status after reconciler starts syncing up states
 		if syncedFunc() {
 			node.Status.VolumesInUse = volumesInUseFunc()
-		}
-		return nil
-	}
-}
-
-// VolumeLimits returns a Setter that updates the volume limits on the node.
-func VolumeLimits(volumePluginListFunc func() []volume.VolumePluginWithAttachLimits, // typically Kubelet.volumePluginMgr.ListVolumePluginWithLimits
-) Setter {
-	return func(ctx context.Context, node *v1.Node) error {
-		if node.Status.Capacity == nil {
-			node.Status.Capacity = v1.ResourceList{}
-		}
-		if node.Status.Allocatable == nil {
-			node.Status.Allocatable = v1.ResourceList{}
-		}
-
-		pluginWithLimits := volumePluginListFunc()
-		for _, volumePlugin := range pluginWithLimits {
-			attachLimits, err := volumePlugin.GetVolumeLimits()
-			if err != nil {
-				klog.V(4).InfoS("Skipping volume limits for volume plugin", "plugin", volumePlugin.GetPluginName())
-				continue
-			}
-			for limitKey, value := range attachLimits {
-				node.Status.Capacity[v1.ResourceName(limitKey)] = *resource.NewQuantity(value, resource.DecimalSI)
-				node.Status.Allocatable[v1.ResourceName(limitKey)] = *resource.NewQuantity(value, resource.DecimalSI)
-			}
 		}
 		return nil
 	}

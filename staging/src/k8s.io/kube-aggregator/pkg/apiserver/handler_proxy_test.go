@@ -40,12 +40,17 @@ import (
 
 	"golang.org/x/net/websocket"
 
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/proxy"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apiserver/pkg/authentication/user"
+	"k8s.io/apiserver/pkg/endpoints/filters"
 	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/server/egressselector"
 	utilflowcontrol "k8s.io/apiserver/pkg/util/flowcontrol"
@@ -54,6 +59,7 @@ import (
 	"k8s.io/component-base/metrics/legacyregistry"
 	apiregistration "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
 	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 )
 
 type targetHTTPHandler struct {
@@ -148,6 +154,7 @@ func TestProxyHandler(t *testing.T) {
 		"proxy with user, insecure": {
 			user: &user.DefaultInfo{
 				Name:   "username",
+				UID:    "6b60d791-1af9-4513-92e5-e4252a1e0a78",
 				Groups: []string{"one", "two"},
 			},
 			path: "/request/path",
@@ -172,6 +179,7 @@ func TestProxyHandler(t *testing.T) {
 				"X-Forwarded-Uri":   {"/request/path"},
 				"X-Forwarded-For":   {"127.0.0.1"},
 				"X-Remote-User":     {"username"},
+				"X-Remote-Uid":      {"6b60d791-1af9-4513-92e5-e4252a1e0a78"},
 				"User-Agent":        {"Go-http-client/1.1"},
 				"Accept-Encoding":   {"gzip"},
 				"X-Remote-Group":    {"one", "two"},
@@ -180,6 +188,7 @@ func TestProxyHandler(t *testing.T) {
 		"proxy with user, cabundle": {
 			user: &user.DefaultInfo{
 				Name:   "username",
+				UID:    "6b60d791-1af9-4513-92e5-e4252a1e0a78",
 				Groups: []string{"one", "two"},
 			},
 			path: "/request/path",
@@ -204,6 +213,7 @@ func TestProxyHandler(t *testing.T) {
 				"X-Forwarded-Uri":   {"/request/path"},
 				"X-Forwarded-For":   {"127.0.0.1"},
 				"X-Remote-User":     {"username"},
+				"X-Remote-Uid":      {"6b60d791-1af9-4513-92e5-e4252a1e0a78"},
 				"User-Agent":        {"Go-http-client/1.1"},
 				"Accept-Encoding":   {"gzip"},
 				"X-Remote-Group":    {"one", "two"},
@@ -212,6 +222,7 @@ func TestProxyHandler(t *testing.T) {
 		"service unavailable": {
 			user: &user.DefaultInfo{
 				Name:   "username",
+				UID:    "6b60d791-1af9-4513-92e5-e4252a1e0a78",
 				Groups: []string{"one", "two"},
 			},
 			path: "/request/path",
@@ -234,6 +245,7 @@ func TestProxyHandler(t *testing.T) {
 		"service unresolveable": {
 			user: &user.DefaultInfo{
 				Name:   "username",
+				UID:    "6b60d791-1af9-4513-92e5-e4252a1e0a78",
 				Groups: []string{"one", "two"},
 			},
 			path:            "/request/path",
@@ -257,6 +269,7 @@ func TestProxyHandler(t *testing.T) {
 		"fail on bad serving cert": {
 			user: &user.DefaultInfo{
 				Name:   "username",
+				UID:    "6b60d791-1af9-4513-92e5-e4252a1e0a78",
 				Groups: []string{"one", "two"},
 			},
 			path: "/request/path",
@@ -278,6 +291,7 @@ func TestProxyHandler(t *testing.T) {
 		"fail on bad serving cert w/o SAN and increase SAN error counter metrics": {
 			user: &user.DefaultInfo{
 				Name:   "username",
+				UID:    "6b60d791-1af9-4513-92e5-e4252a1e0a78",
 				Groups: []string{"one", "two"},
 			},
 			path: "/request/path",
@@ -419,6 +433,7 @@ func newBrokenDialerAndSelector() (*mockEgressDialer, *egressselector.EgressSele
 
 func TestProxyUpgrade(t *testing.T) {
 	upgradeUser := "upgradeUser"
+	upgradeUID := "upgradeUser-UID"
 	testcases := map[string]struct {
 		APIService        *apiregistration.APIService
 		NewEgressSelector func() (*mockEgressDialer, *egressselector.EgressSelector)
@@ -528,6 +543,10 @@ func TestProxyUpgrade(t *testing.T) {
 				if user != upgradeUser {
 					t.Errorf("expected user %q, got %q", upgradeUser, user)
 				}
+				uid := req.Header.Get("X-Remote-Uid")
+				if uid != upgradeUID {
+					t.Errorf("expected UID %q, got %q", upgradeUID, uid)
+				}
 				body := make([]byte, 5)
 				ws.Read(body)
 				ws.Write([]byte("hello " + string(body)))
@@ -570,7 +589,7 @@ func TestProxyUpgrade(t *testing.T) {
 			}
 
 			proxyHandler.updateAPIService(tc.APIService)
-			aggregator := httptest.NewServer(contextHandler(proxyHandler, &user.DefaultInfo{Name: upgradeUser}))
+			aggregator := httptest.NewServer(contextHandler(proxyHandler, &user.DefaultInfo{Name: upgradeUser, UID: upgradeUID}))
 			defer aggregator.Close()
 
 			ws, err := websocket.Dial("ws://"+aggregator.Listener.Addr().String()+path, "", "http://127.0.0.1/")
@@ -772,6 +791,116 @@ func TestGetContextForNewRequest(t *testing.T) {
 		t.Error(string(body))
 	}
 
+}
+
+func TestTracerProvider(t *testing.T) {
+	fakeRecorder := tracetest.NewSpanRecorder()
+	otelTracer := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(fakeRecorder))
+	target := &targetHTTPHandler{}
+	user := &user.DefaultInfo{
+		Name:   "username",
+		Groups: []string{"one", "two"},
+	}
+	path := "/request/path"
+	apiService := &apiregistration.APIService{
+		ObjectMeta: metav1.ObjectMeta{Name: "v1.foo"},
+		Spec: apiregistration.APIServiceSpec{
+			Service:  &apiregistration.ServiceReference{Name: "test-service", Namespace: "test-ns", Port: ptr.To(int32(443))},
+			Group:    "foo",
+			Version:  "v1",
+			CABundle: testCACrt,
+		},
+		Status: apiregistration.APIServiceStatus{
+			Conditions: []apiregistration.APIServiceCondition{
+				{Type: apiregistration.Available, Status: apiregistration.ConditionTrue},
+			},
+		},
+	}
+	targetServer := httptest.NewUnstartedServer(target)
+	serviceCert := svcCrt
+	if cert, err := tls.X509KeyPair(serviceCert, svcKey); err != nil {
+		t.Fatalf("TestTracerProvider: failed to parse key pair: %v", err)
+	} else {
+		targetServer.TLS = &tls.Config{Certificates: []tls.Certificate{cert}}
+	}
+	targetServer.StartTLS()
+	defer targetServer.Close()
+
+	serviceResolver := &mockedRouter{destinationHost: targetServer.Listener.Addr().String()}
+	handler := &proxyHandler{
+		localDelegate:              http.NewServeMux(),
+		serviceResolver:            serviceResolver,
+		proxyCurrentCertKeyContent: func() ([]byte, []byte) { return emptyCert(), emptyCert() },
+		tracerProvider:             otelTracer,
+	}
+
+	server := httptest.NewServer(contextHandler(filters.WithTracing(handler, otelTracer), user))
+	defer server.Close()
+
+	handler.updateAPIService(apiService)
+	curr := handler.handlingInfo.Load().(proxyHandlingInfo)
+	handler.handlingInfo.Store(curr)
+	var propagator propagation.TraceContext
+	req, err := http.NewRequest(http.MethodGet, server.URL+path, nil)
+	if err != nil {
+		t.Errorf("expected new request: %v", err)
+		return
+	}
+
+	t.Logf("Sending request: %v", req)
+	_, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Errorf("http request failed: %v", err)
+		return
+	}
+
+	t.Log("Ensure the target server received the traceparent header")
+	id, ok := target.headers["Traceparent"]
+	if !ok {
+		t.Error("expected traceparent header")
+		return
+	}
+
+	t.Log("Get the span context from the traceparent header")
+	h := http.Header{
+		"Traceparent": id,
+	}
+	ctx := propagator.Extract(context.Background(), propagation.HeaderCarrier(h))
+	span := trace.SpanFromContext(ctx)
+
+	t.Log("Ensure that the span context is valid and remote")
+	if !span.SpanContext().IsValid() {
+		t.Error("expected valid span context")
+		return
+	}
+
+	if !span.SpanContext().IsRemote() {
+		t.Error("expected remote span context")
+		return
+	}
+
+	t.Log("Ensure that the span ID and trace ID match the expected values")
+	expectedSpanCtx := fakeRecorder.Ended()[0].SpanContext()
+	if expectedSpanCtx.TraceID() != span.SpanContext().TraceID() {
+		t.Errorf("expected trace id to match. expected: %v, but got %v", expectedSpanCtx.TraceID(), span.SpanContext().TraceID())
+		return
+	}
+
+	if expectedSpanCtx.SpanID() != span.SpanContext().SpanID() {
+		t.Errorf("expected span id to match. expected: %v, but got: %v", expectedSpanCtx.SpanID(), span.SpanContext().SpanID())
+		return
+	}
+
+	t.Log("Ensure that the expected spans were recorded when sending a request through the proxy")
+	expectedSpanNames := []string{"HTTP GET", "GET"}
+	spanNames := []string{}
+	for _, span := range fakeRecorder.Ended() {
+		spanNames = append(spanNames, span.Name())
+	}
+	if e, a := expectedSpanNames, spanNames; !reflect.DeepEqual(e, a) {
+		t.Errorf("expected span names %v, got %v", e, a)
+		return
+	}
 }
 
 func TestNewRequestForProxyWithAuditID(t *testing.T) {

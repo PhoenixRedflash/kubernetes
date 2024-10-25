@@ -75,6 +75,8 @@ var instanceMetadata = flag.String("instance-metadata", "", "key/value metadata 
 var imageProject = flag.String("image-project", "", "gce project the hosts live in  (gce)")
 var instanceType = flag.String("instance-type", "e2-medium", "GCP Machine type to use for test")
 var preemptibleInstances = flag.Bool("preemptible-instances", false, "If true, gce instances will be configured to be preemptible  (gce)")
+var network = flag.String("network", "", "Specifies the network that the VM instance are a part of")
+var subnet = flag.String("subnet", "", "Specifies the subnet that the VM instance are a part of")
 
 func init() {
 	flag.Var(&nodeEnvs, "node-env", "An environment variable passed to instance as metadata, e.g. when '--node-env=PATH=/usr/bin' is specified, there will be an extra instance metadata 'PATH=/usr/bin'.")
@@ -512,6 +514,12 @@ func (g *GCERunner) createGCEInstance(imageConfig *internalGCEImage) (string, er
 	createArgs = append(createArgs, "--machine-type="+g.machineType(imageConfig.machine))
 	createArgs = append(createArgs, "--create-disk="+strings.Join(diskArgs, ","))
 	createArgs = append(createArgs, "--service-account="+serviceAccount)
+	if len(*network) > 0 {
+		createArgs = append(createArgs, "--network="+*network)
+	}
+	if len(*subnet) > 0 {
+		createArgs = append(createArgs, "--subnet="+*subnet)
+	}
 	if *preemptibleInstances {
 		createArgs = append(createArgs, "--preemptible")
 	}
@@ -535,6 +543,10 @@ func (g *GCERunner) createGCEInstance(imageConfig *internalGCEImage) (string, er
 					return "", fmt.Errorf("unable to create temp file %v", err)
 				}
 				defer os.Remove(dataFile.Name()) // clean up
+				if err = dataFile.Close(); err != nil {
+					return "", fmt.Errorf("unable to close temp file %w", err)
+				}
+
 				if err = os.WriteFile(dataFile.Name(), []byte(item.Value), 0666); err != nil {
 					return "", fmt.Errorf("could not write contents of metadata item into file %v", err)
 				}

@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -58,7 +59,7 @@ func TestDefaultBinder(t *testing.T) {
 			defer cancel()
 
 			var gotBinding *v1.Binding
-			client := fake.NewSimpleClientset(testPod)
+			client := fake.NewClientset(testPod)
 			client.PrependReactor("create", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
 				if action.GetSubresource() != "binding" {
 					return false, nil, nil

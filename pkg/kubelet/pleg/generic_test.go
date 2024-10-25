@@ -26,9 +26,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/mock/gomock"
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/component-base/metrics/testutil"
@@ -140,7 +140,7 @@ func TestRelisting(t *testing.T) {
 	// changed.
 	pleg.Relist()
 	actual = getEventsFromChannel(ch)
-	assert.True(t, len(actual) == 0, "no container has changed, event length should be 0")
+	assert.Empty(t, actual, "no container has changed, event length should be 0")
 
 	runtime.AllPodList = []*containertest.FakePod{
 		{Pod: &kubecontainer.Pod{
@@ -228,7 +228,7 @@ func TestEventChannelFull(t *testing.T) {
 	}
 	// event channel is full, discard events
 	actual = getEventsFromChannel(ch)
-	assert.True(t, len(actual) == 4, "channel length should be 4")
+	assert.Len(t, actual, 4, "channel length should be 4")
 	assert.Subsetf(t, allEvents, actual, "actual events should in all events")
 }
 
@@ -352,15 +352,13 @@ func createTestPodsStatusesAndEvents(num int) ([]*kubecontainer.Pod, []*kubecont
 
 func TestRelistWithCache(t *testing.T) {
 	ctx := context.Background()
-	mockCtrl := gomock.NewController(t)
-	defer mockCtrl.Finish()
-	runtimeMock := containertest.NewMockRuntime(mockCtrl)
+	runtimeMock := containertest.NewMockRuntime(t)
 
 	pleg := newTestGenericPLEGWithRuntimeMock(runtimeMock)
 	ch := pleg.Watch()
 
 	pods, statuses, events := createTestPodsStatusesAndEvents(2)
-	runtimeMock.EXPECT().GetPods(ctx, true).Return(pods, nil).AnyTimes()
+	runtimeMock.EXPECT().GetPods(ctx, true).Return(pods, nil).Maybe()
 	runtimeMock.EXPECT().GetPodStatus(ctx, pods[0].ID, "", "").Return(statuses[0], nil).Times(1)
 	// Inject an error when querying runtime for the pod status for pods[1].
 	statusErr := fmt.Errorf("unable to get status")
@@ -409,9 +407,7 @@ func TestRelistWithCache(t *testing.T) {
 
 func TestRemoveCacheEntry(t *testing.T) {
 	ctx := context.Background()
-	mockCtrl := gomock.NewController(t)
-	defer mockCtrl.Finish()
-	runtimeMock := containertest.NewMockRuntime(mockCtrl)
+	runtimeMock := containertest.NewMockRuntime(t)
 	pleg := newTestGenericPLEGWithRuntimeMock(runtimeMock)
 
 	pods, statuses, _ := createTestPodsStatusesAndEvents(1)
@@ -425,7 +421,7 @@ func TestRemoveCacheEntry(t *testing.T) {
 	pleg.Relist()
 	actualStatus, actualErr := pleg.cache.Get(pods[0].ID)
 	assert.Equal(t, &kubecontainer.PodStatus{ID: pods[0].ID}, actualStatus)
-	assert.Equal(t, nil, actualErr)
+	assert.NoError(t, actualErr)
 }
 
 func TestHealthy(t *testing.T) {
@@ -457,9 +453,7 @@ func TestHealthy(t *testing.T) {
 
 func TestRelistWithReinspection(t *testing.T) {
 	ctx := context.Background()
-	mockCtrl := gomock.NewController(t)
-	defer mockCtrl.Finish()
-	runtimeMock := containertest.NewMockRuntime(mockCtrl)
+	runtimeMock := containertest.NewMockRuntime(t)
 
 	pleg := newTestGenericPLEGWithRuntimeMock(runtimeMock)
 	ch := pleg.Watch()
@@ -486,7 +480,7 @@ func TestRelistWithReinspection(t *testing.T) {
 	actualEvents := getEventsFromChannel(ch)
 	actualStatus, actualErr := pleg.cache.Get(podID)
 	assert.Equal(t, goodStatus, actualStatus)
-	assert.Equal(t, nil, actualErr)
+	assert.NoError(t, actualErr)
 	assert.Exactly(t, []*PodLifecycleEvent{goodEvent}, actualEvents)
 
 	// listing 2 - pretend runtime was in the middle of creating the non-infra container for the pod
@@ -520,7 +514,7 @@ func TestRelistWithReinspection(t *testing.T) {
 	actualEvents = getEventsFromChannel(ch)
 	actualStatus, actualErr = pleg.cache.Get(podID)
 	assert.Equal(t, goodStatus, actualStatus)
-	assert.Equal(t, nil, actualErr)
+	assert.NoError(t, actualErr)
 	// no events are expected because relist #1 set the old pod record which has the infra container
 	// running. relist #2 had the inspection error and therefore didn't modify either old or new.
 	// relist #3 forced the reinspection of the pod to retrieve its status, but because the list of
@@ -613,11 +607,8 @@ func TestRelistIPChange(t *testing.T) {
 		},
 	}
 
-	mockCtrl := gomock.NewController(t)
-	defer mockCtrl.Finish()
-
 	for _, tc := range testCases {
-		runtimeMock := containertest.NewMockRuntime(mockCtrl)
+		runtimeMock := containertest.NewMockRuntime(t)
 
 		pleg := newTestGenericPLEGWithRuntimeMock(runtimeMock)
 		ch := pleg.Watch()
@@ -643,7 +634,7 @@ func TestRelistIPChange(t *testing.T) {
 		actualEvents := getEventsFromChannel(ch)
 		actualStatus, actualErr := pleg.cache.Get(pod.ID)
 		assert.Equal(t, status, actualStatus, tc.name)
-		assert.Nil(t, actualErr, tc.name)
+		assert.NoError(t, actualErr, tc.name)
 		assert.Exactly(t, []*PodLifecycleEvent{event}, actualEvents)
 
 		// Clear the IP address and mark the container terminated
@@ -668,7 +659,7 @@ func TestRelistIPChange(t *testing.T) {
 		statusCopy := *status
 		statusCopy.IPs = tc.podIPs
 		assert.Equal(t, &statusCopy, actualStatus, tc.name)
-		assert.Nil(t, actualErr, tc.name)
+		require.NoError(t, actualErr, tc.name)
 		assert.Exactly(t, []*PodLifecycleEvent{event}, actualEvents)
 	}
 }

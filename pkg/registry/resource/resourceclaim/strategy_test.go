@@ -19,23 +19,21 @@ package resourceclaim
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/kubernetes/pkg/apis/resource"
 )
 
-var resourceClaim = &resource.ResourceClaim{
+var obj = &resource.ResourceClaim{
 	ObjectMeta: metav1.ObjectMeta{
 		Name:      "valid-claim",
 		Namespace: "default",
 	},
-	Spec: resource.ResourceClaimSpec{
-		ResourceClassName: "valid-class",
-		AllocationMode:    resource.AllocationModeImmediate,
-	},
 }
 
-func TestClaimStrategy(t *testing.T) {
+func TestStrategy(t *testing.T) {
 	if !Strategy.NamespaceScoped() {
 		t.Errorf("ResourceClaim must be namespace scoped")
 	}
@@ -44,42 +42,161 @@ func TestClaimStrategy(t *testing.T) {
 	}
 }
 
-func TestClaimStrategyCreate(t *testing.T) {
+func TestStrategyCreate(t *testing.T) {
 	ctx := genericapirequest.NewDefaultContext()
-	resourceClaim := resourceClaim.DeepCopy()
 
-	Strategy.PrepareForCreate(ctx, resourceClaim)
-	errs := Strategy.Validate(ctx, resourceClaim)
-	if len(errs) != 0 {
-		t.Errorf("unexpected error validating for create %v", errs)
+	testcases := map[string]struct {
+		obj                   *resource.ResourceClaim
+		expectValidationError bool
+		expectObj             *resource.ResourceClaim
+	}{
+		"simple": {
+			obj:       obj,
+			expectObj: obj,
+		},
+		"validation-error": {
+			obj: func() *resource.ResourceClaim {
+				obj := obj.DeepCopy()
+				obj.Name = "%#@$%$"
+				return obj
+			}(),
+			expectValidationError: true,
+		},
+	}
+
+	for name, tc := range testcases {
+		t.Run(name, func(t *testing.T) {
+			obj := tc.obj.DeepCopy()
+			Strategy.PrepareForCreate(ctx, obj)
+			if errs := Strategy.Validate(ctx, obj); len(errs) != 0 {
+				if !tc.expectValidationError {
+					t.Fatalf("unexpected validation errors: %q", errs)
+				}
+				return
+			} else if tc.expectValidationError {
+				t.Fatal("expected validation error(s), got none")
+			}
+			if warnings := Strategy.WarningsOnCreate(ctx, obj); len(warnings) != 0 {
+				t.Fatalf("unexpected warnings: %q", warnings)
+			}
+			Strategy.Canonicalize(obj)
+			assert.Equal(t, tc.expectObj, obj)
+		})
 	}
 }
 
-func TestClaimStrategyUpdate(t *testing.T) {
-	t.Run("no-changes-okay", func(t *testing.T) {
-		ctx := genericapirequest.NewDefaultContext()
-		resourceClaim := resourceClaim.DeepCopy()
-		newClaim := resourceClaim.DeepCopy()
-		newClaim.ResourceVersion = "4"
+func TestStrategyUpdate(t *testing.T) {
+	ctx := genericapirequest.NewDefaultContext()
 
-		Strategy.PrepareForUpdate(ctx, newClaim, resourceClaim)
-		errs := Strategy.ValidateUpdate(ctx, newClaim, resourceClaim)
-		if len(errs) != 0 {
-			t.Errorf("unexpected validation errors: %v", errs)
-		}
-	})
+	testcases := map[string]struct {
+		oldObj                *resource.ResourceClaim
+		newObj                *resource.ResourceClaim
+		expectValidationError bool
+		expectObj             *resource.ResourceClaim
+	}{
+		"no-changes-okay": {
+			oldObj:    obj,
+			newObj:    obj,
+			expectObj: obj,
+		},
+		"name-change-not-allowed": {
+			oldObj: obj,
+			newObj: func() *resource.ResourceClaim {
+				obj := obj.DeepCopy()
+				obj.Name += "-2"
+				return obj
+			}(),
+			expectValidationError: true,
+		},
+	}
 
-	t.Run("name-change-not-allowed", func(t *testing.T) {
-		ctx := genericapirequest.NewDefaultContext()
-		resourceClaim := resourceClaim.DeepCopy()
-		newClaim := resourceClaim.DeepCopy()
-		newClaim.Name = "valid-claim-2"
-		newClaim.ResourceVersion = "4"
+	for name, tc := range testcases {
+		t.Run(name, func(t *testing.T) {
+			oldObj := tc.oldObj.DeepCopy()
+			newObj := tc.newObj.DeepCopy()
+			newObj.ResourceVersion = "4"
 
-		Strategy.PrepareForUpdate(ctx, newClaim, resourceClaim)
-		errs := Strategy.ValidateUpdate(ctx, newClaim, resourceClaim)
-		if len(errs) == 0 {
-			t.Errorf("expected a validation error")
-		}
-	})
+			Strategy.PrepareForUpdate(ctx, newObj, oldObj)
+			if errs := Strategy.ValidateUpdate(ctx, newObj, oldObj); len(errs) != 0 {
+				if !tc.expectValidationError {
+					t.Fatalf("unexpected validation errors: %q", errs)
+				}
+				return
+			} else if tc.expectValidationError {
+				t.Fatal("expected validation error(s), got none")
+			}
+			if warnings := Strategy.WarningsOnUpdate(ctx, newObj, oldObj); len(warnings) != 0 {
+				t.Fatalf("unexpected warnings: %q", warnings)
+			}
+			Strategy.Canonicalize(newObj)
+
+			expectObj := tc.expectObj.DeepCopy()
+			expectObj.ResourceVersion = "4"
+			assert.Equal(t, expectObj, newObj)
+		})
+	}
+}
+
+func TestStatusStrategyUpdate(t *testing.T) {
+	ctx := genericapirequest.NewDefaultContext()
+
+	testcases := map[string]struct {
+		oldObj                *resource.ResourceClaim
+		newObj                *resource.ResourceClaim
+		expectValidationError bool
+		expectObj             *resource.ResourceClaim
+	}{
+		"no-changes-okay": {
+			oldObj:    obj,
+			newObj:    obj,
+			expectObj: obj,
+		},
+		"name-change-not-allowed": {
+			oldObj: obj,
+			newObj: func() *resource.ResourceClaim {
+				obj := obj.DeepCopy()
+				obj.Name += "-2"
+				return obj
+			}(),
+			expectValidationError: true,
+		},
+		// Cannot add finalizers, annotations and labels during status update.
+		"drop-meta-changes": {
+			oldObj: obj,
+			newObj: func() *resource.ResourceClaim {
+				obj := obj.DeepCopy()
+				obj.Finalizers = []string{"foo"}
+				obj.Annotations = map[string]string{"foo": "bar"}
+				obj.Labels = map[string]string{"foo": "bar"}
+				return obj
+			}(),
+			expectObj: obj,
+		},
+	}
+
+	for name, tc := range testcases {
+		t.Run(name, func(t *testing.T) {
+			oldObj := tc.oldObj.DeepCopy()
+			newObj := tc.newObj.DeepCopy()
+			newObj.ResourceVersion = "4"
+
+			StatusStrategy.PrepareForUpdate(ctx, newObj, oldObj)
+			if errs := StatusStrategy.ValidateUpdate(ctx, newObj, oldObj); len(errs) != 0 {
+				if !tc.expectValidationError {
+					t.Fatalf("unexpected validation errors: %q", errs)
+				}
+				return
+			} else if tc.expectValidationError {
+				t.Fatal("expected validation error(s), got none")
+			}
+			if warnings := StatusStrategy.WarningsOnUpdate(ctx, newObj, oldObj); len(warnings) != 0 {
+				t.Fatalf("unexpected warnings: %q", warnings)
+			}
+			StatusStrategy.Canonicalize(newObj)
+
+			expectObj := tc.expectObj.DeepCopy()
+			expectObj.ResourceVersion = "4"
+			assert.Equal(t, expectObj, newObj)
+		})
+	}
 }

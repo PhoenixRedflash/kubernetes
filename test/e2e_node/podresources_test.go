@@ -447,12 +447,12 @@ func podresourcesListTests(ctx context.Context, f *framework.Framework, cli kube
 				cntName:        "cnt-00",
 				resourceName:   sd.resourceName,
 				resourceAmount: 1,
-				cpuRequest:     2000,
+				cpuRequest:     1000,
 			},
 			{
 				podName:    "pod-02",
 				cntName:    "cnt-00",
-				cpuRequest: 2000,
+				cpuRequest: 1000,
 			},
 			{
 				podName:        "pod-03",
@@ -471,12 +471,12 @@ func podresourcesListTests(ctx context.Context, f *framework.Framework, cli kube
 			{
 				podName:    "pod-01",
 				cntName:    "cnt-00",
-				cpuRequest: 2000,
+				cpuRequest: 1000,
 			},
 			{
 				podName:    "pod-02",
 				cntName:    "cnt-00",
-				cpuRequest: 2000,
+				cpuRequest: 1000,
 			},
 			{
 				podName:    "pod-03",
@@ -503,12 +503,12 @@ func podresourcesListTests(ctx context.Context, f *framework.Framework, cli kube
 				cntName:        "cnt-00",
 				resourceName:   sd.resourceName,
 				resourceAmount: 1,
-				cpuRequest:     2000,
+				cpuRequest:     1000,
 			},
 			{
 				podName:    "pod-02",
 				cntName:    "cnt-00",
-				cpuRequest: 2000,
+				cpuRequest: 1000,
 			},
 		}
 	} else {
@@ -520,12 +520,12 @@ func podresourcesListTests(ctx context.Context, f *framework.Framework, cli kube
 			{
 				podName:    "pod-01",
 				cntName:    "cnt-00",
-				cpuRequest: 2000,
+				cpuRequest: 1000,
 			},
 			{
 				podName:    "pod-02",
 				cntName:    "cnt-00",
-				cpuRequest: 2000,
+				cpuRequest: 1000,
 			},
 		}
 	}
@@ -740,7 +740,7 @@ func podresourcesGetAllocatableResourcesTests(ctx context.Context, cli kubeletpo
 		expectedCPUs := onlineCPUs.Difference(reservedSystemCPUs)
 
 		ginkgo.By(fmt.Sprintf("expecting CPUs '%v'='%v'", allocatableCPUs, expectedCPUs))
-		gomega.ExpectWithOffset(1, allocatableCPUs.Equals(expectedCPUs)).To(gomega.BeTrue(), "mismatch expecting CPUs")
+		gomega.ExpectWithOffset(1, allocatableCPUs.Equals(expectedCPUs)).To(gomega.BeTrueBecause("mismatch expecting CPUs"))
 	}
 
 	if sd == nil { // no devices in the environment, so expect no devices
@@ -791,7 +791,7 @@ func podresourcesGetTests(ctx context.Context, f *framework.Framework, cli kubel
 		{
 			podName:    "pod-01",
 			cntName:    "cnt-00",
-			cpuRequest: 2000,
+			cpuRequest: 1000,
 		},
 	}
 	tpd.createPodsForTest(ctx, f, expected)
@@ -812,7 +812,7 @@ func podresourcesGetTests(ctx context.Context, f *framework.Framework, cli kubel
 			{
 				podName:    "pod-01",
 				cntName:    "cnt-00",
-				cpuRequest: 2000,
+				cpuRequest: 1000,
 				initContainers: []initContainerDesc{
 					{
 						cntName:    "init-00",
@@ -820,7 +820,7 @@ func podresourcesGetTests(ctx context.Context, f *framework.Framework, cli kubel
 					},
 					{
 						cntName:       "restartable-init-01",
-						cpuRequest:    2000,
+						cpuRequest:    1000,
 						restartPolicy: &containerRestartPolicyAlways,
 					},
 				},
@@ -953,7 +953,7 @@ var _ = SIGDescribe("POD Resources", framework.WithSerial(), feature.PodResource
 		})
 	})
 
-	ginkgo.Context("without SRIOV devices in the system", func() {
+	framework.Context("without SRIOV devices in the system", framework.WithFlaky(), func() {
 		ginkgo.BeforeEach(func() {
 			requireLackOfSRIOVDevices()
 		})
@@ -1027,7 +1027,7 @@ var _ = SIGDescribe("POD Resources", framework.WithSerial(), feature.PodResource
 					}
 					pod := makePodResourcesTestPod(pd)
 					pod.Spec.Containers[0].Command = []string{"sh", "-c", "/bin/true"}
-					pod = e2epod.NewPodClient(f).CreateSync(ctx, pod)
+					pod = e2epod.NewPodClient(f).Create(ctx, pod)
 					defer e2epod.NewPodClient(f).DeleteSync(ctx, pod.Name, metav1.DeleteOptions{}, time.Minute)
 					err := e2epod.WaitForPodCondition(ctx, f.ClientSet, pod.Namespace, pod.Name, "Pod Succeeded", time.Minute*2, testutils.PodSucceeded)
 					framework.ExpectNoError(err)
@@ -1224,7 +1224,7 @@ var _ = SIGDescribe("POD Resources", framework.WithSerial(), feature.PodResource
 		})
 	})
 
-	ginkgo.Context("with the builtin rate limit values", func() {
+	framework.Context("with the builtin rate limit values", framework.WithFlaky(), func() {
 		ginkgo.It("should hit throttling when calling podresources List in a tight loop", func(ctx context.Context) {
 			// ensure APIs have been called at least once
 			endpoint, err := util.LocalEndpoint(defaultPodResourcesPath, podresources.Socket)
@@ -1315,7 +1315,7 @@ func teardownSampleDevicePluginOrFail(ctx context.Context, f *framework.Framewor
 	ginkgo.By(fmt.Sprintf("Delete sample device plugin pod %s/%s", pod.Namespace, pod.Name))
 	err := f.ClientSet.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, deleteOptions)
 
-	framework.ExpectNoError(err, "Failed to delete Pod %v in Namspace %v", pod.Name, pod.Namespace)
+	framework.ExpectNoError(err, "Failed to delete Pod %v in Namespace %v", pod.Name, pod.Namespace)
 	waitForAllContainerRemoval(ctx, pod.Name, pod.Namespace)
 }
 
@@ -1326,7 +1326,7 @@ func waitForTopologyUnawareResources(ctx context.Context, f *framework.Framework
 		node := getLocalNode(ctx, f)
 		resourceAmount := CountSampleDeviceAllocatable(node)
 		return resourceAmount > 0
-	}, 2*time.Minute, framework.Poll).Should(gomega.BeTrue())
+	}, 2*time.Minute, framework.Poll).Should(gomega.BeTrueBecause("expected %q resources to be available, got no resources", defaultTopologyUnawareResourceName))
 }
 
 func getPodResourcesMetrics(ctx context.Context) (e2emetrics.KubeletMetrics, error) {

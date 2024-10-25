@@ -21,6 +21,9 @@ import (
 	"path"
 	"strings"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+
 	"k8s.io/gengo/v2/generator"
 	"k8s.io/gengo/v2/namer"
 	"k8s.io/gengo/v2/types"
@@ -42,6 +45,8 @@ type genFakeForType struct {
 }
 
 var _ generator.Generator = &genFakeForType{}
+
+var titler = cases.Title(language.Und)
 
 // Filter ignores all but one type because we're making a single file per type.
 func (g *genFakeForType) Filter(c *generator.Context, t *types.Type) bool { return t == g.typeToMatch }
@@ -118,34 +123,34 @@ func (g *genFakeForType) GenerateType(c *generator.Context, t *types.Type, w io.
 		"ApplyPatchType":     c.Universe.Type(types.Name{Package: "k8s.io/apimachinery/pkg/types", Name: "ApplyPatchType"}),
 		"watchInterface":     c.Universe.Type(types.Name{Package: "k8s.io/apimachinery/pkg/watch", Name: "Interface"}),
 		"jsonMarshal":        c.Universe.Type(types.Name{Package: "encoding/json", Name: "Marshal"}),
+		"fmtErrorf":          c.Universe.Type(types.Name{Package: "fmt", Name: "Errorf"}),
+		"contextContext":     c.Universe.Type(types.Name{Package: "context", Name: "Context"}),
 
-		"NewRootListAction":              c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootListAction"}),
-		"NewListAction":                  c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewListAction"}),
-		"NewRootGetAction":               c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootGetAction"}),
-		"NewGetAction":                   c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewGetAction"}),
-		"NewRootDeleteAction":            c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootDeleteAction"}),
-		"NewRootDeleteActionWithOptions": c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootDeleteActionWithOptions"}),
-		"NewDeleteAction":                c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewDeleteAction"}),
-		"NewDeleteActionWithOptions":     c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewDeleteActionWithOptions"}),
-		"NewRootDeleteCollectionAction":  c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootDeleteCollectionAction"}),
-		"NewDeleteCollectionAction":      c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewDeleteCollectionAction"}),
-		"NewRootUpdateAction":            c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootUpdateAction"}),
-		"NewUpdateAction":                c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewUpdateAction"}),
-		"NewRootCreateAction":            c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootCreateAction"}),
-		"NewCreateAction":                c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewCreateAction"}),
-		"NewRootWatchAction":             c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootWatchAction"}),
-		"NewWatchAction":                 c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewWatchAction"}),
-		"NewCreateSubresourceAction":     c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewCreateSubresourceAction"}),
-		"NewRootCreateSubresourceAction": c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootCreateSubresourceAction"}),
-		"NewUpdateSubresourceAction":     c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewUpdateSubresourceAction"}),
-		"NewGetSubresourceAction":        c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewGetSubresourceAction"}),
-		"NewRootGetSubresourceAction":    c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootGetSubresourceAction"}),
-		"NewRootUpdateSubresourceAction": c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootUpdateSubresourceAction"}),
-		"NewRootPatchAction":             c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootPatchAction"}),
-		"NewPatchAction":                 c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewPatchAction"}),
-		"NewRootPatchSubresourceAction":  c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootPatchSubresourceAction"}),
-		"NewPatchSubresourceAction":      c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewPatchSubresourceAction"}),
-		"ExtractFromListOptions":         c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "ExtractFromListOptions"}),
+		"NewRootListActionWithOptions":              c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootListActionWithOptions"}),
+		"NewListActionWithOptions":                  c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewListActionWithOptions"}),
+		"NewRootGetActionWithOptions":               c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootGetActionWithOptions"}),
+		"NewGetActionWithOptions":                   c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewGetActionWithOptions"}),
+		"NewRootDeleteActionWithOptions":            c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootDeleteActionWithOptions"}),
+		"NewDeleteActionWithOptions":                c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewDeleteActionWithOptions"}),
+		"NewRootDeleteCollectionActionWithOptions":  c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootDeleteCollectionActionWithOptions"}),
+		"NewDeleteCollectionActionWithOptions":      c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewDeleteCollectionActionWithOptions"}),
+		"NewRootUpdateActionWithOptions":            c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootUpdateActionWithOptions"}),
+		"NewUpdateActionWithOptions":                c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewUpdateActionWithOptions"}),
+		"NewRootCreateActionWithOptions":            c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootCreateActionWithOptions"}),
+		"NewCreateActionWithOptions":                c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewCreateActionWithOptions"}),
+		"NewRootWatchActionWithOptions":             c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootWatchActionWithOptions"}),
+		"NewWatchActionWithOptions":                 c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewWatchActionWithOptions"}),
+		"NewCreateSubresourceActionWithOptions":     c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewCreateSubresourceActionWithOptions"}),
+		"NewRootCreateSubresourceActionWithOptions": c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootCreateSubresourceActionWithOptions"}),
+		"NewUpdateSubresourceActionWithOptions":     c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewUpdateSubresourceActionWithOptions"}),
+		"NewGetSubresourceActionWithOptions":        c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewGetSubresourceActionWithOptions"}),
+		"NewRootGetSubresourceActionWithOptions":    c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootGetSubresourceActionWithOptions"}),
+		"NewRootUpdateSubresourceActionWithOptions": c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootUpdateSubresourceActionWithOptions"}),
+		"NewRootPatchActionWithOptions":             c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootPatchActionWithOptions"}),
+		"NewPatchActionWithOptions":                 c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewPatchActionWithOptions"}),
+		"NewRootPatchSubresourceActionWithOptions":  c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewRootPatchSubresourceActionWithOptions"}),
+		"NewPatchSubresourceActionWithOptions":      c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "NewPatchSubresourceActionWithOptions"}),
+		"ExtractFromListOptions":                    c.Universe.Function(types.Name{Package: pkgClientGoTesting, Name: "ExtractFromListOptions"}),
 	}
 
 	generateApply := len(g.applyConfigurationPackage) > 0
@@ -299,9 +304,7 @@ func (g *genFakeForType) GenerateType(c *generator.Context, t *types.Type, w io.
 // TODO: Make the verbs in templates parametrized so the strings.Replace() is
 // not needed.
 func adjustTemplate(name, verbType, template string) string {
-	//nolint:staticcheck
-	// TODO: convert this to use golang.org/x/text/cases
-	return strings.ReplaceAll(template, " "+strings.Title(verbType), " "+name)
+	return strings.ReplaceAll(template, " "+titler.String(verbType), " "+name)
 }
 
 // template for the struct that implements the type's interface
@@ -331,12 +334,13 @@ var $.type|allLowercasePlural$Kind = $.SchemeGroupVersion|raw$.WithKind("$.type|
 
 var listTemplate = `
 // List takes label and field selectors, and returns the list of $.type|publicPlural$ that match those selectors.
-func (c *Fake$.type|publicPlural$) List(ctx context.Context, opts $.ListOptions|raw$) (result *$.type|raw$List, err error) {
+func (c *Fake$.type|publicPlural$) List(ctx $.contextContext|raw$, opts $.ListOptions|raw$) (result *$.type|raw$List, err error) {
+	emptyResult := &$.type|raw$List{}
 	obj, err := c.Fake.
-		$if .namespaced$Invokes($.NewListAction|raw$($.type|allLowercasePlural$Resource, $.type|allLowercasePlural$Kind, c.ns, opts), &$.type|raw$List{})
-		$else$Invokes($.NewRootListAction|raw$($.type|allLowercasePlural$Resource, $.type|allLowercasePlural$Kind, opts), &$.type|raw$List{})$end$
+		$if .namespaced$Invokes($.NewListActionWithOptions|raw$($.type|allLowercasePlural$Resource, $.type|allLowercasePlural$Kind, c.ns, opts), emptyResult)
+		$else$Invokes($.NewRootListActionWithOptions|raw$($.type|allLowercasePlural$Resource, $.type|allLowercasePlural$Kind, opts), emptyResult)$end$
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*$.type|raw$List), err
 }
@@ -344,12 +348,13 @@ func (c *Fake$.type|publicPlural$) List(ctx context.Context, opts $.ListOptions|
 
 var listUsingOptionsTemplate = `
 // List takes label and field selectors, and returns the list of $.type|publicPlural$ that match those selectors.
-func (c *Fake$.type|publicPlural$) List(ctx context.Context, opts $.ListOptions|raw$) (result *$.type|raw$List, err error) {
+func (c *Fake$.type|publicPlural$) List(ctx $.contextContext|raw$, opts $.ListOptions|raw$) (result *$.type|raw$List, err error) {
+	emptyResult := &$.type|raw$List{}
 	obj, err := c.Fake.
-		$if .namespaced$Invokes($.NewListAction|raw$($.type|allLowercasePlural$Resource, $.type|allLowercasePlural$Kind, c.ns, opts), &$.type|raw$List{})
-		$else$Invokes($.NewRootListAction|raw$($.type|allLowercasePlural$Resource, $.type|allLowercasePlural$Kind, opts), &$.type|raw$List{})$end$
+		$if .namespaced$Invokes($.NewListActionWithOptions|raw$($.type|allLowercasePlural$Resource, $.type|allLowercasePlural$Kind, c.ns, opts), emptyResult)
+		$else$Invokes($.NewRootListActionWithOptions|raw$($.type|allLowercasePlural$Resource, $.type|allLowercasePlural$Kind, opts), emptyResult)$end$
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 
 	label, _, _ := $.ExtractFromListOptions|raw$(opts)
@@ -368,12 +373,13 @@ func (c *Fake$.type|publicPlural$) List(ctx context.Context, opts $.ListOptions|
 
 var getTemplate = `
 // Get takes name of the $.type|private$, and returns the corresponding $.resultType|private$ object, and an error if there is any.
-func (c *Fake$.type|publicPlural$) Get(ctx context.Context, name string, options $.GetOptions|raw$) (result *$.resultType|raw$, err error) {
+func (c *Fake$.type|publicPlural$) Get(ctx $.contextContext|raw$, name string, options $.GetOptions|raw$) (result *$.resultType|raw$, err error) {
+	emptyResult := &$.resultType|raw${}
 	obj, err := c.Fake.
-		$if .namespaced$Invokes($.NewGetAction|raw$($.type|allLowercasePlural$Resource, c.ns, name), &$.resultType|raw${})
-		$else$Invokes($.NewRootGetAction|raw$($.type|allLowercasePlural$Resource, name), &$.resultType|raw${})$end$
+		$if .namespaced$Invokes($.NewGetActionWithOptions|raw$($.type|allLowercasePlural$Resource, c.ns, name, options), emptyResult)
+		$else$Invokes($.NewRootGetActionWithOptions|raw$($.type|allLowercasePlural$Resource, name, options), emptyResult)$end$
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*$.resultType|raw$), err
 }
@@ -381,12 +387,13 @@ func (c *Fake$.type|publicPlural$) Get(ctx context.Context, name string, options
 
 var getSubresourceTemplate = `
 // Get takes name of the $.type|private$, and returns the corresponding $.resultType|private$ object, and an error if there is any.
-func (c *Fake$.type|publicPlural$) Get(ctx context.Context, $.type|private$Name string, options $.GetOptions|raw$) (result *$.resultType|raw$, err error) {
+func (c *Fake$.type|publicPlural$) Get(ctx $.contextContext|raw$, $.type|private$Name string, options $.GetOptions|raw$) (result *$.resultType|raw$, err error) {
+	emptyResult := &$.resultType|raw${}
 	obj, err := c.Fake.
-		$if .namespaced$Invokes($.NewGetSubresourceAction|raw$($.type|allLowercasePlural$Resource, c.ns, "$.subresourcePath$", $.type|private$Name), &$.resultType|raw${})
-		$else$Invokes($.NewRootGetSubresourceAction|raw$($.type|allLowercasePlural$Resource, "$.subresourcePath$", $.type|private$Name), &$.resultType|raw${})$end$
+		$if .namespaced$Invokes($.NewGetSubresourceActionWithOptions|raw$($.type|allLowercasePlural$Resource, c.ns, "$.subresourcePath$", $.type|private$Name, options), emptyResult)
+		$else$Invokes($.NewRootGetSubresourceActionWithOptions|raw$($.type|allLowercasePlural$Resource, "$.subresourcePath$", $.type|private$Name, options), emptyResult)$end$
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*$.resultType|raw$), err
 }
@@ -394,7 +401,7 @@ func (c *Fake$.type|publicPlural$) Get(ctx context.Context, $.type|private$Name 
 
 var deleteTemplate = `
 // Delete takes name of the $.type|private$ and deletes it. Returns an error if one occurs.
-func (c *Fake$.type|publicPlural$) Delete(ctx context.Context, name string, opts $.DeleteOptions|raw$) error {
+func (c *Fake$.type|publicPlural$) Delete(ctx $.contextContext|raw$, name string, opts $.DeleteOptions|raw$) error {
 	_, err := c.Fake.
 		$if .namespaced$Invokes($.NewDeleteActionWithOptions|raw$($.type|allLowercasePlural$Resource, c.ns, name, opts), &$.type|raw${})
 		$else$Invokes($.NewRootDeleteActionWithOptions|raw$($.type|allLowercasePlural$Resource, name, opts), &$.type|raw${})$end$
@@ -404,9 +411,9 @@ func (c *Fake$.type|publicPlural$) Delete(ctx context.Context, name string, opts
 
 var deleteCollectionTemplate = `
 // DeleteCollection deletes a collection of objects.
-func (c *Fake$.type|publicPlural$) DeleteCollection(ctx context.Context, opts $.DeleteOptions|raw$, listOpts $.ListOptions|raw$) error {
-	$if .namespaced$action := $.NewDeleteCollectionAction|raw$($.type|allLowercasePlural$Resource, c.ns, listOpts)
-	$else$action := $.NewRootDeleteCollectionAction|raw$($.type|allLowercasePlural$Resource, listOpts)
+func (c *Fake$.type|publicPlural$) DeleteCollection(ctx $.contextContext|raw$, opts $.DeleteOptions|raw$, listOpts $.ListOptions|raw$) error {
+	$if .namespaced$action := $.NewDeleteCollectionActionWithOptions|raw$($.type|allLowercasePlural$Resource, c.ns, opts, listOpts)
+	$else$action := $.NewRootDeleteCollectionActionWithOptions|raw$($.type|allLowercasePlural$Resource, opts, listOpts)
 	$end$
 	_, err := c.Fake.Invokes(action, &$.type|raw$List{})
 	return err
@@ -414,12 +421,13 @@ func (c *Fake$.type|publicPlural$) DeleteCollection(ctx context.Context, opts $.
 `
 var createTemplate = `
 // Create takes the representation of a $.inputType|private$ and creates it.  Returns the server's representation of the $.resultType|private$, and an error, if there is any.
-func (c *Fake$.type|publicPlural$) Create(ctx context.Context, $.inputType|private$ *$.inputType|raw$, opts $.CreateOptions|raw$) (result *$.resultType|raw$, err error) {
+func (c *Fake$.type|publicPlural$) Create(ctx $.contextContext|raw$, $.inputType|private$ *$.inputType|raw$, opts $.CreateOptions|raw$) (result *$.resultType|raw$, err error) {
+	emptyResult := &$.resultType|raw${}
 	obj, err := c.Fake.
-		$if .namespaced$Invokes($.NewCreateAction|raw$($.inputType|allLowercasePlural$Resource, c.ns, $.inputType|private$), &$.resultType|raw${})
-		$else$Invokes($.NewRootCreateAction|raw$($.inputType|allLowercasePlural$Resource, $.inputType|private$), &$.resultType|raw${})$end$
+		$if .namespaced$Invokes($.NewCreateActionWithOptions|raw$($.inputType|allLowercasePlural$Resource, c.ns, $.inputType|private$, opts), emptyResult)
+		$else$Invokes($.NewRootCreateActionWithOptions|raw$($.inputType|allLowercasePlural$Resource, $.inputType|private$, opts), emptyResult)$end$
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*$.resultType|raw$), err
 }
@@ -427,12 +435,13 @@ func (c *Fake$.type|publicPlural$) Create(ctx context.Context, $.inputType|priva
 
 var createSubresourceTemplate = `
 // Create takes the representation of a $.inputType|private$ and creates it.  Returns the server's representation of the $.resultType|private$, and an error, if there is any.
-func (c *Fake$.type|publicPlural$) Create(ctx context.Context, $.type|private$Name string, $.inputType|private$ *$.inputType|raw$, opts $.CreateOptions|raw$) (result *$.resultType|raw$, err error) {
+func (c *Fake$.type|publicPlural$) Create(ctx $.contextContext|raw$, $.type|private$Name string, $.inputType|private$ *$.inputType|raw$, opts $.CreateOptions|raw$) (result *$.resultType|raw$, err error) {
+	emptyResult := &$.resultType|raw${}
 	obj, err := c.Fake.
-		$if .namespaced$Invokes($.NewCreateSubresourceAction|raw$($.type|allLowercasePlural$Resource, $.type|private$Name, "$.subresourcePath$", c.ns, $.inputType|private$), &$.resultType|raw${})
-		$else$Invokes($.NewRootCreateSubresourceAction|raw$($.type|allLowercasePlural$Resource, $.type|private$Name, "$.subresourcePath$", $.inputType|private$), &$.resultType|raw${})$end$
+		$if .namespaced$Invokes($.NewCreateSubresourceActionWithOptions|raw$($.type|allLowercasePlural$Resource, $.type|private$Name, "$.subresourcePath$", c.ns, $.inputType|private$, opts), emptyResult)
+		$else$Invokes($.NewRootCreateSubresourceActionWithOptions|raw$($.type|allLowercasePlural$Resource, $.type|private$Name, "$.subresourcePath$", $.inputType|private$, opts), emptyResult)$end$
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*$.resultType|raw$), err
 }
@@ -440,12 +449,13 @@ func (c *Fake$.type|publicPlural$) Create(ctx context.Context, $.type|private$Na
 
 var updateTemplate = `
 // Update takes the representation of a $.inputType|private$ and updates it. Returns the server's representation of the $.resultType|private$, and an error, if there is any.
-func (c *Fake$.type|publicPlural$) Update(ctx context.Context, $.inputType|private$ *$.inputType|raw$, opts $.UpdateOptions|raw$) (result *$.resultType|raw$, err error) {
+func (c *Fake$.type|publicPlural$) Update(ctx $.contextContext|raw$, $.inputType|private$ *$.inputType|raw$, opts $.UpdateOptions|raw$) (result *$.resultType|raw$, err error) {
+	emptyResult := &$.resultType|raw${}
 	obj, err := c.Fake.
-		$if .namespaced$Invokes($.NewUpdateAction|raw$($.inputType|allLowercasePlural$Resource, c.ns, $.inputType|private$), &$.resultType|raw${})
-		$else$Invokes($.NewRootUpdateAction|raw$($.inputType|allLowercasePlural$Resource, $.inputType|private$), &$.resultType|raw${})$end$
+		$if .namespaced$Invokes($.NewUpdateActionWithOptions|raw$($.inputType|allLowercasePlural$Resource, c.ns, $.inputType|private$, opts), emptyResult)
+		$else$Invokes($.NewRootUpdateActionWithOptions|raw$($.inputType|allLowercasePlural$Resource, $.inputType|private$, opts), emptyResult)$end$
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*$.resultType|raw$), err
 }
@@ -453,12 +463,13 @@ func (c *Fake$.type|publicPlural$) Update(ctx context.Context, $.inputType|priva
 
 var updateSubresourceTemplate = `
 // Update takes the representation of a $.inputType|private$ and updates it. Returns the server's representation of the $.resultType|private$, and an error, if there is any.
-func (c *Fake$.type|publicPlural$) Update(ctx context.Context, $.type|private$Name string, $.inputType|private$ *$.inputType|raw$, opts $.UpdateOptions|raw$) (result *$.resultType|raw$, err error) {
+func (c *Fake$.type|publicPlural$) Update(ctx $.contextContext|raw$, $.type|private$Name string, $.inputType|private$ *$.inputType|raw$, opts $.UpdateOptions|raw$) (result *$.resultType|raw$, err error) {
+	emptyResult := &$.resultType|raw${}
 	obj, err := c.Fake.
-		$if .namespaced$Invokes($.NewUpdateSubresourceAction|raw$($.type|allLowercasePlural$Resource, "$.subresourcePath$", c.ns, $.inputType|private$), &$.inputType|raw${})
-		$else$Invokes($.NewRootUpdateSubresourceAction|raw$($.type|allLowercasePlural$Resource, "$.subresourcePath$", $.inputType|private$), &$.resultType|raw${})$end$
+		$if .namespaced$Invokes($.NewUpdateSubresourceActionWithOptions|raw$($.type|allLowercasePlural$Resource, "$.subresourcePath$", c.ns, $.inputType|private$, opts), &$.inputType|raw${})
+		$else$Invokes($.NewRootUpdateSubresourceActionWithOptions|raw$($.type|allLowercasePlural$Resource, "$.subresourcePath$", $.inputType|private$, opts), emptyResult)$end$
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*$.resultType|raw$), err
 }
@@ -467,12 +478,13 @@ func (c *Fake$.type|publicPlural$) Update(ctx context.Context, $.type|private$Na
 var updateStatusTemplate = `
 // UpdateStatus was generated because the type contains a Status member.
 // Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-func (c *Fake$.type|publicPlural$) UpdateStatus(ctx context.Context, $.type|private$ *$.type|raw$, opts $.UpdateOptions|raw$) (*$.type|raw$, error) {
+func (c *Fake$.type|publicPlural$) UpdateStatus(ctx $.contextContext|raw$, $.type|private$ *$.type|raw$, opts $.UpdateOptions|raw$) (result *$.type|raw$, err error) {
+	emptyResult := &$.type|raw${}
 	obj, err := c.Fake.
-		$if .namespaced$Invokes($.NewUpdateSubresourceAction|raw$($.type|allLowercasePlural$Resource, "status", c.ns, $.type|private$), &$.type|raw${})
-		$else$Invokes($.NewRootUpdateSubresourceAction|raw$($.type|allLowercasePlural$Resource, "status", $.type|private$), &$.type|raw${})$end$
+		$if .namespaced$Invokes($.NewUpdateSubresourceActionWithOptions|raw$($.type|allLowercasePlural$Resource, "status", c.ns, $.type|private$, opts), emptyResult)
+		$else$Invokes($.NewRootUpdateSubresourceActionWithOptions|raw$($.type|allLowercasePlural$Resource, "status", $.type|private$, opts), emptyResult)$end$
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*$.type|raw$), err
 }
@@ -480,21 +492,22 @@ func (c *Fake$.type|publicPlural$) UpdateStatus(ctx context.Context, $.type|priv
 
 var watchTemplate = `
 // Watch returns a $.watchInterface|raw$ that watches the requested $.type|privatePlural$.
-func (c *Fake$.type|publicPlural$) Watch(ctx context.Context, opts $.ListOptions|raw$) ($.watchInterface|raw$, error) {
+func (c *Fake$.type|publicPlural$) Watch(ctx $.contextContext|raw$, opts $.ListOptions|raw$) ($.watchInterface|raw$, error) {
 	return c.Fake.
-		$if .namespaced$InvokesWatch($.NewWatchAction|raw$($.type|allLowercasePlural$Resource, c.ns, opts))
-		$else$InvokesWatch($.NewRootWatchAction|raw$($.type|allLowercasePlural$Resource, opts))$end$
+		$if .namespaced$InvokesWatch($.NewWatchActionWithOptions|raw$($.type|allLowercasePlural$Resource, c.ns, opts))
+		$else$InvokesWatch($.NewRootWatchActionWithOptions|raw$($.type|allLowercasePlural$Resource, opts))$end$
 }
 `
 
 var patchTemplate = `
 // Patch applies the patch and returns the patched $.resultType|private$.
-func (c *Fake$.type|publicPlural$) Patch(ctx context.Context, name string, pt $.PatchType|raw$, data []byte, opts $.PatchOptions|raw$, subresources ...string) (result *$.resultType|raw$, err error) {
+func (c *Fake$.type|publicPlural$) Patch(ctx $.contextContext|raw$, name string, pt $.PatchType|raw$, data []byte, opts $.PatchOptions|raw$, subresources ...string) (result *$.resultType|raw$, err error) {
+	emptyResult := &$.resultType|raw${}
 	obj, err := c.Fake.
-		$if .namespaced$Invokes($.NewPatchSubresourceAction|raw$($.type|allLowercasePlural$Resource, c.ns, name, pt, data, subresources... ), &$.resultType|raw${})
-		$else$Invokes($.NewRootPatchSubresourceAction|raw$($.type|allLowercasePlural$Resource, name, pt, data, subresources...), &$.resultType|raw${})$end$
+		$if .namespaced$Invokes($.NewPatchSubresourceActionWithOptions|raw$($.type|allLowercasePlural$Resource, c.ns, name, pt, data, opts, subresources... ), emptyResult)
+		$else$Invokes($.NewRootPatchSubresourceActionWithOptions|raw$($.type|allLowercasePlural$Resource, name, pt, data, opts, subresources...), emptyResult)$end$
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*$.resultType|raw$), err
 }
@@ -502,23 +515,24 @@ func (c *Fake$.type|publicPlural$) Patch(ctx context.Context, name string, pt $.
 
 var applyTemplate = `
 // Apply takes the given apply declarative configuration, applies it and returns the applied $.resultType|private$.
-func (c *Fake$.type|publicPlural$) Apply(ctx context.Context, $.inputType|private$ *$.inputApplyConfig|raw$, opts $.ApplyOptions|raw$) (result *$.resultType|raw$, err error) {
+func (c *Fake$.type|publicPlural$) Apply(ctx $.contextContext|raw$, $.inputType|private$ *$.inputApplyConfig|raw$, opts $.ApplyOptions|raw$) (result *$.resultType|raw$, err error) {
 	if $.inputType|private$ == nil {
-		return nil, fmt.Errorf("$.inputType|private$ provided to Apply must not be nil")
+		return nil, $.fmtErrorf|raw$("$.inputType|private$ provided to Apply must not be nil")
 	}
 	data, err := $.jsonMarshal|raw$($.inputType|private$)
 	if err != nil {
 		return nil, err
 	}
-    name := $.inputType|private$.Name
+	name := $.inputType|private$.Name
 	if name == nil {
-		return nil, fmt.Errorf("$.inputType|private$.Name must be provided to Apply")
+		return nil, $.fmtErrorf|raw$("$.inputType|private$.Name must be provided to Apply")
 	}
+	emptyResult := &$.resultType|raw${}
 	obj, err := c.Fake.
-		$if .namespaced$Invokes($.NewPatchSubresourceAction|raw$($.type|allLowercasePlural$Resource, c.ns, *name, $.ApplyPatchType|raw$, data), &$.resultType|raw${})
-		$else$Invokes($.NewRootPatchSubresourceAction|raw$($.type|allLowercasePlural$Resource, *name, $.ApplyPatchType|raw$, data), &$.resultType|raw${})$end$
+		$if .namespaced$Invokes($.NewPatchSubresourceActionWithOptions|raw$($.type|allLowercasePlural$Resource, c.ns, *name, $.ApplyPatchType|raw$, data, opts.ToPatchOptions()), emptyResult)
+		$else$Invokes($.NewRootPatchSubresourceActionWithOptions|raw$($.type|allLowercasePlural$Resource, *name, $.ApplyPatchType|raw$, data, opts.ToPatchOptions()), emptyResult)$end$
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*$.resultType|raw$), err
 }
@@ -527,23 +541,24 @@ func (c *Fake$.type|publicPlural$) Apply(ctx context.Context, $.inputType|privat
 var applyStatusTemplate = `
 // ApplyStatus was generated because the type contains a Status member.
 // Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
-func (c *Fake$.type|publicPlural$) ApplyStatus(ctx context.Context, $.inputType|private$ *$.inputApplyConfig|raw$, opts $.ApplyOptions|raw$) (result *$.resultType|raw$, err error) {
+func (c *Fake$.type|publicPlural$) ApplyStatus(ctx $.contextContext|raw$, $.inputType|private$ *$.inputApplyConfig|raw$, opts $.ApplyOptions|raw$) (result *$.resultType|raw$, err error) {
 	if $.inputType|private$ == nil {
-		return nil, fmt.Errorf("$.inputType|private$ provided to Apply must not be nil")
+		return nil, $.fmtErrorf|raw$("$.inputType|private$ provided to Apply must not be nil")
 	}
 	data, err := $.jsonMarshal|raw$($.inputType|private$)
 	if err != nil {
 		return nil, err
 	}
-    name := $.inputType|private$.Name
+	name := $.inputType|private$.Name
 	if name == nil {
-		return nil, fmt.Errorf("$.inputType|private$.Name must be provided to Apply")
+		return nil, $.fmtErrorf|raw$("$.inputType|private$.Name must be provided to Apply")
 	}
+	emptyResult := &$.resultType|raw${}
 	obj, err := c.Fake.
-		$if .namespaced$Invokes($.NewPatchSubresourceAction|raw$($.type|allLowercasePlural$Resource, c.ns, *name, $.ApplyPatchType|raw$, data, "status"), &$.resultType|raw${})
-		$else$Invokes($.NewRootPatchSubresourceAction|raw$($.type|allLowercasePlural$Resource, *name, $.ApplyPatchType|raw$, data, "status"), &$.resultType|raw${})$end$
+		$if .namespaced$Invokes($.NewPatchSubresourceActionWithOptions|raw$($.type|allLowercasePlural$Resource, c.ns, *name, $.ApplyPatchType|raw$, data, opts.ToPatchOptions(), "status"), emptyResult)
+		$else$Invokes($.NewRootPatchSubresourceActionWithOptions|raw$($.type|allLowercasePlural$Resource, *name, $.ApplyPatchType|raw$, data, opts.ToPatchOptions(), "status"), emptyResult)$end$
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*$.resultType|raw$), err
 }
@@ -552,19 +567,20 @@ func (c *Fake$.type|publicPlural$) ApplyStatus(ctx context.Context, $.inputType|
 var applySubresourceTemplate = `
 // Apply takes top resource name and the apply declarative configuration for $.subresourcePath$,
 // applies it and returns the applied $.resultType|private$, and an error, if there is any.
-func (c *Fake$.type|publicPlural$) Apply(ctx context.Context, $.type|private$Name string, $.inputType|private$ *$.inputApplyConfig|raw$, opts $.ApplyOptions|raw$) (result *$.resultType|raw$, err error) {
+func (c *Fake$.type|publicPlural$) Apply(ctx $.contextContext|raw$, $.type|private$Name string, $.inputType|private$ *$.inputApplyConfig|raw$, opts $.ApplyOptions|raw$) (result *$.resultType|raw$, err error) {
 	if $.inputType|private$ == nil {
-		return nil, fmt.Errorf("$.inputType|private$ provided to Apply must not be nil")
+		return nil, $.fmtErrorf|raw$("$.inputType|private$ provided to Apply must not be nil")
 	}
 	data, err := $.jsonMarshal|raw$($.inputType|private$)
 	if err != nil {
 		return nil, err
 	}
+	emptyResult := &$.resultType|raw${}
 	obj, err := c.Fake.
-		$if .namespaced$Invokes($.NewPatchSubresourceAction|raw$($.type|allLowercasePlural$Resource, c.ns, $.type|private$Name, $.ApplyPatchType|raw$, data, "status"), &$.resultType|raw${})
-		$else$Invokes($.NewRootPatchSubresourceAction|raw$($.type|allLowercasePlural$Resource, $.type|private$Name, $.ApplyPatchType|raw$, data, "status"), &$.resultType|raw${})$end$
+		$if .namespaced$Invokes($.NewPatchSubresourceActionWithOptions|raw$($.type|allLowercasePlural$Resource, c.ns, $.type|private$Name, $.ApplyPatchType|raw$, data, opts.ToPatchOptions(), "$.inputType|private$"), emptyResult)
+		$else$Invokes($.NewRootPatchSubresourceActionWithOptions|raw$($.type|allLowercasePlural$Resource, $.type|private$Name, $.ApplyPatchType|raw$, data, opts.ToPatchOptions(), "$.inputType|private$"), emptyResult)$end$
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*$.resultType|raw$), err
 }

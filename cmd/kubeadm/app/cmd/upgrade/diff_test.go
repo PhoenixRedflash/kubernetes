@@ -86,7 +86,6 @@ diff:
 		out:     io.Discard,
 	}
 
-	// TODO: Add test cases for empty cfgPath, it should automatically fetch cfg from cluster
 	testCases := []struct {
 		name            string
 		args            []string
@@ -95,6 +94,13 @@ diff:
 		cfgPath         string
 		expectedError   bool
 	}{
+		{
+			name:            "valid: run diff with empty config path on valid manifest path",
+			cfgPath:         "",
+			setManifestPath: true,
+			manifestPath:    testUpgradeDiffManifest,
+			expectedError:   false,
+		},
 		{
 			name:            "valid: run diff on valid manifest path",
 			cfgPath:         testUpgradeDiffConfig,
@@ -106,13 +112,6 @@ diff:
 			name:          "invalid: missing config file",
 			cfgPath:       "missing-path-to-a-config",
 			expectedError: true,
-		},
-		{
-			name:            "invalid: valid config but empty manifest path",
-			cfgPath:         testUpgradeDiffConfig,
-			setManifestPath: true,
-			manifestPath:    "",
-			expectedError:   true,
 		},
 		{
 			name:            "invalid: valid config but bad manifest path",

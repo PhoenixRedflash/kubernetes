@@ -741,7 +741,22 @@ items:
     - leases
     verbs:
     - get
+    - list
     - update
+    - watch
+  - apiGroups:
+    - coordination.k8s.io
+    resources:
+    - leasecandidates
+    verbs:
+    - create
+    - delete
+    - deletecollection
+    - get
+    - list
+    - patch
+    - update
+    - watch
   - apiGroups:
     - ""
     resources:
@@ -832,6 +847,14 @@ items:
     - storage.k8s.io
     resources:
     - csinodes
+    verbs:
+    - get
+    - list
+    - watch
+  - apiGroups:
+    - storage.k8s.io
+    resources:
+    - volumeattachments
     verbs:
     - get
     - list

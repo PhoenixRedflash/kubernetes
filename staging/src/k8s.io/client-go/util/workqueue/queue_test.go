@@ -17,6 +17,7 @@ limitations under the License.
 package workqueue_test
 
 import (
+	"fmt"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -26,6 +27,23 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/workqueue"
 )
+
+// traceQueue traces whether items are touched
+type traceQueue struct {
+	workqueue.Queue[any]
+
+	touched map[interface{}]struct{}
+}
+
+func (t *traceQueue) Touch(item interface{}) {
+	t.Queue.Touch(item)
+	if t.touched == nil {
+		t.touched = make(map[interface{}]struct{})
+	}
+	t.touched[item] = struct{}{}
+}
+
+var _ workqueue.Queue[any] = &traceQueue{}
 
 func TestBasic(t *testing.T) {
 	tests := []struct {
@@ -198,7 +216,11 @@ func TestReinsert(t *testing.T) {
 }
 
 func TestCollapse(t *testing.T) {
-	q := workqueue.New()
+	tq := &traceQueue{Queue: workqueue.DefaultQueue[any]()}
+	q := workqueue.NewWithConfig(workqueue.QueueConfig{
+		Name:  "",
+		Queue: tq,
+	})
 	// Add a new one twice
 	q.Add("bar")
 	q.Add("bar")
@@ -216,10 +238,18 @@ func TestCollapse(t *testing.T) {
 	if a := q.Len(); a != 0 {
 		t.Errorf("Expected queue to be empty. Has %v items", a)
 	}
+
+	if _, ok := tq.touched["bar"]; !ok {
+		t.Errorf("Expected bar to be Touched")
+	}
 }
 
 func TestCollapseWhileProcessing(t *testing.T) {
-	q := workqueue.New()
+	tq := &traceQueue{Queue: workqueue.DefaultQueue[any]()}
+	q := workqueue.NewWithConfig(workqueue.QueueConfig{
+		Name:  "",
+		Queue: tq,
+	})
 	q.Add("foo")
 
 	// Start processing
@@ -260,6 +290,10 @@ func TestCollapseWhileProcessing(t *testing.T) {
 	<-waitCh
 	if a := q.Len(); a != 0 {
 		t.Errorf("Expected queue to be empty. Has %v items", a)
+	}
+
+	if _, ok := tq.touched["foo"]; ok {
+		t.Errorf("Unexpected Touch")
 	}
 }
 
@@ -426,4 +460,22 @@ func mustGarbageCollect(t *testing.T, i interface{}) {
 			t.Errorf("object was not garbage collected")
 		}
 	})
+}
+
+func BenchmarkQueue(b *testing.B) {
+	keys := make([]string, 100)
+	for idx := range keys {
+		keys[idx] = fmt.Sprintf("key-%d", idx)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		q := workqueue.NewTypedWithConfig(workqueue.TypedQueueConfig[string]{})
+		b.StartTimer()
+		for j := 0; j < 100; j++ {
+			q.Add(keys[j])
+			key, _ := q.Get()
+			q.Done(key)
+		}
+	}
 }

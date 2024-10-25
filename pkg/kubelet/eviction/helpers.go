@@ -738,7 +738,6 @@ func process(stats statsFunc) cmpFunc {
 
 		p1Process := processUsage(p1Stats.ProcessStats)
 		p2Process := processUsage(p2Stats.ProcessStats)
-		// prioritize evicting the pod which has the larger consumption of process
 		return int(p2Process - p1Process)
 	}
 }
@@ -846,13 +845,11 @@ func makeSignalObservations(summary *statsapi.Summary) (signalObservations, stat
 	// build an evaluation context for current eviction signals
 	result := signalObservations{}
 
-	if memory := summary.Node.Memory; memory != nil && memory.AvailableBytes != nil && memory.WorkingSetBytes != nil {
-		result[evictionapi.SignalMemoryAvailable] = signalObservation{
-			available: resource.NewQuantity(int64(*memory.AvailableBytes), resource.BinarySI),
-			capacity:  resource.NewQuantity(int64(*memory.AvailableBytes+*memory.WorkingSetBytes), resource.BinarySI),
-			time:      memory.Time,
-		}
+	memoryAvailableSignal := makeMemoryAvailableSignalObservation(summary)
+	if memoryAvailableSignal != nil {
+		result[evictionapi.SignalMemoryAvailable] = *memoryAvailableSignal
 	}
+
 	if allocatableContainer, err := getSysContainer(summary.Node.SystemContainers, statsapi.SystemContainerPods); err != nil {
 		klog.ErrorS(err, "Eviction manager: failed to construct signal", "signal", evictionapi.SignalAllocatableMemoryAvailable)
 	} else {
@@ -1237,14 +1234,22 @@ func evictionMessage(resourceToReclaim v1.ResourceName, pod *v1.Pod, stats stats
 	if quantity != nil && available != nil {
 		message += fmt.Sprintf(thresholdMetMessageFmt, quantity, available)
 	}
-	containers := []string{}
+	exceededContainers := []string{}
 	containerUsage := []string{}
 	podStats, ok := stats(pod)
 	if !ok {
 		return
 	}
+	// Since the resources field cannot be specified for ephemeral containers,
+	// they will always be blamed for resource overuse when an eviction occurs.
+	// That’s why only regular, init and restartable init containers are considered
+	// for the eviction message.
+	containers := pod.Spec.Containers
+	if len(pod.Spec.InitContainers) != 0 {
+		containers = append(containers, pod.Spec.InitContainers...)
+	}
 	for _, containerStats := range podStats.Containers {
-		for _, container := range pod.Spec.Containers {
+		for _, container := range containers {
 			if container.Name == containerStats.Name {
 				requests := container.Resources.Requests[resourceToReclaim]
 				if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) &&
@@ -1266,13 +1271,16 @@ func evictionMessage(resourceToReclaim v1.ResourceName, pod *v1.Pod, stats stats
 				}
 				if usage != nil && usage.Cmp(requests) > 0 {
 					message += fmt.Sprintf(containerMessageFmt, container.Name, usage.String(), requests.String(), resourceToReclaim)
-					containers = append(containers, container.Name)
+					exceededContainers = append(exceededContainers, container.Name)
 					containerUsage = append(containerUsage, usage.String())
 				}
+				// Found the container to compare resource usage with,
+				// so it's safe to break out of the containers loop here.
+				break
 			}
 		}
 	}
-	annotations[OffendingContainersKey] = strings.Join(containers, ",")
+	annotations[OffendingContainersKey] = strings.Join(exceededContainers, ",")
 	annotations[OffendingContainersUsageKey] = strings.Join(containerUsage, ",")
 	annotations[StarvedResourceKey] = string(resourceToReclaim)
 	return

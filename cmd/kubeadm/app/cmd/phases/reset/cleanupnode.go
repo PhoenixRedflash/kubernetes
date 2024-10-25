@@ -26,9 +26,8 @@ import (
 	"github.com/pkg/errors"
 
 	"k8s.io/klog/v2"
-	utilsexec "k8s.io/utils/exec"
 
-	kubeadmapiv1 "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1beta3"
+	kubeadmapiv1 "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1beta4"
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/options"
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/phases/workflow"
 	kubeadmconstants "k8s.io/kubernetes/cmd/kubeadm/app/constants"
@@ -76,7 +75,7 @@ func runCleanupNode(c workflow.RunData) error {
 				klog.Warningln("[reset] Please ensure kubelet is stopped manually")
 			}
 		} else {
-			fmt.Println("[reset] Would stop the kubelet service")
+			fmt.Println("[dryrun] Would stop the kubelet service")
 		}
 	}
 
@@ -97,16 +96,16 @@ func runCleanupNode(c workflow.RunData) error {
 			dirsToClean = append(dirsToClean, kubeletRunDirectory)
 		}
 	} else {
-		fmt.Printf("[reset] Would unmount mounted directories in %q\n", kubeadmconstants.KubeletRunDirectory)
+		fmt.Printf("[dryrun] Would unmount mounted directories in %q\n", kubeadmconstants.KubeletRunDirectory)
 	}
 
 	if !r.DryRun() {
 		klog.V(1).Info("[reset] Removing Kubernetes-managed containers")
-		if err := removeContainers(utilsexec.New(), r.CRISocketPath()); err != nil {
+		if err := removeContainers(r.CRISocketPath()); err != nil {
 			klog.Warningf("[reset] Failed to remove containers: %v\n", err)
 		}
 	} else {
-		fmt.Println("[reset] Would remove Kubernetes-managed containers")
+		fmt.Println("[dryrun] Would remove Kubernetes-managed containers")
 	}
 
 	// Remove contents from the config and pki directories
@@ -116,7 +115,7 @@ func runCleanupNode(c workflow.RunData) error {
 
 	dirsToClean = append(dirsToClean, certsDir)
 	if r.CleanupTmpDir() {
-		tempDir := path.Join(kubeadmconstants.KubernetesDir, kubeadmconstants.TempDirForKubeadm)
+		tempDir := path.Join(kubeadmconstants.KubernetesDir, kubeadmconstants.TempDir)
 		dirsToClean = append(dirsToClean, tempDir)
 	}
 	resetConfigDir(kubeadmconstants.KubernetesDir, dirsToClean, r.DryRun())
@@ -128,16 +127,16 @@ func runCleanupNode(c workflow.RunData) error {
 				klog.Warningf("[reset] Failed to remove users and groups: %v\n", err)
 			}
 		} else {
-			fmt.Println("[reset] Would remove users and groups created for rootless control-plane")
+			fmt.Println("[dryrun] Would remove users and groups created for rootless control-plane")
 		}
 	}
 
 	return nil
 }
 
-func removeContainers(execer utilsexec.Interface, criSocketPath string) error {
-	containerRuntime, err := utilruntime.NewContainerRuntime(execer, criSocketPath)
-	if err != nil {
+func removeContainers(criSocketPath string) error {
+	containerRuntime := utilruntime.NewContainerRuntime(criSocketPath)
+	if err := containerRuntime.Connect(); err != nil {
 		return err
 	}
 	containers, err := containerRuntime.ListKubeContainers()
@@ -157,7 +156,7 @@ func resetConfigDir(configPathDir string, dirsToClean []string, isDryRun bool) {
 			}
 		}
 	} else {
-		fmt.Printf("[reset] Would delete contents of directories: %v\n", dirsToClean)
+		fmt.Printf("[dryrun] Would delete contents of directories: %v\n", dirsToClean)
 	}
 
 	filesToClean := []string{
@@ -177,7 +176,7 @@ func resetConfigDir(configPathDir string, dirsToClean []string, isDryRun bool) {
 			}
 		}
 	} else {
-		fmt.Printf("[reset] Would delete files: %v\n", filesToClean)
+		fmt.Printf("[dryrun] Would delete files: %v\n", filesToClean)
 	}
 }
 

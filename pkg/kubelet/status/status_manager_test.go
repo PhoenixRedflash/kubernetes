@@ -35,14 +35,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	core "k8s.io/client-go/testing"
-	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 	api "k8s.io/kubernetes/pkg/apis/core"
-	"k8s.io/kubernetes/pkg/features"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	kubepod "k8s.io/kubernetes/pkg/kubelet/pod"
 	statustest "k8s.io/kubernetes/pkg/kubelet/status/testing"
@@ -448,22 +445,32 @@ func shuffle(statuses []v1.ContainerStatus) []v1.ContainerStatus {
 }
 
 func TestStatusEquality(t *testing.T) {
-	pod := v1.Pod{
-		Spec: v1.PodSpec{},
-	}
-	containerStatus := []v1.ContainerStatus{}
-	for i := 0; i < 10; i++ {
-		s := v1.ContainerStatus{
-			Name: fmt.Sprintf("container%d", i),
+	getContainersAndStatuses := func() ([]v1.Container, []v1.ContainerStatus) {
+		var containers []v1.Container
+		var containerStatuses []v1.ContainerStatus
+		for i := 0; i < 10; i++ {
+			containerName := fmt.Sprintf("container%d", i)
+			containers = append(containers, v1.Container{Name: containerName})
+			containerStatuses = append(containerStatuses, v1.ContainerStatus{Name: containerName})
 		}
-		containerStatus = append(containerStatus, s)
+		return containers, containerStatuses
+	}
+	containers, containerStatuses := getContainersAndStatuses()
+	pod := v1.Pod{
+		Spec: v1.PodSpec{
+			InitContainers: containers,
+		},
 	}
 	podStatus := v1.PodStatus{
-		ContainerStatuses: containerStatus,
+		ContainerStatuses:          containerStatuses,
+		InitContainerStatuses:      containerStatuses,
+		EphemeralContainerStatuses: containerStatuses,
 	}
 	for i := 0; i < 10; i++ {
 		oldPodStatus := v1.PodStatus{
-			ContainerStatuses: shuffle(podStatus.ContainerStatuses),
+			ContainerStatuses:          shuffle(podStatus.ContainerStatuses),
+			InitContainerStatuses:      shuffle(podStatus.InitContainerStatuses),
+			EphemeralContainerStatuses: shuffle(podStatus.EphemeralContainerStatuses),
 		}
 		normalizeStatus(&pod, &oldPodStatus)
 		normalizeStatus(&pod, &podStatus)
@@ -507,8 +514,9 @@ func TestStatusNormalizationEnforcesMaxBytes(t *testing.T) {
 		containerStatus = append(containerStatus, s)
 	}
 	podStatus := v1.PodStatus{
-		InitContainerStatuses: containerStatus[:24],
-		ContainerStatuses:     containerStatus[24:],
+		InitContainerStatuses:      containerStatus[:16],
+		ContainerStatuses:          containerStatus[16:32],
+		EphemeralContainerStatuses: containerStatus[32:],
 	}
 	result := normalizeStatus(&pod, &podStatus)
 	count := 0
@@ -521,6 +529,49 @@ func TestStatusNormalizationEnforcesMaxBytes(t *testing.T) {
 	}
 	if count > kubecontainer.MaxPodTerminationMessageLogLength {
 		t.Errorf("message length not truncated")
+	}
+}
+
+func TestStatusNormalizeTimeStamp(t *testing.T) {
+	pod := v1.Pod{
+		Spec: v1.PodSpec{},
+	}
+
+	now := metav1.Now()
+	podStatus := v1.PodStatus{
+		ContainerStatuses: []v1.ContainerStatus{
+			{State: v1.ContainerState{Running: &v1.ContainerStateRunning{StartedAt: now}}},
+			{State: v1.ContainerState{Terminated: &v1.ContainerStateTerminated{StartedAt: now, FinishedAt: now}}},
+		},
+		InitContainerStatuses: []v1.ContainerStatus{
+			{State: v1.ContainerState{Running: &v1.ContainerStateRunning{StartedAt: now}}},
+			{State: v1.ContainerState{Terminated: &v1.ContainerStateTerminated{StartedAt: now, FinishedAt: now}}},
+		},
+		EphemeralContainerStatuses: []v1.ContainerStatus{
+			{State: v1.ContainerState{Running: &v1.ContainerStateRunning{StartedAt: now}}},
+			{State: v1.ContainerState{Terminated: &v1.ContainerStateTerminated{StartedAt: now, FinishedAt: now}}},
+		},
+	}
+
+	expectedTime := now.DeepCopy().Rfc3339Copy()
+	expectedPodStatus := v1.PodStatus{
+		ContainerStatuses: []v1.ContainerStatus{
+			{State: v1.ContainerState{Running: &v1.ContainerStateRunning{StartedAt: expectedTime}}},
+			{State: v1.ContainerState{Terminated: &v1.ContainerStateTerminated{StartedAt: expectedTime, FinishedAt: expectedTime}}},
+		},
+		InitContainerStatuses: []v1.ContainerStatus{
+			{State: v1.ContainerState{Running: &v1.ContainerStateRunning{StartedAt: expectedTime}}},
+			{State: v1.ContainerState{Terminated: &v1.ContainerStateTerminated{StartedAt: expectedTime, FinishedAt: expectedTime}}},
+		},
+		EphemeralContainerStatuses: []v1.ContainerStatus{
+			{State: v1.ContainerState{Running: &v1.ContainerStateRunning{StartedAt: expectedTime}}},
+			{State: v1.ContainerState{Terminated: &v1.ContainerStateTerminated{StartedAt: expectedTime, FinishedAt: expectedTime}}},
+		},
+	}
+
+	normalizedStatus := normalizeStatus(&pod, &podStatus)
+	if !isPodStatusByKubeletEqual(&expectedPodStatus, normalizedStatus) {
+		t.Fatalf("The timestamp is not correctly converted to RFC3339 format.")
 	}
 }
 
@@ -552,7 +603,7 @@ func TestStaticPod(t *testing.T) {
 
 	t.Logf("Should not sync pod in syncBatch because there is no corresponding mirror pod for the static pod.")
 	m.syncBatch(true)
-	assert.Equal(t, len(m.kubeClient.(*fake.Clientset).Actions()), 0, "Expected no updates after syncBatch, got %+v", m.kubeClient.(*fake.Clientset).Actions())
+	assert.Empty(t, m.kubeClient.(*fake.Clientset).Actions(), "Expected no updates after syncBatch")
 
 	t.Logf("Create the mirror pod")
 	m.podManager.(mutablePodManager).AddPod(mirrorPod)
@@ -564,7 +615,7 @@ func TestStaticPod(t *testing.T) {
 	assert.True(t, isPodStatusByKubeletEqual(&status, &retrievedStatus), "Expected: %+v, Got: %+v", status, retrievedStatus)
 
 	t.Logf("Should sync pod because the corresponding mirror pod is created")
-	assert.Equal(t, m.syncBatch(true), 1)
+	assert.Equal(t, 1, m.syncBatch(true))
 	verifyActions(t, m, []core.Action{getAction(), patchAction()})
 
 	t.Logf("syncBatch should not sync any pods because nothing is changed.")
@@ -578,7 +629,7 @@ func TestStaticPod(t *testing.T) {
 	m.podManager.(mutablePodManager).AddPod(mirrorPod)
 
 	t.Logf("Should not update to mirror pod, because UID has changed.")
-	assert.Equal(t, m.syncBatch(true), 1)
+	assert.Equal(t, 1, m.syncBatch(true))
 	verifyActions(t, m, []core.Action{getAction()})
 }
 
@@ -632,13 +683,13 @@ func TestTerminatePod(t *testing.T) {
 	t.Logf("we expect the container statuses to have changed to terminated")
 	newStatus := expectPodStatus(t, syncer, testPod)
 	for i := range newStatus.ContainerStatuses {
-		assert.False(t, newStatus.ContainerStatuses[i].State.Terminated == nil, "expected containers to be terminated")
+		assert.NotNil(t, newStatus.ContainerStatuses[i].State.Terminated, "expected containers to be terminated")
 	}
 	for i := range newStatus.InitContainerStatuses {
-		assert.False(t, newStatus.InitContainerStatuses[i].State.Terminated == nil, "expected init containers to be terminated")
+		assert.NotNil(t, newStatus.InitContainerStatuses[i].State.Terminated, "expected init containers to be terminated")
 	}
 
-	expectUnknownState := v1.ContainerState{Terminated: &v1.ContainerStateTerminated{Reason: "ContainerStatusUnknown", Message: "The container could not be located when the pod was terminated", ExitCode: 137}}
+	expectUnknownState := v1.ContainerState{Terminated: &v1.ContainerStateTerminated{Reason: kubecontainer.ContainerReasonStatusUnknown, Message: "The container could not be located when the pod was terminated", ExitCode: 137}}
 	if !reflect.DeepEqual(newStatus.InitContainerStatuses[0].State, expectUnknownState) {
 		t.Errorf("terminated container state not defaulted: %s", cmp.Diff(newStatus.InitContainerStatuses[0].State, expectUnknownState))
 	}
@@ -714,16 +765,16 @@ func TestTerminatePodWaiting(t *testing.T) {
 	t.Logf("we expect the container statuses to have changed to terminated")
 	newStatus := expectPodStatus(t, syncer, testPod)
 	for _, container := range newStatus.ContainerStatuses {
-		assert.False(t, container.State.Terminated == nil, "expected containers to be terminated")
+		assert.NotNil(t, container.State.Terminated, "expected containers to be terminated")
 	}
 	for _, container := range newStatus.InitContainerStatuses[:2] {
-		assert.False(t, container.State.Terminated == nil, "expected init containers to be terminated")
+		assert.NotNil(t, container.State.Terminated, "expected init containers to be terminated")
 	}
 	for _, container := range newStatus.InitContainerStatuses[2:] {
-		assert.False(t, container.State.Waiting == nil, "expected init containers to be waiting")
+		assert.NotNil(t, container.State.Waiting, "expected init containers to be waiting")
 	}
 
-	expectUnknownState := v1.ContainerState{Terminated: &v1.ContainerStateTerminated{Reason: "ContainerStatusUnknown", Message: "The container could not be located when the pod was terminated", ExitCode: 137}}
+	expectUnknownState := v1.ContainerState{Terminated: &v1.ContainerStateTerminated{Reason: kubecontainer.ContainerReasonStatusUnknown, Message: "The container could not be located when the pod was terminated", ExitCode: 137}}
 	if !reflect.DeepEqual(newStatus.InitContainerStatuses[0].State, expectUnknownState) {
 		t.Errorf("terminated container state not defaulted: %s", cmp.Diff(newStatus.InitContainerStatuses[0].State, expectUnknownState))
 	}
@@ -772,7 +823,7 @@ func TestTerminatePod_DefaultUnknownStatus(t *testing.T) {
 		if state.Terminated == nil || state.Running != nil || state.Waiting != nil {
 			t.Fatalf("unexpected state: %#v", state)
 		}
-		if state.Terminated.ExitCode != 137 || state.Terminated.Reason != "ContainerStatusUnknown" || len(state.Terminated.Message) == 0 {
+		if state.Terminated.ExitCode != 137 || state.Terminated.Reason != kubecontainer.ContainerReasonStatusUnknown || len(state.Terminated.Message) == 0 {
 			t.Fatalf("unexpected terminated state: %#v", state.Terminated)
 		}
 	}
@@ -1065,9 +1116,8 @@ func TestTerminatePod_DefaultUnknownStatus(t *testing.T) {
 
 func TestTerminatePod_EnsurePodPhaseIsTerminal(t *testing.T) {
 	testCases := map[string]struct {
-		enablePodDisruptionConditions bool
-		status                        v1.PodStatus
-		wantStatus                    v1.PodStatus
+		status     v1.PodStatus
+		wantStatus v1.PodStatus
 	}{
 		"Pending pod": {
 			status: v1.PodStatus{
@@ -1542,24 +1592,21 @@ func deleteAction() core.DeleteAction {
 
 func TestMergePodStatus(t *testing.T) {
 	useCases := []struct {
-		desc                          string
-		enablePodDisruptionConditions bool
-		hasRunningContainers          bool
-		oldPodStatus                  func(input v1.PodStatus) v1.PodStatus
-		newPodStatus                  func(input v1.PodStatus) v1.PodStatus
-		expectPodStatus               v1.PodStatus
+		desc                 string
+		hasRunningContainers bool
+		oldPodStatus         func(input v1.PodStatus) v1.PodStatus
+		newPodStatus         func(input v1.PodStatus) v1.PodStatus
+		expectPodStatus      v1.PodStatus
 	}{
 		{
 			"no change",
-			false,
 			false,
 			func(input v1.PodStatus) v1.PodStatus { return input },
 			func(input v1.PodStatus) v1.PodStatus { return input },
 			getPodStatus(),
 		},
 		{
-			"add DisruptionTarget condition when transitioning into failed phase; PodDisruptionConditions enabled",
-			true,
+			"add DisruptionTarget condition when transitioning into failed phase",
 			false,
 			func(input v1.PodStatus) v1.PodStatus { return input },
 			func(input v1.PodStatus) v1.PodStatus {
@@ -1598,8 +1645,7 @@ func TestMergePodStatus(t *testing.T) {
 			},
 		},
 		{
-			"don't add DisruptionTarget condition when transitioning into failed phase, but there are might still be running containers; PodDisruptionConditions enabled",
-			true,
+			"don't add DisruptionTarget condition when transitioning into failed phase, but there might still be running containers",
 			true,
 			func(input v1.PodStatus) v1.PodStatus { return input },
 			func(input v1.PodStatus) v1.PodStatus {
@@ -1627,8 +1673,7 @@ func TestMergePodStatus(t *testing.T) {
 			},
 		},
 		{
-			"preserve DisruptionTarget condition; PodDisruptionConditions enabled",
-			true,
+			"preserve DisruptionTarget condition",
 			false,
 			func(input v1.PodStatus) v1.PodStatus {
 				input.Conditions = append(input.Conditions, v1.PodCondition{
@@ -1662,43 +1707,7 @@ func TestMergePodStatus(t *testing.T) {
 			},
 		},
 		{
-			"preserve DisruptionTarget condition; PodDisruptionConditions disabled",
-			false,
-			false,
-			func(input v1.PodStatus) v1.PodStatus {
-				input.Conditions = append(input.Conditions, v1.PodCondition{
-					Type:   v1.DisruptionTarget,
-					Status: v1.ConditionTrue,
-					Reason: "TerminationByKubelet",
-				})
-				return input
-			},
-			func(input v1.PodStatus) v1.PodStatus {
-				return input
-			},
-			v1.PodStatus{
-				Phase: v1.PodRunning,
-				Conditions: []v1.PodCondition{
-					{
-						Type:   v1.PodReady,
-						Status: v1.ConditionTrue,
-					},
-					{
-						Type:   v1.PodScheduled,
-						Status: v1.ConditionTrue,
-					},
-					{
-						Type:   v1.DisruptionTarget,
-						Status: v1.ConditionTrue,
-						Reason: "TerminationByKubelet",
-					},
-				},
-				Message: "Message",
-			},
-		},
-		{
-			"override DisruptionTarget condition; PodDisruptionConditions enabled",
-			true,
+			"override DisruptionTarget condition",
 			false,
 			func(input v1.PodStatus) v1.PodStatus {
 				input.Conditions = append(input.Conditions, v1.PodCondition{
@@ -1744,8 +1753,7 @@ func TestMergePodStatus(t *testing.T) {
 			},
 		},
 		{
-			"don't override DisruptionTarget condition when remaining in running phase; PodDisruptionConditions enabled",
-			true,
+			"don't override DisruptionTarget condition when remaining in running phase",
 			false,
 			func(input v1.PodStatus) v1.PodStatus {
 				input.Conditions = append(input.Conditions, v1.PodCondition{
@@ -1784,8 +1792,7 @@ func TestMergePodStatus(t *testing.T) {
 			},
 		},
 		{
-			"don't override DisruptionTarget condition when transitioning to failed phase but there might still be running containers; PodDisruptionConditions enabled",
-			true,
+			"don't override DisruptionTarget condition when transitioning to failed phase but there might still be running containers",
 			true,
 			func(input v1.PodStatus) v1.PodStatus {
 				input.Conditions = append(input.Conditions, v1.PodCondition{
@@ -1827,7 +1834,6 @@ func TestMergePodStatus(t *testing.T) {
 		{
 			"readiness changes",
 			false,
-			false,
 			func(input v1.PodStatus) v1.PodStatus { return input },
 			func(input v1.PodStatus) v1.PodStatus {
 				input.Conditions[0].Status = v1.ConditionFalse
@@ -1850,7 +1856,6 @@ func TestMergePodStatus(t *testing.T) {
 		},
 		{
 			"additional pod condition",
-			false,
 			false,
 			func(input v1.PodStatus) v1.PodStatus {
 				input.Conditions = append(input.Conditions, v1.PodCondition{
@@ -1881,7 +1886,6 @@ func TestMergePodStatus(t *testing.T) {
 		},
 		{
 			"additional pod condition and readiness changes",
-			false,
 			false,
 			func(input v1.PodStatus) v1.PodStatus {
 				input.Conditions = append(input.Conditions, v1.PodCondition{
@@ -1915,7 +1919,6 @@ func TestMergePodStatus(t *testing.T) {
 		},
 		{
 			"additional pod condition changes",
-			false,
 			false,
 			func(input v1.PodStatus) v1.PodStatus {
 				input.Conditions = append(input.Conditions, v1.PodCondition{
@@ -1953,7 +1956,6 @@ func TestMergePodStatus(t *testing.T) {
 		{
 			"phase is transitioning to failed and no containers running",
 			false,
-			false,
 			func(input v1.PodStatus) v1.PodStatus {
 				input.Phase = v1.PodRunning
 				input.Reason = "Unknown"
@@ -1990,7 +1992,6 @@ func TestMergePodStatus(t *testing.T) {
 		},
 		{
 			"phase is transitioning to failed and containers running",
-			false,
 			true,
 			func(input v1.PodStatus) v1.PodStatus {
 				input.Phase = v1.PodRunning
@@ -2024,7 +2025,6 @@ func TestMergePodStatus(t *testing.T) {
 
 	for _, tc := range useCases {
 		t.Run(tc.desc, func(t *testing.T) {
-			defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.PodDisruptionConditions, tc.enablePodDisruptionConditions)()
 			output := mergePodStatus(tc.oldPodStatus(getPodStatus()), tc.newPodStatus(getPodStatus()), tc.hasRunningContainers)
 			if !conditionsEqual(output.Conditions, tc.expectPodStatus.Conditions) || !statusEqual(output, tc.expectPodStatus) {
 				t.Fatalf("unexpected output: %s", cmp.Diff(tc.expectPodStatus, output))

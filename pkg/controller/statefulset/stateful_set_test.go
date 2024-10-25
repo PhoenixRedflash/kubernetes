@@ -37,7 +37,6 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	core "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/record"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/ktesting"
@@ -298,10 +297,8 @@ func TestStatefulSetControllerAddPod(t *testing.T) {
 
 	ssc.addPod(logger, pod1)
 	key, done := ssc.queue.Get()
-	if key == nil || done {
+	if key == "" || done {
 		t.Error("failed to enqueue StatefulSet")
-	} else if key, ok := key.(string); !ok {
-		t.Error("key is not a string")
 	} else if expectedKey, _ := controller.KeyFunc(set1); expectedKey != key {
 		t.Errorf("expected StatefulSet key %s found %s", expectedKey, key)
 	}
@@ -309,10 +306,8 @@ func TestStatefulSetControllerAddPod(t *testing.T) {
 
 	ssc.addPod(logger, pod2)
 	key, done = ssc.queue.Get()
-	if key == nil || done {
+	if key == "" || done {
 		t.Error("failed to enqueue StatefulSet")
-	} else if key, ok := key.(string); !ok {
-		t.Error("key is not a string")
 	} else if expectedKey, _ := controller.KeyFunc(set2); expectedKey != key {
 		t.Errorf("expected StatefulSet key %s found %s", expectedKey, key)
 	}
@@ -349,7 +344,7 @@ func TestStatefulSetControllerAddPodNoSet(t *testing.T) {
 	ssc.addPod(logger, pod)
 	ssc.queue.ShutDown()
 	key, _ := ssc.queue.Get()
-	if key != nil {
+	if key != "" {
 		t.Errorf("StatefulSet enqueued key for Pod with no Set %s", key)
 	}
 }
@@ -369,10 +364,8 @@ func TestStatefulSetControllerUpdatePod(t *testing.T) {
 	fakeResourceVersion(pod1)
 	ssc.updatePod(logger, &prev, pod1)
 	key, done := ssc.queue.Get()
-	if key == nil || done {
+	if key == "" || done {
 		t.Error("failed to enqueue StatefulSet")
-	} else if key, ok := key.(string); !ok {
-		t.Error("key is not a string")
 	} else if expectedKey, _ := controller.KeyFunc(set1); expectedKey != key {
 		t.Errorf("expected StatefulSet key %s found %s", expectedKey, key)
 	}
@@ -381,10 +374,8 @@ func TestStatefulSetControllerUpdatePod(t *testing.T) {
 	fakeResourceVersion(pod2)
 	ssc.updatePod(logger, &prev, pod2)
 	key, done = ssc.queue.Get()
-	if key == nil || done {
+	if key == "" || done {
 		t.Error("failed to enqueue StatefulSet")
-	} else if key, ok := key.(string); !ok {
-		t.Error("key is not a string")
 	} else if expectedKey, _ := controller.KeyFunc(set2); expectedKey != key {
 		t.Errorf("expected StatefulSet key %s found %s", expectedKey, key)
 	}
@@ -400,7 +391,7 @@ func TestStatefulSetControllerUpdatePodWithNoSet(t *testing.T) {
 	ssc.updatePod(logger, &prev, pod)
 	ssc.queue.ShutDown()
 	key, _ := ssc.queue.Get()
-	if key != nil {
+	if key != "" {
 		t.Errorf("StatefulSet enqueued key for Pod with no Set %s", key)
 	}
 }
@@ -414,7 +405,7 @@ func TestStatefulSetControllerUpdatePodWithSameVersion(t *testing.T) {
 	ssc.updatePod(logger, pod, pod)
 	ssc.queue.ShutDown()
 	key, _ := ssc.queue.Get()
-	if key != nil {
+	if key != "" {
 		t.Errorf("StatefulSet enqueued key for Pod with no Set %s", key)
 	}
 }
@@ -488,20 +479,16 @@ func TestStatefulSetControllerDeletePod(t *testing.T) {
 
 	ssc.deletePod(logger, pod1)
 	key, done := ssc.queue.Get()
-	if key == nil || done {
+	if key == "" || done {
 		t.Error("failed to enqueue StatefulSet")
-	} else if key, ok := key.(string); !ok {
-		t.Error("key is not a string")
 	} else if expectedKey, _ := controller.KeyFunc(set1); expectedKey != key {
 		t.Errorf("expected StatefulSet key %s found %s", expectedKey, key)
 	}
 
 	ssc.deletePod(logger, pod2)
 	key, done = ssc.queue.Get()
-	if key == nil || done {
+	if key == "" || done {
 		t.Error("failed to enqueue StatefulSet")
-	} else if key, ok := key.(string); !ok {
-		t.Error("key is not a string")
 	} else if expectedKey, _ := controller.KeyFunc(set2); expectedKey != key {
 		t.Errorf("expected StatefulSet key %s found %s", expectedKey, key)
 	}
@@ -534,10 +521,8 @@ func TestStatefulSetControllerDeletePodTombstone(t *testing.T) {
 	tombstone := cache.DeletedFinalStateUnknown{Key: tombstoneKey, Obj: pod}
 	ssc.deletePod(logger, tombstone)
 	key, done := ssc.queue.Get()
-	if key == nil || done {
+	if key == "" || done {
 		t.Error("failed to enqueue StatefulSet")
-	} else if key, ok := key.(string); !ok {
-		t.Error("key is not a string")
 	} else if expectedKey, _ := controller.KeyFunc(set); expectedKey != key {
 		t.Errorf("expected StatefulSet key %s found %s", expectedKey, key)
 	}
@@ -684,7 +669,7 @@ func TestGetPodsForStatefulSetRelease(t *testing.T) {
 }
 
 func TestOrphanedPodsWithPVCDeletePolicy(t *testing.T) {
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.StatefulSetAutoDeletePVC, true)()
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.StatefulSetAutoDeletePVC, true)
 
 	testFn := func(t *testing.T, scaledownPolicy, deletionPolicy apps.PersistentVolumeClaimRetentionPolicyType) {
 		set := newStatefulSet(4)
@@ -819,7 +804,7 @@ func TestOrphanedPodsWithPVCDeletePolicy(t *testing.T) {
 }
 
 func TestStaleOwnerRefOnScaleup(t *testing.T) {
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.StatefulSetAutoDeletePVC, true)()
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.StatefulSetAutoDeletePVC, true)
 
 	for _, policy := range []*apps.StatefulSetPersistentVolumeClaimRetentionPolicy{
 		{
@@ -839,35 +824,35 @@ func TestStaleOwnerRefOnScaleup(t *testing.T) {
 		logger, ctx := ktesting.NewTestContext(t)
 		ssc, spc, om, _ := newFakeStatefulSetController(ctx, set)
 		if err := scaleUpStatefulSetController(logger, set, ssc, spc, om); err != nil {
-			t.Errorf(onPolicy("Failed to turn up StatefulSet : %s", err))
+			t.Error(onPolicy("Failed to turn up StatefulSet : %s", err))
 		}
 		var err error
 		if set, err = om.setsLister.StatefulSets(set.Namespace).Get(set.Name); err != nil {
-			t.Errorf(onPolicy("Could not get scaled up set: %v", err))
+			t.Error(onPolicy("Could not get scaled up set: %v", err))
 		}
 		if set.Status.Replicas != 3 {
-			t.Errorf(onPolicy("set.Status.Replicas = %v; want 3", set.Status.Replicas))
+			t.Error(onPolicy("set.Status.Replicas = %v; want 3", set.Status.Replicas))
 		}
 		*set.Spec.Replicas = 2
 		if err := scaleDownStatefulSetController(logger, set, ssc, spc, om); err != nil {
-			t.Errorf(onPolicy("Failed to scale down StatefulSet : msg, %s", err))
+			t.Error(onPolicy("Failed to scale down StatefulSet : msg, %s", err))
 		}
 		set, err = om.setsLister.StatefulSets(set.Namespace).Get(set.Name)
 		if err != nil {
-			t.Errorf(onPolicy("Could not get scaled down StatefulSet: %v", err))
+			t.Error(onPolicy("Could not get scaled down StatefulSet: %v", err))
 		}
 		if set.Status.Replicas != 2 {
-			t.Errorf(onPolicy("Failed to scale statefulset to 2 replicas"))
+			t.Error(onPolicy("Failed to scale statefulset to 2 replicas"))
 		}
 
 		var claim *v1.PersistentVolumeClaim
 		claim, err = om.claimsLister.PersistentVolumeClaims(set.Namespace).Get("datadir-foo-2")
 		if err != nil {
-			t.Errorf(onPolicy("Could not find expected pvc datadir-foo-2"))
+			t.Error(onPolicy("Could not find expected pvc datadir-foo-2"))
 		}
 		refs := claim.GetOwnerReferences()
 		if len(refs) != 1 {
-			t.Errorf(onPolicy("Expected only one refs: %v", refs))
+			t.Error(onPolicy("Expected only one refs: %v", refs))
 		}
 		// Make the pod ref stale.
 		for i := range refs {
@@ -878,29 +863,29 @@ func TestStaleOwnerRefOnScaleup(t *testing.T) {
 		}
 		claim.SetOwnerReferences(refs)
 		if err = om.claimsIndexer.Update(claim); err != nil {
-			t.Errorf(onPolicy("Could not update claim with new owner ref: %v", err))
+			t.Error(onPolicy("Could not update claim with new owner ref: %v", err))
 		}
 
 		*set.Spec.Replicas = 3
 		// Until the stale PVC goes away, the scale up should never finish. Run 10 iterations, then delete the PVC.
 		if err := scaleUpStatefulSetControllerBounded(logger, set, ssc, spc, om, 10); err != nil {
-			t.Errorf(onPolicy("Failed attempt to scale StatefulSet back up: %v", err))
+			t.Error(onPolicy("Failed attempt to scale StatefulSet back up: %v", err))
 		}
 		set, err = om.setsLister.StatefulSets(set.Namespace).Get(set.Name)
 		if err != nil {
-			t.Errorf(onPolicy("Could not get scaled down StatefulSet: %v", err))
+			t.Error(onPolicy("Could not get scaled down StatefulSet: %v", err))
 		}
 		if set.Status.Replicas != 2 {
-			t.Errorf(onPolicy("Expected set to stay at two replicas"))
+			t.Error(onPolicy("Expected set to stay at two replicas"))
 		}
 
 		claim, err = om.claimsLister.PersistentVolumeClaims(set.Namespace).Get("datadir-foo-2")
 		if err != nil {
-			t.Errorf(onPolicy("Could not find expected pvc datadir-foo-2"))
+			t.Error(onPolicy("Could not find expected pvc datadir-foo-2"))
 		}
 		refs = claim.GetOwnerReferences()
 		if len(refs) != 1 {
-			t.Errorf(onPolicy("Unexpected change to condemned pvc ownerRefs: %v", refs))
+			t.Error(onPolicy("Unexpected change to condemned pvc ownerRefs: %v", refs))
 		}
 		foundPodRef := false
 		for i := range refs {
@@ -910,21 +895,21 @@ func TestStaleOwnerRefOnScaleup(t *testing.T) {
 			}
 		}
 		if !foundPodRef {
-			t.Errorf(onPolicy("Claim ref unexpectedly changed: %v", refs))
+			t.Error(onPolicy("Claim ref unexpectedly changed: %v", refs))
 		}
 		if err = om.claimsIndexer.Delete(claim); err != nil {
-			t.Errorf(onPolicy("Could not delete stale pvc: %v", err))
+			t.Error(onPolicy("Could not delete stale pvc: %v", err))
 		}
 
 		if err := scaleUpStatefulSetController(logger, set, ssc, spc, om); err != nil {
-			t.Errorf(onPolicy("Failed to scale StatefulSet back up: %v", err))
+			t.Error(onPolicy("Failed to scale StatefulSet back up: %v", err))
 		}
 		set, err = om.setsLister.StatefulSets(set.Namespace).Get(set.Name)
 		if err != nil {
-			t.Errorf(onPolicy("Could not get scaled down StatefulSet: %v", err))
+			t.Error(onPolicy("Could not get scaled down StatefulSet: %v", err))
 		}
 		if set.Status.Replicas != 3 {
-			t.Errorf(onPolicy("Failed to scale set back up once PVC was deleted"))
+			t.Error(onPolicy("Failed to scale set back up once PVC was deleted"))
 		}
 	}
 }
@@ -946,15 +931,14 @@ func newFakeStatefulSetController(ctx context.Context, initialObjects ...runtime
 	ssh := history.NewFakeHistory(informerFactory.Apps().V1().ControllerRevisions())
 	ssc.podListerSynced = alwaysReady
 	ssc.setListerSynced = alwaysReady
-	recorder := record.NewFakeRecorder(10)
-	ssc.control = NewDefaultStatefulSetControl(spc, ssu, ssh, recorder)
+	ssc.control = NewDefaultStatefulSetControl(spc, ssu, ssh)
 
 	return ssc, spc, om, ssh
 }
 
 func fakeWorker(ssc *StatefulSetController) {
 	if obj, done := ssc.queue.Get(); !done {
-		ssc.sync(context.TODO(), obj.(string))
+		_ = ssc.sync(context.TODO(), obj)
 		ssc.queue.Done(obj)
 	}
 }

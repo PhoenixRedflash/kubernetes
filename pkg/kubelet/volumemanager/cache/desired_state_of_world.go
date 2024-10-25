@@ -33,7 +33,7 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/volume/csi"
 
-	resourcehelper "k8s.io/kubernetes/pkg/api/v1/resource"
+	resourcehelper "k8s.io/component-helpers/resource"
 	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/volume"
 	"k8s.io/kubernetes/pkg/volume/util"
@@ -134,7 +134,7 @@ type DesiredStateOfWorld interface {
 	// UpdatePersistentVolumeSize updates persistentVolumeSize in desired state of the world
 	// so as it can be compared against actual size and volume expansion performed
 	// if necessary
-	UpdatePersistentVolumeSize(volumeName v1.UniqueVolumeName, size *resource.Quantity)
+	UpdatePersistentVolumeSize(volumeName v1.UniqueVolumeName, size resource.Quantity)
 }
 
 // VolumeToMount represents a volume that is attached to this node and needs to
@@ -151,7 +151,7 @@ func NewDesiredStateOfWorld(volumePluginMgr *volume.VolumePluginMgr, seLinuxTran
 	return &desiredStateOfWorld{
 		volumesToMount:    make(map[v1.UniqueVolumeName]volumeToMount),
 		volumePluginMgr:   volumePluginMgr,
-		podErrors:         make(map[types.UniquePodName]sets.String),
+		podErrors:         make(map[types.UniquePodName]sets.Set[string]),
 		seLinuxTranslator: seLinuxTranslator,
 	}
 }
@@ -166,7 +166,7 @@ type desiredStateOfWorld struct {
 	// plugin objects.
 	volumePluginMgr *volume.VolumePluginMgr
 	// podErrors are errors caught by desiredStateOfWorldPopulator about volumes for a given pod.
-	podErrors map[types.UniquePodName]sets.String
+	podErrors map[types.UniquePodName]sets.Set[string]
 	// seLinuxTranslator translates v1.SELinuxOptions to a file SELinux label.
 	seLinuxTranslator util.SELinuxLabelTranslator
 
@@ -206,7 +206,7 @@ type volumeToMount struct {
 
 	// persistentVolumeSize records desired size of a persistent volume.
 	// Usually this value reflects size recorded in pv.Spec.Capacity
-	persistentVolumeSize *resource.Quantity
+	persistentVolumeSize resource.Quantity
 
 	// effectiveSELinuxMountFileLabel is the SELinux label that will be applied to the volume using mount options.
 	// If empty, then:
@@ -347,7 +347,7 @@ func (dsw *desiredStateOfWorld) AddPodToVolume(
 			pvCap := volumeSpec.PersistentVolume.Spec.Capacity.Storage()
 			if pvCap != nil {
 				pvCapCopy := pvCap.DeepCopy()
-				vmt.persistentVolumeSize = &pvCapCopy
+				vmt.persistentVolumeSize = pvCapCopy
 			}
 		}
 		dsw.volumesToMount[volumeName] = vmt
@@ -499,7 +499,7 @@ func (dsw *desiredStateOfWorld) DeletePodFromVolume(
 
 // UpdatePersistentVolumeSize updates last known PV size. This is used for volume expansion and
 // should be only used for persistent volumes.
-func (dsw *desiredStateOfWorld) UpdatePersistentVolumeSize(volumeName v1.UniqueVolumeName, size *resource.Quantity) {
+func (dsw *desiredStateOfWorld) UpdatePersistentVolumeSize(volumeName v1.UniqueVolumeName, size resource.Quantity) {
 	dsw.Lock()
 	defer dsw.Unlock()
 
@@ -610,7 +610,7 @@ func (dsw *desiredStateOfWorld) GetVolumesToMount() []VolumeToMount {
 					SELinuxLabel:            volumeObj.effectiveSELinuxMountFileLabel,
 				},
 			}
-			if volumeObj.persistentVolumeSize != nil {
+			if !volumeObj.persistentVolumeSize.IsZero() {
 				vmt.DesiredPersistentVolumeSize = volumeObj.persistentVolumeSize.DeepCopy()
 			}
 			volumesToMount = append(volumesToMount, vmt)
@@ -629,7 +629,7 @@ func (dsw *desiredStateOfWorld) AddErrorToPod(podName types.UniquePodName, err s
 		}
 		return
 	}
-	dsw.podErrors[podName] = sets.NewString(err)
+	dsw.podErrors[podName] = sets.New[string](err)
 }
 
 func (dsw *desiredStateOfWorld) PopPodErrors(podName types.UniquePodName) []string {
@@ -638,7 +638,7 @@ func (dsw *desiredStateOfWorld) PopPodErrors(podName types.UniquePodName) []stri
 
 	if errs, found := dsw.podErrors[podName]; found {
 		delete(dsw.podErrors, podName)
-		return errs.List()
+		return sets.List(errs)
 	}
 	return []string{}
 }

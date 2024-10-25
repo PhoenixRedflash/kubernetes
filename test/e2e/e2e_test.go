@@ -19,14 +19,12 @@ package e2e
 import (
 	"flag"
 	"fmt"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/onsi/ginkgo/v2"
-	"gopkg.in/yaml.v2"
+	yaml "sigs.k8s.io/yaml/goyaml.v2"
 
 	// Never, ever remove the line with "/ginkgo". Without it,
 	// the ginkgo test runner will not detect that this
@@ -64,7 +62,7 @@ import (
 	_ "k8s.io/kubernetes/test/e2e/node"
 	_ "k8s.io/kubernetes/test/e2e/scheduling"
 	_ "k8s.io/kubernetes/test/e2e/storage"
-	_ "k8s.io/kubernetes/test/e2e/storage/csi_mock"
+	_ "k8s.io/kubernetes/test/e2e/storage/csimock"
 	_ "k8s.io/kubernetes/test/e2e/storage/external"
 	_ "k8s.io/kubernetes/test/e2e/windows"
 
@@ -142,7 +140,6 @@ func TestMain(m *testing.M) {
 		testfiles.AddFileSource(testfiles.RootFileSource{Root: framework.TestContext.RepoRoot})
 	}
 
-	rand.Seed(time.Now().UnixNano())
 	os.Exit(m.Run())
 }
 

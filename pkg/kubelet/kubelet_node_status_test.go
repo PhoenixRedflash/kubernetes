@@ -34,22 +34,28 @@ import (
 
 	cadvisorapi "github.com/google/cadvisor/info/v1"
 	"github.com/google/go-cmp/cmp"
+
 	v1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/apimachinery/pkg/util/uuid"
+	utilversion "k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/apimachinery/pkg/util/wait"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 	core "k8s.io/client-go/testing"
+	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	"k8s.io/component-base/version"
 	kubeletapis "k8s.io/kubelet/pkg/apis"
+	"k8s.io/kubernetes/pkg/features"
 	cadvisortest "k8s.io/kubernetes/pkg/kubelet/cadvisor/testing"
 	"k8s.io/kubernetes/pkg/kubelet/cm"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
@@ -160,6 +166,27 @@ func (lcm *localCM) GetCapacity(localStorageCapacityIsolation bool) v1.ResourceL
 	return lcm.capacity
 }
 
+type delegatingNodeLister struct {
+	client clientset.Interface
+}
+
+func (l delegatingNodeLister) Get(name string) (*v1.Node, error) {
+	return l.client.CoreV1().Nodes().Get(context.Background(), name, metav1.GetOptions{})
+}
+
+func (l delegatingNodeLister) List(selector labels.Selector) (ret []*v1.Node, err error) {
+	opts := metav1.ListOptions{}
+	if selector != nil {
+		opts.LabelSelector = selector.String()
+	}
+	nodeList, err := l.client.CoreV1().Nodes().List(context.Background(), opts)
+	if err != nil {
+		return nil, err
+	}
+	nodes := make([]*v1.Node, len(nodeList.Items))
+	return nodes, nil
+}
+
 func TestUpdateNewNodeStatus(t *testing.T) {
 	cases := []struct {
 		desc                string
@@ -211,6 +238,7 @@ func TestUpdateNewNodeStatus(t *testing.T) {
 			kubeClient := testKubelet.fakeKubeClient
 			existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{Name: testKubeletHostname}}
 			kubeClient.ReactionChain = fake.NewSimpleClientset(&v1.NodeList{Items: []v1.Node{existingNode}}).ReactionChain
+			kubelet.nodeLister = delegatingNodeLister{client: kubeClient}
 			machineInfo := &cadvisorapi.MachineInfo{
 				MachineID:      "123",
 				SystemUUID:     "abc",
@@ -295,7 +323,7 @@ func TestUpdateNewNodeStatus(t *testing.T) {
 			actions := kubeClient.Actions()
 			require.Len(t, actions, 2)
 			require.True(t, actions[1].Matches("patch", "nodes"))
-			require.Equal(t, actions[1].GetSubresource(), "status")
+			require.Equal(t, "status", actions[1].GetSubresource())
 
 			updatedNode, err := applyNodeStatusPatch(&existingNode, actions[1].(core.PatchActionImpl).GetPatch())
 			assert.NoError(t, err)
@@ -390,6 +418,7 @@ func TestUpdateExistingNodeStatus(t *testing.T) {
 		},
 	}
 	kubeClient.ReactionChain = fake.NewSimpleClientset(&v1.NodeList{Items: []v1.Node{existingNode}}).ReactionChain
+	kubelet.nodeLister = delegatingNodeLister{client: kubeClient}
 	machineInfo := &cadvisorapi.MachineInfo{
 		MachineID:      "123",
 		SystemUUID:     "abc",
@@ -602,6 +631,7 @@ func TestUpdateNodeStatusWithRuntimeStateError(t *testing.T) {
 	kubeClient := testKubelet.fakeKubeClient
 	existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{Name: testKubeletHostname}}
 	kubeClient.ReactionChain = fake.NewSimpleClientset(&v1.NodeList{Items: []v1.Node{existingNode}}).ReactionChain
+	kubelet.nodeLister = delegatingNodeLister{client: kubeClient}
 	machineInfo := &cadvisorapi.MachineInfo{
 		MachineID:      "123",
 		SystemUUID:     "abc",
@@ -689,7 +719,7 @@ func TestUpdateNodeStatusWithRuntimeStateError(t *testing.T) {
 		actions := kubeClient.Actions()
 		require.Len(t, actions, 2)
 		require.True(t, actions[1].Matches("patch", "nodes"))
-		require.Equal(t, actions[1].GetSubresource(), "status")
+		require.Equal(t, "status", actions[1].GetSubresource())
 
 		updatedNode, err := kubeClient.CoreV1().Nodes().Get(ctx, testKubeletHostname, metav1.GetOptions{})
 		require.NoError(t, err, "can't apply node status patch")
@@ -824,6 +854,7 @@ func TestUpdateNodeStatusWithLease(t *testing.T) {
 	kubeClient := testKubelet.fakeKubeClient
 	existingNode := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: testKubeletHostname}}
 	kubeClient.ReactionChain = fake.NewSimpleClientset(&v1.NodeList{Items: []v1.Node{*existingNode}}).ReactionChain
+	kubelet.nodeLister = delegatingNodeLister{client: kubeClient}
 	machineInfo := &cadvisorapi.MachineInfo{
 		MachineID:      "123",
 		SystemUUID:     "abc",
@@ -1097,7 +1128,7 @@ func TestUpdateNodeStatusAndVolumesInUseWithNodeLease(t *testing.T) {
 			kubelet.setCachedMachineInfo(&cadvisorapi.MachineInfo{})
 
 			// override test volumeManager
-			fakeVolumeManager := kubeletvolume.NewFakeVolumeManager(tc.existingVolumes)
+			fakeVolumeManager := kubeletvolume.NewFakeVolumeManager(tc.existingVolumes, 0, nil)
 			kubelet.volumeManager = fakeVolumeManager
 
 			// Only test VolumesInUse setter
@@ -1108,6 +1139,7 @@ func TestUpdateNodeStatusAndVolumesInUseWithNodeLease(t *testing.T) {
 
 			kubeClient := testKubelet.fakeKubeClient
 			kubeClient.ReactionChain = fake.NewSimpleClientset(&v1.NodeList{Items: []v1.Node{*tc.existingNode}}).ReactionChain
+			kubelet.nodeLister = delegatingNodeLister{client: kubeClient}
 
 			// Execute
 			assert.NoError(t, kubelet.updateNodeStatus(ctx))
@@ -1256,15 +1288,19 @@ func TestFastStatusUpdateOnce(t *testing.T) {
 
 			actions := kubeClient.Actions()
 			if tc.wantPatches == 0 {
-				require.Len(t, actions, 0)
+				require.Empty(t, actions)
 				return
 			}
 
-			// patch, get, patch, get, patch, ... up to initial patch + nodeStatusUpdateRetry patches
-			require.Len(t, actions, 2*tc.wantPatches-1)
+			// patch, then patch, get, patch, get, patch, ... up to initial patch + nodeStatusUpdateRetry patches
+			expectedActions := 2*tc.wantPatches - 2
+			if tc.wantPatches == 1 {
+				expectedActions = 1
+			}
+			require.Len(t, actions, expectedActions)
 
 			for i, action := range actions {
-				if i%2 == 1 {
+				if i%2 == 0 && i > 0 {
 					require.IsType(t, core.GetActionImpl{}, action)
 					continue
 				}
@@ -1354,6 +1390,10 @@ func TestTryRegisterWithApiServer(t *testing.T) {
 		ErrStatus: metav1.Status{Reason: metav1.StatusReasonConflict},
 	}
 
+	forbidden := &apierrors.StatusError{
+		ErrStatus: metav1.Status{Reason: metav1.StatusReasonForbidden},
+	}
+
 	newNode := func(cmad bool) *v1.Node {
 		node := &v1.Node{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1376,18 +1416,19 @@ func TestTryRegisterWithApiServer(t *testing.T) {
 	}
 
 	cases := []struct {
-		name            string
-		newNode         *v1.Node
-		existingNode    *v1.Node
-		createError     error
-		getError        error
-		patchError      error
-		deleteError     error
-		expectedResult  bool
-		expectedActions int
-		testSavedNode   bool
-		savedNodeIndex  int
-		savedNodeCMAD   bool
+		name                   string
+		newNode                *v1.Node
+		existingNode           *v1.Node
+		createError            error
+		getError               error
+		patchError             error
+		deleteError            error
+		expectedResult         bool
+		expectedActions        int
+		testSavedNode          bool
+		getOnForbiddenDisabled bool
+		savedNodeIndex         int
+		savedNodeCMAD          bool
 	}{
 		{
 			name:            "success case - new node",
@@ -1402,6 +1443,25 @@ func TestTryRegisterWithApiServer(t *testing.T) {
 			existingNode:    newNode(true),
 			expectedResult:  true,
 			expectedActions: 2,
+		},
+		{
+			name:            "success case - existing node - create forbidden - no change in CMAD",
+			newNode:         newNode(true),
+			createError:     forbidden,
+			existingNode:    newNode(true),
+			expectedResult:  true,
+			expectedActions: 2,
+		},
+		{
+			name:            "success case - existing node - create forbidden - CMAD disabled",
+			newNode:         newNode(false),
+			createError:     forbidden,
+			existingNode:    newNode(true),
+			expectedResult:  true,
+			expectedActions: 3,
+			testSavedNode:   true,
+			savedNodeIndex:  2,
+			savedNodeCMAD:   false,
 		},
 		{
 			name:            "success case - existing node - CMAD disabled",
@@ -1433,6 +1493,14 @@ func TestTryRegisterWithApiServer(t *testing.T) {
 			expectedActions: 1,
 		},
 		{
+			name:                   "create failed with forbidden - get-on-forbidden feature is disabled",
+			newNode:                newNode(false),
+			getOnForbiddenDisabled: true,
+			createError:            forbidden,
+			expectedResult:         false,
+			expectedActions:        1,
+		},
+		{
 			name:            "get existing node failed",
 			newNode:         newNode(false),
 			createError:     alreadyExists,
@@ -1452,55 +1520,61 @@ func TestTryRegisterWithApiServer(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		testKubelet := newTestKubelet(t, false /* controllerAttachDetachEnabled is a don't-care for this test */)
-		defer testKubelet.Cleanup()
-		kubelet := testKubelet.kubelet
-		kubeClient := testKubelet.fakeKubeClient
-
-		kubeClient.AddReactor("create", "nodes", func(action core.Action) (bool, runtime.Object, error) {
-			return true, nil, tc.createError
-		})
-		kubeClient.AddReactor("get", "nodes", func(action core.Action) (bool, runtime.Object, error) {
-			// Return an existing (matching) node on get.
-			return true, tc.existingNode, tc.getError
-		})
-		kubeClient.AddReactor("patch", "nodes", func(action core.Action) (bool, runtime.Object, error) {
-			if action.GetSubresource() == "status" {
-				return true, nil, tc.patchError
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.getOnForbiddenDisabled {
+				featuregatetesting.SetFeatureGateEmulationVersionDuringTest(t, utilfeature.DefaultFeatureGate, utilversion.MustParse("1.32"))
+				featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.KubeletRegistrationGetOnExistsOnly, true)
 			}
-			return notImplemented(action)
-		})
-		kubeClient.AddReactor("delete", "nodes", func(action core.Action) (bool, runtime.Object, error) {
-			return true, nil, tc.deleteError
-		})
-		addNotImplatedReaction(kubeClient)
+			testKubelet := newTestKubelet(t, false /* controllerAttachDetachEnabled is a don't-care for this test */)
+			defer testKubelet.Cleanup()
+			kubelet := testKubelet.kubelet
+			kubeClient := testKubelet.fakeKubeClient
 
-		result := kubelet.tryRegisterWithAPIServer(tc.newNode)
-		require.Equal(t, tc.expectedResult, result, "test [%s]", tc.name)
+			kubeClient.AddReactor("create", "nodes", func(action core.Action) (bool, runtime.Object, error) {
+				return true, nil, tc.createError
+			})
+			kubeClient.AddReactor("get", "nodes", func(action core.Action) (bool, runtime.Object, error) {
+				// Return an existing (matching) node on get.
+				return true, tc.existingNode, tc.getError
+			})
+			kubeClient.AddReactor("patch", "nodes", func(action core.Action) (bool, runtime.Object, error) {
+				if action.GetSubresource() == "status" {
+					return true, nil, tc.patchError
+				}
+				return notImplemented(action)
+			})
+			kubeClient.AddReactor("delete", "nodes", func(action core.Action) (bool, runtime.Object, error) {
+				return true, nil, tc.deleteError
+			})
+			addNotImplatedReaction(kubeClient)
 
-		actions := kubeClient.Actions()
-		assert.Len(t, actions, tc.expectedActions, "test [%s]", tc.name)
+			result := kubelet.tryRegisterWithAPIServer(tc.newNode)
+			require.Equal(t, tc.expectedResult, result, "test [%s]", tc.name)
 
-		if tc.testSavedNode {
-			var savedNode *v1.Node
+			actions := kubeClient.Actions()
+			assert.Len(t, actions, tc.expectedActions, "test [%s]", tc.name)
 
-			t.Logf("actions: %v: %+v", len(actions), actions)
-			action := actions[tc.savedNodeIndex]
-			if action.GetVerb() == "create" {
-				createAction := action.(core.CreateAction)
-				obj := createAction.GetObject()
-				require.IsType(t, &v1.Node{}, obj)
-				savedNode = obj.(*v1.Node)
-			} else if action.GetVerb() == "patch" {
-				patchAction := action.(core.PatchActionImpl)
-				var err error
-				savedNode, err = applyNodeStatusPatch(tc.existingNode, patchAction.GetPatch())
-				require.NoError(t, err)
+			if tc.testSavedNode {
+				var savedNode *v1.Node
+
+				t.Logf("actions: %v: %+v", len(actions), actions)
+				action := actions[tc.savedNodeIndex]
+				if action.GetVerb() == "create" {
+					createAction := action.(core.CreateAction)
+					obj := createAction.GetObject()
+					require.IsType(t, &v1.Node{}, obj)
+					savedNode = obj.(*v1.Node)
+				} else if action.GetVerb() == "patch" {
+					patchAction := action.(core.PatchActionImpl)
+					var err error
+					savedNode, err = applyNodeStatusPatch(tc.existingNode, patchAction.GetPatch())
+					require.NoError(t, err)
+				}
+
+				actualCMAD, _ := strconv.ParseBool(savedNode.Annotations[util.ControllerManagedAttachAnnotation])
+				assert.Equal(t, tc.savedNodeCMAD, actualCMAD, "test [%s]", tc.name)
 			}
-
-			actualCMAD, _ := strconv.ParseBool(savedNode.Annotations[util.ControllerManagedAttachAnnotation])
-			assert.Equal(t, tc.savedNodeCMAD, actualCMAD, "test [%s]", tc.name)
-		}
+		})
 	}
 }
 
@@ -1566,11 +1640,11 @@ func TestUpdateNewNodeStatusTooLargeReservation(t *testing.T) {
 	kubelet.updateRuntimeUp()
 	assert.NoError(t, kubelet.updateNodeStatus(ctx))
 	actions := kubeClient.Actions()
-	require.Len(t, actions, 2)
-	require.True(t, actions[1].Matches("patch", "nodes"))
-	require.Equal(t, actions[1].GetSubresource(), "status")
+	require.Len(t, actions, 1)
+	require.True(t, actions[0].Matches("patch", "nodes"))
+	require.Equal(t, "status", actions[0].GetSubresource())
 
-	updatedNode, err := applyNodeStatusPatch(&existingNode, actions[1].(core.PatchActionImpl).GetPatch())
+	updatedNode, err := applyNodeStatusPatch(&existingNode, actions[0].(core.PatchActionImpl).GetPatch())
 	assert.NoError(t, err)
 	assert.True(t, apiequality.Semantic.DeepEqual(expectedNode.Status.Allocatable, updatedNode.Status.Allocatable), "%s", cmp.Diff(expectedNode.Status.Allocatable, updatedNode.Status.Allocatable))
 }
@@ -2630,8 +2704,7 @@ func TestValidateNodeIPParam(t *testing.T) {
 	}
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		assert.Error(t, err, fmt.Sprintf(
-			"Unable to obtain a list of the node's unicast interface addresses."))
+		assert.Errorf(t, err, "Unable to obtain a list of the node's unicast interface addresses.")
 	}
 	for _, addr := range addrs {
 		var ip net.IP
@@ -2654,9 +2727,9 @@ func TestValidateNodeIPParam(t *testing.T) {
 	for _, test := range tests {
 		err := validateNodeIP(netutils.ParseIPSloppy(test.nodeIP))
 		if test.success {
-			assert.NoError(t, err, "test %s", test.testName)
+			assert.NoErrorf(t, err, "test %s", test.testName)
 		} else {
-			assert.Error(t, err, fmt.Sprintf("test %s", test.testName))
+			assert.Errorf(t, err, "test %s", test.testName)
 		}
 	}
 }
@@ -2701,8 +2774,7 @@ func TestRegisterWithApiServerWithTaint(t *testing.T) {
 		Effect: v1.TaintEffectNoSchedule,
 	}
 
-	require.Equal(t,
-		true,
+	require.True(t,
 		taintutil.TaintExists(got.Spec.Taints, unschedulableTaint),
 		"test unschedulable taint for TaintNodesByCondition")
 }

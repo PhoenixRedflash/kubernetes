@@ -72,6 +72,7 @@ const (
 	OrphanedRuntimePodTotalKey         = "orphaned_runtime_pods_total"
 	RestartedPodTotalKey               = "restarted_pods_total"
 	ImagePullDurationKey               = "image_pull_duration_seconds"
+	CgroupVersionKey                   = "cgroup_version"
 
 	// Metrics keys of remote runtime operations
 	RuntimeOperationsKey         = "runtime_operations_total"
@@ -126,10 +127,21 @@ const (
 	// Metric for tracking garbage collected images
 	ImageGarbageCollectedTotalKey = "image_garbage_collected_total"
 
+	// Metric for tracking aligment of compute resources
+	ContainerAlignedComputeResourcesNameKey          = "container_aligned_compute_resources_count"
+	ContainerAlignedComputeResourcesScopeLabelKey    = "scope"
+	ContainerAlignedComputeResourcesBoundaryLabelKey = "boundary"
+
 	// Values used in metric labels
 	Container          = "container"
 	InitContainer      = "init_container"
 	EphemeralContainer = "ephemeral_container"
+
+	AlignScopePod       = "pod"
+	AlignScopeContainer = "container"
+
+	AlignedPhysicalCPU = "physical_cpu"
+	AlignedNUMANode    = "numa_node"
 )
 
 type imageSizeBucket struct {
@@ -761,6 +773,16 @@ var (
 		},
 	)
 
+	ContainerAlignedComputeResources = metrics.NewCounterVec(
+		&metrics.CounterOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           ContainerAlignedComputeResourcesNameKey,
+			Help:           "Cumulative number of aligned compute resources allocated to containers by alignment type.",
+			StabilityLevel: metrics.ALPHA,
+		},
+		[]string{ContainerAlignedComputeResourcesScopeLabelKey, ContainerAlignedComputeResourcesBoundaryLabelKey},
+	)
+
 	// MemoryManagerPinningRequestTotal tracks the number of times the pod spec required the memory manager to pin memory pages
 	MemoryManagerPinningRequestTotal = metrics.NewCounter(
 		&metrics.CounterOpts{
@@ -907,6 +929,15 @@ var (
 			StabilityLevel: metrics.ALPHA,
 		},
 	)
+
+	CgroupVersion = metrics.NewGauge(
+		&metrics.GaugeOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           CgroupVersionKey,
+			Help:           "cgroup version on the hosts.",
+			StabilityLevel: metrics.ALPHA,
+		},
+	)
 )
 
 var registerMetrics sync.Once
@@ -922,6 +953,7 @@ func Register(collectors ...metrics.StableCollector) {
 		legacyregistry.MustRegister(PodStartSLIDuration)
 		legacyregistry.MustRegister(PodStartTotalDuration)
 		legacyregistry.MustRegister(ImagePullDuration)
+		legacyregistry.MustRegister(ImageGarbageCollectedTotal)
 		legacyregistry.MustRegister(NodeStartupPreKubeletDuration)
 		legacyregistry.MustRegister(NodeStartupPreRegistrationDuration)
 		legacyregistry.MustRegister(NodeStartupRegistrationDuration)
@@ -974,6 +1006,7 @@ func Register(collectors ...metrics.StableCollector) {
 		legacyregistry.MustRegister(RunPodSandboxErrors)
 		legacyregistry.MustRegister(CPUManagerPinningRequestsTotal)
 		legacyregistry.MustRegister(CPUManagerPinningErrorsTotal)
+		legacyregistry.MustRegister(ContainerAlignedComputeResources)
 		if utilfeature.DefaultFeatureGate.Enabled(features.MemoryManager) {
 			legacyregistry.MustRegister(MemoryManagerPinningRequestTotal)
 			legacyregistry.MustRegister(MemoryManagerPinningErrorsTotal)
@@ -996,6 +1029,7 @@ func Register(collectors ...metrics.StableCollector) {
 
 		legacyregistry.MustRegister(LifecycleHandlerHTTPFallbacks)
 		legacyregistry.MustRegister(LifecycleHandlerSleepTerminated)
+		legacyregistry.MustRegister(CgroupVersion)
 	})
 }
 

@@ -527,9 +527,6 @@ type KubeletConfiguration struct {
 	// evictionMaxPodGracePeriod is the maximum allowed grace period (in seconds) to use
 	// when terminating pods in response to a soft eviction threshold being met. This value
 	// effectively caps the Pod's terminationGracePeriodSeconds value during soft evictions.
-	// Note: Due to issue #64530, the behavior has a bug where this value currently just
-	// overrides the grace period during soft eviction, which can increase the grace
-	// period from what is set on the Pod. This bug will be fixed in a future release.
 	// Default: 0
 	// +optional
 	EvictionMaxPodGracePeriod int32 `json:"evictionMaxPodGracePeriod,omitempty"`
@@ -632,14 +629,14 @@ type KubeletConfiguration struct {
 	// systemReserved is a set of ResourceName=ResourceQuantity (e.g. cpu=200m,memory=150G)
 	// pairs that describe resources reserved for non-kubernetes components.
 	// Currently only cpu and memory are supported.
-	// See http://kubernetes.io/docs/user-guide/compute-resources for more detail.
+	// See https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources for more detail.
 	// Default: nil
 	// +optional
 	SystemReserved map[string]string `json:"systemReserved,omitempty"`
 	// kubeReserved is a set of ResourceName=ResourceQuantity (e.g. cpu=200m,memory=150G) pairs
 	// that describe resources reserved for kubernetes system components.
 	// Currently cpu, memory and local storage for root file system are supported.
-	// See https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+	// See https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources
 	// for more details.
 	// Default: nil
 	// +optional
@@ -851,6 +848,14 @@ type KubeletConfiguration struct {
 	// If not specified, the value in containerRuntimeEndpoint is used.
 	// +optional
 	ImageServiceEndpoint string `json:"imageServiceEndpoint,omitempty"`
+
+	// FailCgroupV1 prevents the kubelet from starting on hosts
+	// that use cgroup v1. By default, this is set to 'false', meaning
+	// the kubelet is allowed to start on cgroup v1 hosts unless this
+	// option is explicitly enabled.
+	// Default: false
+	// +optional
+	FailCgroupV1 *bool `json:"failCgroupV1,omitempty"`
 }
 
 type KubeletAuthorizationMode string

@@ -30,16 +30,12 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	genericfeatures "k8s.io/apiserver/pkg/features"
 	"k8s.io/apiserver/pkg/quota/v1/generic"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/metadata"
 	restclient "k8s.io/client-go/rest"
-	cloudnodelifecyclecontroller "k8s.io/cloud-provider/controllers/nodelifecycle"
-	routecontroller "k8s.io/cloud-provider/controllers/route"
-	servicecontroller "k8s.io/cloud-provider/controllers/service"
 	cpnames "k8s.io/cloud-provider/names"
 	"k8s.io/component-base/featuregate"
 	"k8s.io/controller-manager/controller"
@@ -92,21 +88,9 @@ func newServiceLBControllerDescriptor() *ControllerDescriptor {
 }
 
 func startServiceLBController(ctx context.Context, controllerContext ControllerContext, controllerName string) (controller.Interface, bool, error) {
-	serviceController, err := servicecontroller.New(
-		controllerContext.Cloud,
-		controllerContext.ClientBuilder.ClientOrDie("service-controller"),
-		controllerContext.InformerFactory.Core().V1().Services(),
-		controllerContext.InformerFactory.Core().V1().Nodes(),
-		controllerContext.ComponentConfig.KubeCloudShared.ClusterName,
-		utilfeature.DefaultFeatureGate,
-	)
-	if err != nil {
-		// This error shouldn't fail. It lives like this as a legacy.
-		klog.FromContext(ctx).Error(err, "Failed to start service controller")
-		return nil, false, nil
-	}
-	go serviceController.Run(ctx, int(controllerContext.ComponentConfig.ServiceController.ConcurrentServiceSyncs), controllerContext.ControllerManagerMetrics)
-	return nil, true, nil
+	logger := klog.FromContext(ctx)
+	logger.Info("Warning: service-controller is set, but no cloud provider functionality is available in kube-controller-manger (KEP-2395). Will not configure service controller.")
+	return nil, false, nil
 }
 func newNodeIpamControllerDescriptor() *ControllerDescriptor {
 	return &ControllerDescriptor{
@@ -128,11 +112,7 @@ func startNodeIpamController(ctx context.Context, controllerContext ControllerCo
 
 	if controllerContext.ComponentConfig.KubeCloudShared.CIDRAllocatorType == string(ipam.CloudAllocatorType) {
 		// Cannot run cloud ipam controller if cloud provider is nil (--cloud-provider not set or set to 'external')
-		if controllerContext.Cloud == nil {
-			return nil, false, errors.New("--cidr-allocator-type is set to 'CloudAllocator' but cloud provider is not configured")
-		}
-		// As part of the removal of all the cloud providers from kubernetes, this support will be removed as well
-		klog.Warningf("DEPRECATED: 'CloudAllocator' bas been deprecated and will be removed in a future release.")
+		return nil, false, errors.New("--cidr-allocator-type is set to 'CloudAllocator' but cloud provider is not configured")
 	}
 
 	clusterCIDRs, err := validateCIDRs(controllerContext.ComponentConfig.KubeCloudShared.ClusterCIDR)
@@ -177,7 +157,7 @@ func startNodeIpamController(ctx context.Context, controllerContext ControllerCo
 	nodeIpamController, err := nodeipamcontroller.NewNodeIpamController(
 		ctx,
 		controllerContext.InformerFactory.Core().V1().Nodes(),
-		controllerContext.Cloud,
+		nil, // no cloud provider on kube-controller-manager since v1.31 (KEP-2395)
 		controllerContext.ClientBuilder.ClientOrDie("node-controller"),
 		clusterCIDRs,
 		serviceCIDR,
@@ -261,22 +241,8 @@ func newCloudNodeLifecycleControllerDescriptor() *ControllerDescriptor {
 
 func startCloudNodeLifecycleController(ctx context.Context, controllerContext ControllerContext, controllerName string) (controller.Interface, bool, error) {
 	logger := klog.FromContext(ctx)
-	cloudNodeLifecycleController, err := cloudnodelifecyclecontroller.NewCloudNodeLifecycleController(
-		controllerContext.InformerFactory.Core().V1().Nodes(),
-		// cloud node lifecycle controller uses existing cluster role from node-controller
-		controllerContext.ClientBuilder.ClientOrDie("node-controller"),
-		controllerContext.Cloud,
-		controllerContext.ComponentConfig.KubeCloudShared.NodeMonitorPeriod.Duration,
-	)
-	if err != nil {
-		// the controller manager should continue to run if the "Instances" interface is not
-		// supported, though it's unlikely for a cloud provider to not support it
-		logger.Error(err, "Failed to start cloud node lifecycle controller")
-		return nil, false, nil
-	}
-
-	go cloudNodeLifecycleController.Run(ctx, controllerContext.ControllerManagerMetrics)
-	return nil, true, nil
+	logger.Info("Warning: node-controller is set, but no cloud provider functionality is available in kube-controller-manger (KEP-2395). Will not configure node lifecyle controller.")
+	return nil, false, nil
 }
 
 func newNodeRouteControllerDescriptor() *ControllerDescriptor {
@@ -290,32 +256,8 @@ func newNodeRouteControllerDescriptor() *ControllerDescriptor {
 
 func startNodeRouteController(ctx context.Context, controllerContext ControllerContext, controllerName string) (controller.Interface, bool, error) {
 	logger := klog.FromContext(ctx)
-	if !controllerContext.ComponentConfig.KubeCloudShared.AllocateNodeCIDRs || !controllerContext.ComponentConfig.KubeCloudShared.ConfigureCloudRoutes {
-		logger.Info("Will not configure cloud provider routes for allocate-node-cidrs", "CIDRs", controllerContext.ComponentConfig.KubeCloudShared.AllocateNodeCIDRs, "routes", controllerContext.ComponentConfig.KubeCloudShared.ConfigureCloudRoutes)
-		return nil, false, nil
-	}
-	if controllerContext.Cloud == nil {
-		logger.Info("Warning: configure-cloud-routes is set, but no cloud provider specified. Will not configure cloud provider routes.")
-		return nil, false, nil
-	}
-	routes, ok := controllerContext.Cloud.Routes()
-	if !ok {
-		logger.Info("Warning: configure-cloud-routes is set, but cloud provider does not support routes. Will not configure cloud provider routes.")
-		return nil, false, nil
-	}
-
-	clusterCIDRs, err := validateCIDRs(controllerContext.ComponentConfig.KubeCloudShared.ClusterCIDR)
-	if err != nil {
-		return nil, false, err
-	}
-
-	routeController := routecontroller.New(routes,
-		controllerContext.ClientBuilder.ClientOrDie("route-controller"),
-		controllerContext.InformerFactory.Core().V1().Nodes(),
-		controllerContext.ComponentConfig.KubeCloudShared.ClusterName,
-		clusterCIDRs)
-	go routeController.Run(ctx, controllerContext.ComponentConfig.KubeCloudShared.RouteReconciliationPeriod.Duration, controllerContext.ControllerManagerMetrics)
-	return nil, true, nil
+	logger.Info("Warning: configure-cloud-routes is set, but no cloud provider functionality is available in kube-controller-manger (KEP-2395). Will not configure cloud provider routes.")
+	return nil, false, nil
 }
 
 func newPersistentVolumeBinderControllerDescriptor() *ControllerDescriptor {
@@ -337,8 +279,6 @@ func startPersistentVolumeBinderController(ctx context.Context, controllerContex
 		KubeClient:                controllerContext.ClientBuilder.ClientOrDie("persistent-volume-binder"),
 		SyncPeriod:                controllerContext.ComponentConfig.PersistentVolumeBinderController.PVClaimBinderSyncPeriod.Duration,
 		VolumePlugins:             plugins,
-		Cloud:                     controllerContext.Cloud,
-		ClusterName:               controllerContext.ComponentConfig.KubeCloudShared.ClusterName,
 		VolumeInformer:            controllerContext.InformerFactory.Core().V1().PersistentVolumes(),
 		ClaimInformer:             controllerContext.InformerFactory.Core().V1().PersistentVolumeClaims(),
 		ClassInformer:             controllerContext.InformerFactory.Storage().V1().StorageClasses(),
@@ -384,7 +324,6 @@ func startPersistentVolumeAttachDetachController(ctx context.Context, controller
 			csiNodeInformer,
 			csiDriverInformer,
 			controllerContext.InformerFactory.Storage().V1().VolumeAttachments(),
-			controllerContext.Cloud,
 			plugins,
 			GetDynamicPluginProber(controllerContext.ComponentConfig.PersistentVolumeBinderController.VolumeConfiguration),
 			controllerContext.ComponentConfig.AttachDetachController.DisableAttachDetachReconcilerSync,
@@ -419,7 +358,6 @@ func startPersistentVolumeExpanderController(ctx context.Context, controllerCont
 		ctx,
 		controllerContext.ClientBuilder.ClientOrDie("expand-controller"),
 		controllerContext.InformerFactory.Core().V1().PersistentVolumeClaims(),
-		controllerContext.Cloud,
 		plugins,
 		csiTranslator,
 		csimigration.NewPluginManager(csiTranslator, utilfeature.DefaultFeatureGate),
@@ -471,9 +409,8 @@ func startResourceClaimController(ctx context.Context, controllerContext Control
 		klog.FromContext(ctx),
 		controllerContext.ClientBuilder.ClientOrDie("resource-claim-controller"),
 		controllerContext.InformerFactory.Core().V1().Pods(),
-		controllerContext.InformerFactory.Resource().V1alpha2().PodSchedulingContexts(),
-		controllerContext.InformerFactory.Resource().V1alpha2().ResourceClaims(),
-		controllerContext.InformerFactory.Resource().V1alpha2().ResourceClaimTemplates())
+		controllerContext.InformerFactory.Resource().V1alpha3().ResourceClaims(),
+		controllerContext.InformerFactory.Resource().V1alpha3().ResourceClaimTemplates())
 	if err != nil {
 		return nil, true, fmt.Errorf("failed to start resource claim controller: %v", err)
 	}
@@ -684,11 +621,6 @@ func startGarbageCollectorController(ctx context.Context, controllerContext Cont
 		return nil, true, err
 	}
 
-	ignoredResources := make(map[schema.GroupResource]struct{})
-	for _, r := range controllerContext.ComponentConfig.GarbageCollectorController.GCIgnoredResources {
-		ignoredResources[schema.GroupResource{Group: r.Group, Resource: r.Resource}] = struct{}{}
-	}
-
 	garbageCollector, err := garbagecollector.NewComposedGarbageCollector(
 		ctx,
 		gcClientset,
@@ -702,11 +634,12 @@ func startGarbageCollectorController(ctx context.Context, controllerContext Cont
 
 	// Start the garbage collector.
 	workers := int(controllerContext.ComponentConfig.GarbageCollectorController.ConcurrentGCSyncs)
-	go garbageCollector.Run(ctx, workers)
+	const syncPeriod = 30 * time.Second
+	go garbageCollector.Run(ctx, workers, syncPeriod)
 
 	// Periodically refresh the RESTMapper with new discovery information and sync
 	// the garbage collector.
-	go garbageCollector.Sync(ctx, discoveryClient, 30*time.Second)
+	go garbageCollector.Sync(ctx, discoveryClient, syncPeriod)
 
 	return garbageCollector, true, nil
 }

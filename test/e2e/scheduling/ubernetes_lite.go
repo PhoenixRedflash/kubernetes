@@ -24,6 +24,7 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -73,7 +74,7 @@ var _ = SIGDescribe("Multi-AZ Clusters", func() {
 	})
 
 	f.It("should spread the pods of a replication controller across zones", f.WithSerial(), func(ctx context.Context) {
-		SpreadRCOrFail(ctx, f, int32(5*zoneCount), zoneNames, framework.ServeHostnameImage, []string{"serve-hostname"})
+		SpreadRCOrFail(ctx, f, int32(5*zoneCount), zoneNames, imageutils.GetE2EImage(imageutils.Agnhost), []string{"serve-hostname"})
 	})
 })
 

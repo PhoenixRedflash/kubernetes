@@ -38,6 +38,10 @@ import (
 )
 
 func TestGetsSelfAttributes(t *testing.T) {
+	// KUBE_APISERVER_SERVE_REMOVED_APIS_FOR_ONE_RELEASE allows for APIs pending removal to not block tests
+	// TODO: Remove this line once authentication v1alpha1 types to be removed in 1.32 are fully removed
+	t.Setenv("KUBE_APISERVER_SERVE_REMOVED_APIS_FOR_ONE_RELEASE", "true")
+
 	tests := []struct {
 		name           string
 		userInfo       *user.DefaultInfo
@@ -101,8 +105,8 @@ func TestGetsSelfAttributes(t *testing.T) {
 		},
 		ModifyServerConfig: func(config *controlplane.Config) {
 			// Unset BearerToken to disable BearerToken authenticator.
-			config.GenericConfig.LoopbackClientConfig.BearerToken = ""
-			config.GenericConfig.Authentication.Authenticator = authenticator.RequestFunc(func(req *http.Request) (*authenticator.Response, bool, error) {
+			config.ControlPlane.Generic.LoopbackClientConfig.BearerToken = ""
+			config.ControlPlane.Generic.Authentication.Authenticator = authenticator.RequestFunc(func(req *http.Request) (*authenticator.Response, bool, error) {
 				respMu.RLock()
 				defer respMu.RUnlock()
 				return &authenticator.Response{User: response}, true, nil
@@ -215,8 +219,8 @@ func TestGetsSelfAttributesError(t *testing.T) {
 		},
 		ModifyServerConfig: func(config *controlplane.Config) {
 			// Unset BearerToken to disable BearerToken authenticator.
-			config.GenericConfig.LoopbackClientConfig.BearerToken = ""
-			config.GenericConfig.Authentication.Authenticator = authenticator.RequestFunc(func(req *http.Request) (*authenticator.Response, bool, error) {
+			config.ControlPlane.Generic.LoopbackClientConfig.BearerToken = ""
+			config.ControlPlane.Generic.Authentication.Authenticator = authenticator.RequestFunc(func(req *http.Request) (*authenticator.Response, bool, error) {
 				if toggle.Load().(bool) {
 					return &authenticator.Response{
 						User: &user.DefaultInfo{

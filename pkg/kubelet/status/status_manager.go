@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-//go:generate mockgen -source=status_manager.go -destination=testing/mock_pod_status_provider.go -package=testing PodStatusProvider
+//go:generate mockery
 package status
 
 import (
@@ -446,7 +446,7 @@ func (m *manager) TerminatePod(pod *v1.Pod) {
 			}
 			status.ContainerStatuses[i].State = v1.ContainerState{
 				Terminated: &v1.ContainerStateTerminated{
-					Reason:   "ContainerStatusUnknown",
+					Reason:   kubecontainer.ContainerReasonStatusUnknown,
 					Message:  "The container could not be located when the pod was terminated",
 					ExitCode: 137,
 				},
@@ -462,7 +462,7 @@ func (m *manager) TerminatePod(pod *v1.Pod) {
 		}
 		status.InitContainerStatuses[i].State = v1.ContainerState{
 			Terminated: &v1.ContainerStateTerminated{
-				Reason:   "ContainerStatusUnknown",
+				Reason:   kubecontainer.ContainerReasonStatusUnknown,
 				Message:  "The container could not be located when the pod was terminated",
 				ExitCode: 137,
 			},
@@ -639,10 +639,8 @@ func (m *manager) updateStatusInternal(pod *v1.Pod, status v1.PodStatus, forceUp
 	// Set PodScheduledCondition.LastTransitionTime.
 	updateLastTransitionTime(&status, &oldStatus, v1.PodScheduled)
 
-	if utilfeature.DefaultFeatureGate.Enabled(features.PodDisruptionConditions) {
-		// Set DisruptionTarget.LastTransitionTime.
-		updateLastTransitionTime(&status, &oldStatus, v1.DisruptionTarget)
-	}
+	// Set DisruptionTarget.LastTransitionTime.
+	updateLastTransitionTime(&status, &oldStatus, v1.DisruptionTarget)
 
 	// ensure that the start time does not change across updates.
 	if oldStatus.StartTime != nil && !oldStatus.StartTime.IsZero() {
@@ -995,7 +993,7 @@ func (m *manager) needsReconcile(uid types.UID, status v1.PodStatus) bool {
 // Related issue #15262/PR #15263 to move apiserver to RFC339NANO is closed.
 func normalizeStatus(pod *v1.Pod, status *v1.PodStatus) *v1.PodStatus {
 	bytesPerStatus := kubecontainer.MaxPodTerminationMessageLogLength
-	if containers := len(pod.Spec.Containers) + len(pod.Spec.InitContainers); containers > 0 {
+	if containers := len(pod.Spec.Containers) + len(pod.Spec.InitContainers) + len(pod.Spec.EphemeralContainers); containers > 0 {
 		bytesPerStatus = bytesPerStatus / containers
 	}
 	normalizeTimeStamp := func(t *metav1.Time) {
@@ -1023,23 +1021,23 @@ func normalizeStatus(pod *v1.Pod, status *v1.PodStatus) *v1.PodStatus {
 		normalizeTimeStamp(&condition.LastTransitionTime)
 	}
 
-	// update container statuses
-	for i := range status.ContainerStatuses {
-		cstatus := &status.ContainerStatuses[i]
-		normalizeContainerState(&cstatus.State)
-		normalizeContainerState(&cstatus.LastTerminationState)
+	normalizeContainerStatuses := func(containerStatuses []v1.ContainerStatus) {
+		for i := range containerStatuses {
+			cstatus := &containerStatuses[i]
+			normalizeContainerState(&cstatus.State)
+			normalizeContainerState(&cstatus.LastTerminationState)
+		}
 	}
-	// Sort the container statuses, so that the order won't affect the result of comparison
+
+	normalizeContainerStatuses(status.ContainerStatuses)
 	sort.Sort(kubetypes.SortedContainerStatuses(status.ContainerStatuses))
 
-	// update init container statuses
-	for i := range status.InitContainerStatuses {
-		cstatus := &status.InitContainerStatuses[i]
-		normalizeContainerState(&cstatus.State)
-		normalizeContainerState(&cstatus.LastTerminationState)
-	}
-	// Sort the container statuses, so that the order won't affect the result of comparison
+	normalizeContainerStatuses(status.InitContainerStatuses)
 	kubetypes.SortInitContainerStatuses(pod, status.InitContainerStatuses)
+
+	normalizeContainerStatuses(status.EphemeralContainerStatuses)
+	sort.Sort(kubetypes.SortedContainerStatuses(status.EphemeralContainerStatuses))
+
 	return status
 }
 
