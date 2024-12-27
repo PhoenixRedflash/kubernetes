@@ -354,6 +354,15 @@ type KubeletConfiguration struct {
 	// Default: "None"
 	// +optional
 	CPUManagerPolicy string `json:"cpuManagerPolicy,omitempty"`
+	// singleProcessOOMKill, if true, will prevent the `memory.oom.group` flag from being set for container
+	// cgroups in cgroups v2. This causes processes in the container to be OOM killed individually instead of as
+	// a group. It means that if true, the behavior aligns with the behavior of cgroups v1.
+	// The default value is determined automatically when you don't specify.
+	// On non-linux such as windows, only null / absent is allowed.
+	// On cgroup v1 linux, only null / absent and true are allowed.
+	// On cgroup v2 linux, null / absent, true and false are allowed. The default value is false.
+	// +optional
+	SingleProcessOOMKill *bool `json:"singleProcessOOMKill,omitempty"`
 	// cpuManagerPolicyOptions is a set of key=value which 	allows to set extra options
 	// to fine tune the behaviour of the cpu manager policies.
 	// Requires  both the "CPUManager" and "CPUManagerPolicyOptions" feature gates to be enabled.
@@ -766,6 +775,11 @@ type KubeletConfiguration struct {
 	// +featureGate=GracefulNodeShutdownBasedOnPodPriority
 	// +optional
 	ShutdownGracePeriodByPodPriority []ShutdownGracePeriodByPodPriority `json:"shutdownGracePeriodByPodPriority,omitempty"`
+	// CrashLoopBackOff contains config to modify node-level parameters for
+	// container restart behavior
+	// +featureGate=KubeletCrashLoopBackOffMax
+	// +optional
+	CrashLoopBackOff CrashLoopBackOffConfig `json:"crashLoopBackOff,omitempty"`
 	// reservedMemory specifies a comma-separated list of memory reservations for NUMA nodes.
 	// The parameter makes sense only in the context of the memory manager feature.
 	// The memory manager will not allocate reserved memory for container workloads.
@@ -964,6 +978,15 @@ type MemorySwapConfiguration struct {
 	// +featureGate=NodeSwap
 	// +optional
 	SwapBehavior string `json:"swapBehavior,omitempty"`
+}
+
+type CrashLoopBackOffConfig struct {
+	// maxContainerRestartPeriod is the maximum duration the backoff delay can accrue
+	// to for container restarts, minimum 1 second, maximum 300 seconds. If not set,
+	// defaults to the internal crashloopbackoff maximum (300s).
+	// +featureGate=KubeletCrashLoopBackOffMax
+	// +optional
+	MaxContainerRestartPeriod *metav1.Duration `json:"maxContainerRestartPeriod,omitempty"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

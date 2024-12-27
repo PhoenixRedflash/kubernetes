@@ -375,9 +375,9 @@ func NewProxier(
 	proxier := &Proxier{
 		ipFamily:              ipFamily,
 		svcPortMap:            make(proxy.ServicePortMap),
-		serviceChanges:        proxy.NewServiceChangeTracker(newServiceInfo, ipFamily, recorder, nil),
+		serviceChanges:        proxy.NewServiceChangeTracker(ipFamily, newServiceInfo, nil),
 		endpointsMap:          make(proxy.EndpointsMap),
-		endpointsChanges:      proxy.NewEndpointsChangeTracker(hostname, nil, ipFamily, recorder, nil),
+		endpointsChanges:      proxy.NewEndpointsChangeTracker(ipFamily, hostname, nil, nil),
 		initialSync:           true,
 		syncPeriod:            syncPeriod,
 		minSyncPeriod:         minSyncPeriod,
@@ -744,7 +744,7 @@ func (proxier *Proxier) Sync() {
 	if proxier.healthzServer != nil {
 		proxier.healthzServer.QueuedUpdate(proxier.ipFamily)
 	}
-	metrics.SyncProxyRulesLastQueuedTimestamp.SetToCurrentTime()
+	metrics.SyncProxyRulesLastQueuedTimestamp.WithLabelValues(string(proxier.ipFamily)).SetToCurrentTime()
 	proxier.syncRunner.Run()
 }
 
@@ -755,7 +755,7 @@ func (proxier *Proxier) SyncLoop() {
 		proxier.healthzServer.Updated(proxier.ipFamily)
 	}
 	// synthesize "last change queued" time as the informers are syncing.
-	metrics.SyncProxyRulesLastQueuedTimestamp.SetToCurrentTime()
+	metrics.SyncProxyRulesLastQueuedTimestamp.WithLabelValues(string(proxier.ipFamily)).SetToCurrentTime()
 	proxier.syncRunner.Loop(wait.NeverStop)
 }
 
@@ -925,14 +925,14 @@ func (proxier *Proxier) syncProxyRules() {
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
-		metrics.SyncProxyRulesLatency.Observe(metrics.SinceInSeconds(start))
+		metrics.SyncProxyRulesLatency.WithLabelValues(string(proxier.ipFamily)).Observe(metrics.SinceInSeconds(start))
 		proxier.logger.V(4).Info("syncProxyRules complete", "elapsed", time.Since(start))
 	}()
 
 	// We assume that if this was called, we really want to sync them,
 	// even if nothing changed in the meantime. In other words, callers are
 	// responsible for detecting no-op changes and not calling this function.
-	serviceUpdateResult := proxier.svcPortMap.Update(proxier.serviceChanges)
+	_ = proxier.svcPortMap.Update(proxier.serviceChanges)
 	endpointUpdateResult := proxier.endpointsMap.Update(proxier.endpointsChanges)
 
 	proxier.logger.V(3).Info("Syncing ipvs proxier rules")
@@ -1444,13 +1444,13 @@ func (proxier *Proxier) syncProxyRules() {
 		} else {
 			proxier.logger.Error(err, "Failed to execute iptables-restore", "rules", proxier.iptablesData.Bytes())
 		}
-		metrics.IPTablesRestoreFailuresTotal.Inc()
+		metrics.IPTablesRestoreFailuresTotal.WithLabelValues(string(proxier.ipFamily)).Inc()
 		return
 	}
 	for name, lastChangeTriggerTimes := range endpointUpdateResult.LastChangeTriggerTimes {
 		for _, lastChangeTriggerTime := range lastChangeTriggerTimes {
 			latency := metrics.SinceInSeconds(lastChangeTriggerTime)
-			metrics.NetworkProgrammingLatency.Observe(latency)
+			metrics.NetworkProgrammingLatency.WithLabelValues(string(proxier.ipFamily)).Observe(latency)
 			proxier.logger.V(4).Info("Network programming", "endpoint", klog.KRef(name.Namespace, name.Name), "elapsed", latency)
 		}
 	}
@@ -1482,7 +1482,7 @@ func (proxier *Proxier) syncProxyRules() {
 	if proxier.healthzServer != nil {
 		proxier.healthzServer.Updated(proxier.ipFamily)
 	}
-	metrics.SyncProxyRulesLastTimestamp.SetToCurrentTime()
+	metrics.SyncProxyRulesLastTimestamp.WithLabelValues(string(proxier.ipFamily)).SetToCurrentTime()
 
 	// Update service healthchecks.  The endpoints list might include services that are
 	// not "OnlyLocal", but the services list will not, and the serviceHealthServer
@@ -1494,11 +1494,13 @@ func (proxier *Proxier) syncProxyRules() {
 		proxier.logger.Error(err, "Error syncing healthcheck endpoints")
 	}
 
-	metrics.SyncProxyRulesNoLocalEndpointsTotal.WithLabelValues("internal").Set(float64(proxier.serviceNoLocalEndpointsInternal.Len()))
-	metrics.SyncProxyRulesNoLocalEndpointsTotal.WithLabelValues("external").Set(float64(proxier.serviceNoLocalEndpointsExternal.Len()))
+	metrics.SyncProxyRulesNoLocalEndpointsTotal.WithLabelValues("internal", string(proxier.ipFamily)).Set(float64(proxier.serviceNoLocalEndpointsInternal.Len()))
+	metrics.SyncProxyRulesNoLocalEndpointsTotal.WithLabelValues("external", string(proxier.ipFamily)).Set(float64(proxier.serviceNoLocalEndpointsExternal.Len()))
 
-	// Finish housekeeping, clear stale conntrack entries for UDP Services
-	conntrack.CleanStaleEntries(proxier.conntrack, proxier.ipFamily, proxier.svcPortMap, serviceUpdateResult, endpointUpdateResult)
+	if endpointUpdateResult.ConntrackCleanupRequired {
+		// Finish housekeeping, clear stale conntrack entries for UDP Services
+		conntrack.CleanStaleEntries(proxier.conntrack, proxier.ipFamily, proxier.svcPortMap, proxier.endpointsMap)
+	}
 }
 
 // writeIptablesRules write all iptables rules to proxier.natRules or proxier.FilterRules that ipvs proxier needed

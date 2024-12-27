@@ -532,7 +532,7 @@ func addAllEventHandlers(
 			}
 		case framework.ResourceSlice:
 			if utilfeature.DefaultFeatureGate.Enabled(features.DynamicResourceAllocation) {
-				if handlerRegistration, err = informerFactory.Resource().V1alpha3().ResourceSlices().Informer().AddEventHandler(
+				if handlerRegistration, err = informerFactory.Resource().V1beta1().ResourceSlices().Informer().AddEventHandler(
 					buildEvtResHandler(at, framework.ResourceSlice),
 				); err != nil {
 					return err
@@ -541,7 +541,7 @@ func addAllEventHandlers(
 			}
 		case framework.DeviceClass:
 			if utilfeature.DefaultFeatureGate.Enabled(features.DynamicResourceAllocation) {
-				if handlerRegistration, err = informerFactory.Resource().V1alpha3().DeviceClasses().Informer().AddEventHandler(
+				if handlerRegistration, err = informerFactory.Resource().V1beta1().DeviceClasses().Informer().AddEventHandler(
 					buildEvtResHandler(at, framework.DeviceClass),
 				); err != nil {
 					return err
@@ -551,6 +551,13 @@ func addAllEventHandlers(
 		case framework.StorageClass:
 			if handlerRegistration, err = informerFactory.Storage().V1().StorageClasses().Informer().AddEventHandler(
 				buildEvtResHandler(at, framework.StorageClass),
+			); err != nil {
+				return err
+			}
+			handlers = append(handlers, handlerRegistration)
+		case framework.VolumeAttachment:
+			if handlerRegistration, err = informerFactory.Storage().V1().VolumeAttachments().Informer().AddEventHandler(
+				buildEvtResHandler(at, framework.VolumeAttachment),
 			); err != nil {
 				return err
 			}
@@ -616,7 +623,9 @@ func preCheckForNode(nodeInfo *framework.NodeInfo) queue.PreEnqueueCheck {
 // returns all failures.
 func AdmissionCheck(pod *v1.Pod, nodeInfo *framework.NodeInfo, includeAllFailures bool) []AdmissionResult {
 	var admissionResults []AdmissionResult
-	insufficientResources := noderesources.Fits(pod, nodeInfo)
+	insufficientResources := noderesources.Fits(pod, nodeInfo, noderesources.ResourceRequestsOptions{
+		EnablePodLevelResources: utilfeature.DefaultFeatureGate.Enabled(features.PodLevelResources),
+	})
 	if len(insufficientResources) != 0 {
 		for i := range insufficientResources {
 			admissionResults = append(admissionResults, AdmissionResult{InsufficientResource: &insufficientResources[i]})

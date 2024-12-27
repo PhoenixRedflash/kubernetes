@@ -69,7 +69,7 @@ type TokensControllerOptions struct {
 }
 
 // NewTokensController returns a new *TokensController.
-func NewTokensController(serviceAccounts informers.ServiceAccountInformer, secrets informers.SecretInformer, cl clientset.Interface, options TokensControllerOptions) (*TokensController, error) {
+func NewTokensController(logger klog.Logger, serviceAccounts informers.ServiceAccountInformer, secrets informers.SecretInformer, cl clientset.Interface, options TokensControllerOptions) (*TokensController, error) {
 	maxRetries := options.MaxRetries
 	if maxRetries == 0 {
 		maxRetries = 10
@@ -104,9 +104,9 @@ func NewTokensController(serviceAccounts informers.ServiceAccountInformer, secre
 	)
 
 	secretCache := secrets.Informer().GetIndexer()
-	e.updatedSecrets = cache.NewIntegerResourceVersionMutationCache(secretCache, secretCache, 60*time.Second, true)
+	e.updatedSecrets = cache.NewIntegerResourceVersionMutationCache(logger, secretCache, secretCache, 60*time.Second, true)
 	e.secretSynced = secrets.Informer().HasSynced
-	secrets.Informer().AddEventHandlerWithResyncPeriod(
+	secrets.Informer().AddEventHandlerWithOptions(
 		cache.FilteringResourceEventHandler{
 			FilterFunc: func(obj interface{}) bool {
 				switch t := obj.(type) {
@@ -123,7 +123,10 @@ func NewTokensController(serviceAccounts informers.ServiceAccountInformer, secre
 				DeleteFunc: e.queueSecretSync,
 			},
 		},
-		options.SecretResync,
+		cache.HandlerOptions{
+			Logger:       &logger,
+			ResyncPeriod: &options.SecretResync,
+		},
 	)
 
 	return e, nil
@@ -409,7 +412,9 @@ func (e *TokensController) generateTokenIfNeeded(logger klog.Logger, serviceAcco
 
 	// Generate the token
 	if needsToken {
-		token, err := e.token.GenerateToken(serviceaccount.LegacyClaims(*serviceAccount, *liveSecret))
+		c, pc := serviceaccount.LegacyClaims(*serviceAccount, *liveSecret)
+		// TODO: need to plumb context if using external signer ever becomes a posibility.
+		token, err := e.token.GenerateToken(context.TODO(), c, pc)
 		if err != nil {
 			return false, err
 		}

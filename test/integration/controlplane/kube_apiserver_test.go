@@ -24,7 +24,6 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -39,7 +38,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/kubernetes"
+	featuregatetesting "k8s.io/component-base/featuregate/testing"
+	"k8s.io/component-base/zpages/features"
 	"k8s.io/kube-aggregator/pkg/apis/apiregistration"
 	"k8s.io/kube-openapi/pkg/validation/spec"
 	kubeapiservertesting "k8s.io/kubernetes/cmd/kube-apiserver/app/testing"
@@ -125,6 +127,36 @@ func TestLivezAndReadyz(t *testing.T) {
 	}
 	if statusOK, err := endpointReturnsStatusOK(client, "/readyz"); err != nil || !statusOK {
 		t.Fatalf("readyz should be healthy, got %v and error %v", statusOK, err)
+	}
+}
+
+func TestFlagz(t *testing.T) {
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.ComponentFlagz, true)
+	server := kubeapiservertesting.StartTestServerOrDie(t, nil, framework.DefaultTestServerFlags(), framework.SharedEtcd())
+	defer server.TearDownFn()
+
+	client, err := kubernetes.NewForConfig(server.ClientConfig)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	res := client.CoreV1().RESTClient().Get().RequestURI("/flagz").Do(context.TODO())
+	var status int
+	res.StatusCode(&status)
+	if status != http.StatusOK {
+		t.Fatalf("flagz/ should be healthy, got %v", status)
+	}
+
+	expectedHeader := `
+kube-apiserver flags
+Warning: This endpoint is not meant to be machine parseable, has no formatting compatibility guarantees and is for debugging purposes only.`
+
+	raw, err := res.Raw()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(raw, []byte(expectedHeader)) {
+		t.Fatalf("Header mismatch!\nExpected:\n%s\n\nGot:\n%s", expectedHeader, string(raw))
 	}
 }
 
@@ -440,22 +472,16 @@ func testReconcilersAPIServerLease(t *testing.T, leaseCount int, apiServerCount 
 
 	instanceOptions := kubeapiservertesting.NewDefaultTestServerOptions()
 
-	wg := sync.WaitGroup{}
 	// 1. start apiServerCount api servers
 	for i := 0; i < apiServerCount; i++ {
 		// start count api server
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			server := kubeapiservertesting.StartTestServerOrDie(t, instanceOptions, []string{
-				"--endpoint-reconciler-type", "master-count",
-				"--advertise-address", fmt.Sprintf("10.0.1.%v", i+1),
-				"--apiserver-count", fmt.Sprintf("%v", apiServerCount),
-			}, etcd)
-			apiServerCountServers[i] = server
-		}(i)
+		server := kubeapiservertesting.StartTestServerOrDie(t, instanceOptions, []string{
+			"--endpoint-reconciler-type", "master-count",
+			"--advertise-address", fmt.Sprintf("10.0.1.%v", i+1),
+			"--apiserver-count", fmt.Sprintf("%v", apiServerCount),
+		}, etcd)
+		apiServerCountServers[i] = server
 	}
-	wg.Wait()
 
 	// 2. verify API Server count servers have registered
 	if err := wait.PollImmediate(3*time.Second, 2*time.Minute, func() (bool, error) {
@@ -476,18 +502,14 @@ func testReconcilersAPIServerLease(t *testing.T, leaseCount int, apiServerCount 
 
 	// 3. start lease api servers
 	for i := 0; i < leaseCount; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			options := []string{
-				"--endpoint-reconciler-type", "lease",
-				"--advertise-address", fmt.Sprintf("10.0.1.%v", i+10),
-			}
-			server := kubeapiservertesting.StartTestServerOrDie(t, instanceOptions, options, etcd)
-			leaseServers[i] = server
-		}(i)
+		options := []string{
+			"--endpoint-reconciler-type", "lease",
+			"--advertise-address", fmt.Sprintf("10.0.1.%v", i+10),
+		}
+		server := kubeapiservertesting.StartTestServerOrDie(t, instanceOptions, options, etcd)
+		leaseServers[i] = server
 	}
-	wg.Wait()
+
 	defer func() {
 		for i := 0; i < leaseCount; i++ {
 			leaseServers[i].TearDownFn()

@@ -330,6 +330,19 @@
     resources are available.
   release: v1.16
   file: test/e2e/apimachinery/custom_resource_definition.go
+- testname: custom-resource-definition-field-selectors-list-watch-register-informers
+  codename: '[sig-api-machinery] CustomResourceFieldSelectors [Privileged:ClusterAdmin]
+    CustomResourceFieldSelectors MUST list and watch custom resources matching the
+    field selector [Conformance]'
+  description: Create a Custom Resource Definition with SelectableFields. Create a
+    custom resource with two versions and a conversion webhook that converts between
+    the versions. Attempt to list, watch and register informers for the custom resources
+    with field selectors; the lists, watches and informers MUST return only custom
+    resources matching the field selector. Delete and update some of the resources
+    with field selectors; the lists, watches and informers MUST return only the custom
+    resources matching custom resources.
+  release: v1.32
+  file: test/e2e/apimachinery/crd_selectable_fields.go
 - testname: Custom Resource OpenAPI Publish, stop serving version
   codename: '[sig-api-machinery] CustomResourcePublishOpenAPI [Privileged:ClusterAdmin]
     removes definition from spec when one version gets changed to not be served [Conformance]'
@@ -1326,6 +1339,14 @@
     and 3c the ServiceTokenVolume MUST not be auto mounted.
   release: v1.9
   file: test/e2e/auth/service_accounts.go
+- testname: ServiceAccount, create and review token
+  codename: '[sig-auth] ServiceAccounts should create a serviceAccountToken and ensure
+    a successful TokenReview [Conformance]'
+  description: Creating a ServiceAccount MUST succeed. Creating a ServiceAccountToken
+    MUST succeed. The token MUST not be empty. Creating a TokenReview MUST succeed.
+    The TokenReview MUST be authenticated without any errors.
+  release: v1.32
+  file: test/e2e/auth/service_accounts.go
 - testname: RootCA ConfigMap test
   codename: '[sig-auth] ServiceAccounts should guarantee kube-root-ca.crt exist in
     any namespace [Conformance]'
@@ -2138,6 +2159,14 @@
     Specify host IP as environment variable in the Pod Spec are visible at runtime
     in the container.
   release: v1.9
+  file: test/e2e/common/node/downwardapi.go
+- testname: DownwardAPI, environment for hostIPs
+  codename: '[sig-node] Downward API should provide hostIPs as an env var [NodeConformance]
+    [Conformance]'
+  description: Downward API MUST expose Pod and Container fields as environment variables.
+    Specify hostIPs as environment variable in the Pod Spec are visible at runtime
+    in the container.
+  release: v1.32
   file: test/e2e/common/node/downwardapi.go
 - testname: DownwardAPI, environment for Pod UID
   codename: '[sig-node] Downward API should provide pod UID as env vars [NodeConformance]

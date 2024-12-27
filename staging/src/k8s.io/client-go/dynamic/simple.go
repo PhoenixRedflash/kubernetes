@@ -25,12 +25,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/features"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/apply"
 	"k8s.io/client-go/util/consistencydetector"
 	"k8s.io/client-go/util/watchlist"
 	"k8s.io/klog/v2"
@@ -49,9 +49,9 @@ func ConfigFor(inConfig *rest.Config) *rest.Config {
 
 	config.ContentType = "application/json"
 	config.AcceptContentTypes = "application/json"
-	if features.TestOnlyFeatureGates.Enabled(features.TestOnlyClientAllowsCBOR) {
+	if features.FeatureGates().Enabled(features.ClientsAllowCBOR) {
 		config.AcceptContentTypes = "application/json;q=0.9,application/cbor;q=1"
-		if features.TestOnlyFeatureGates.Enabled(features.TestOnlyClientPrefersCBOR) {
+		if features.FeatureGates().Enabled(features.ClientsPreferCBOR) {
 			config.ContentType = "application/cbor"
 		}
 	}
@@ -340,10 +340,6 @@ func (c *dynamicResourceClient) Apply(ctx context.Context, name string, obj *uns
 	if err := validateNamespaceWithOptionalName(c.namespace, name); err != nil {
 		return nil, err
 	}
-	outBytes, err := runtime.Encode(unstructured.UnstructuredJSONScheme, obj)
-	if err != nil {
-		return nil, err
-	}
 	accessor, err := meta.Accessor(obj)
 	if err != nil {
 		return nil, err
@@ -355,21 +351,16 @@ func (c *dynamicResourceClient) Apply(ctx context.Context, name string, obj *uns
 	}
 	patchOpts := opts.ToPatchOptions()
 
-	result := c.client.client.
-		Patch(types.ApplyPatchType).
-		AbsPath(append(c.makeURLSegments(name), subresources...)...).
-		Body(outBytes).
-		SpecificallyVersionedParams(&patchOpts, dynamicParameterCodec, versionV1).
-		Do(ctx)
-	if err := result.Error(); err != nil {
-		return nil, err
-	}
-	retBytes, err := result.Raw()
+	request, err := apply.NewRequest(c.client.client, obj.Object)
 	if err != nil {
 		return nil, err
 	}
+
 	var out unstructured.Unstructured
-	if err := runtime.DecodeInto(unstructured.UnstructuredJSONScheme, retBytes, &out); err != nil {
+	if err := request.
+		AbsPath(append(c.makeURLSegments(name), subresources...)...).
+		SpecificallyVersionedParams(&patchOpts, dynamicParameterCodec, versionV1).
+		Do(ctx).Into(&out); err != nil {
 		return nil, err
 	}
 	return &out, nil

@@ -40,10 +40,7 @@ import (
 )
 
 const (
-	nodeShutdownNotAdmittedReason  = "NodeShutdown"
-	nodeShutdownNotAdmittedMessage = "Pod was rejected as the node is shutting down."
-	dbusReconnectPeriod            = 1 * time.Second
-	localStorageStateFile          = "graceful_node_shutdown_state"
+	dbusReconnectPeriod = 1 * time.Second
 )
 
 var systemDbus = func() (dbusInhibiter, error) {
@@ -123,7 +120,7 @@ func (m *managerImpl) Admit(attrs *lifecycle.PodAdmitAttributes) lifecycle.PodAd
 	if nodeShuttingDown {
 		return lifecycle.PodAdmitResult{
 			Admit:   false,
-			Reason:  nodeShutdownNotAdmittedReason,
+			Reason:  NodeShutdownNotAdmittedReason,
 			Message: nodeShutdownNotAdmittedMessage,
 		}
 	}
@@ -321,7 +318,7 @@ func (m *managerImpl) processShutdownEvent() error {
 			if err != nil {
 				m.logger.Error(err, "Failed to store graceful shutdown state")
 			}
-			metrics.GracefulShutdownStartTime.Set(timestamp(endTime))
+			metrics.GracefulShutdownEndTime.Set(timestamp(endTime))
 		}()
 	}
 

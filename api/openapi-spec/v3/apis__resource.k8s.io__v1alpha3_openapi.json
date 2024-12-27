@@ -86,6 +86,64 @@
         "type": "object",
         "x-kubernetes-map-type": "atomic"
       },
+      "io.k8s.api.resource.v1alpha3.AllocatedDeviceStatus": {
+        "description": "AllocatedDeviceStatus contains the status of an allocated device, if the driver chooses to report it. This may include driver-specific information.",
+        "properties": {
+          "conditions": {
+            "description": "Conditions contains the latest observation of the device's state. If the device has been configured according to the class and claim config references, the `Ready` condition should be True.",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Condition"
+                }
+              ],
+              "default": {}
+            },
+            "type": "array",
+            "x-kubernetes-list-map-keys": [
+              "type"
+            ],
+            "x-kubernetes-list-type": "map"
+          },
+          "data": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.runtime.RawExtension"
+              }
+            ],
+            "description": "Data contains arbitrary driver-specific data.\n\nThe length of the raw data must be smaller or equal to 10 Ki."
+          },
+          "device": {
+            "default": "",
+            "description": "Device references one device instance via its name in the driver's resource pool. It must be a DNS label.",
+            "type": "string"
+          },
+          "driver": {
+            "default": "",
+            "description": "Driver specifies the name of the DRA driver whose kubelet plugin should be invoked to process the allocation once the claim is needed on a node.\n\nMust be a DNS subdomain and should end with a DNS domain owned by the vendor of the driver.",
+            "type": "string"
+          },
+          "networkData": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.NetworkDeviceData"
+              }
+            ],
+            "description": "NetworkData contains network-related information specific to the device."
+          },
+          "pool": {
+            "default": "",
+            "description": "This name together with the driver name and the device name field identify which device was allocated (`<driver name>/<pool name>/<device name>`).\n\nMust not be longer than 253 characters and may contain one or more DNS sub-domains separated by slashes.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "driver",
+          "pool",
+          "device"
+        ],
+        "type": "object"
+      },
       "io.k8s.api.resource.v1alpha3.AllocationResult": {
         "description": "AllocationResult contains attributes of an allocated resource.",
         "properties": {
@@ -139,7 +197,7 @@
         "properties": {
           "expression": {
             "default": "",
-            "description": "Expression is a CEL expression which evaluates a single device. It must evaluate to true when the device under consideration satisfies the desired criteria, and false when it does not. Any other result is an error and causes allocation of devices to abort.\n\nThe expression's input is an object named \"device\", which carries the following properties:\n - driver (string): the name of the driver which defines this device.\n - attributes (map[string]object): the device's attributes, grouped by prefix\n   (e.g. device.attributes[\"dra.example.com\"] evaluates to an object with all\n   of the attributes which were prefixed by \"dra.example.com\".\n - capacity (map[string]object): the device's capacities, grouped by prefix.\n\nExample: Consider a device with driver=\"dra.example.com\", which exposes two attributes named \"model\" and \"ext.example.com/family\" and which exposes one capacity named \"modules\". This input to this expression would have the following fields:\n\n    device.driver\n    device.attributes[\"dra.example.com\"].model\n    device.attributes[\"ext.example.com\"].family\n    device.capacity[\"dra.example.com\"].modules\n\nThe device.driver field can be used to check for a specific driver, either as a high-level precondition (i.e. you only want to consider devices from this driver) or as part of a multi-clause expression that is meant to consider devices from different drivers.\n\nThe value type of each attribute is defined by the device definition, and users who write these expressions must consult the documentation for their specific drivers. The value type of each capacity is Quantity.\n\nIf an unknown prefix is used as a lookup in either device.attributes or device.capacity, an empty map will be returned. Any reference to an unknown field will cause an evaluation error and allocation to abort.\n\nA robust expression should check for the existence of attributes before referencing them.\n\nFor ease of use, the cel.bind() function is enabled, and can be used to simplify expressions that access multiple attributes with the same domain. For example:\n\n    cel.bind(dra, device.attributes[\"dra.example.com\"], dra.someBool && dra.anotherBool)",
+            "description": "Expression is a CEL expression which evaluates a single device. It must evaluate to true when the device under consideration satisfies the desired criteria, and false when it does not. Any other result is an error and causes allocation of devices to abort.\n\nThe expression's input is an object named \"device\", which carries the following properties:\n - driver (string): the name of the driver which defines this device.\n - attributes (map[string]object): the device's attributes, grouped by prefix\n   (e.g. device.attributes[\"dra.example.com\"] evaluates to an object with all\n   of the attributes which were prefixed by \"dra.example.com\".\n - capacity (map[string]object): the device's capacities, grouped by prefix.\n\nExample: Consider a device with driver=\"dra.example.com\", which exposes two attributes named \"model\" and \"ext.example.com/family\" and which exposes one capacity named \"modules\". This input to this expression would have the following fields:\n\n    device.driver\n    device.attributes[\"dra.example.com\"].model\n    device.attributes[\"ext.example.com\"].family\n    device.capacity[\"dra.example.com\"].modules\n\nThe device.driver field can be used to check for a specific driver, either as a high-level precondition (i.e. you only want to consider devices from this driver) or as part of a multi-clause expression that is meant to consider devices from different drivers.\n\nThe value type of each attribute is defined by the device definition, and users who write these expressions must consult the documentation for their specific drivers. The value type of each capacity is Quantity.\n\nIf an unknown prefix is used as a lookup in either device.attributes or device.capacity, an empty map will be returned. Any reference to an unknown field will cause an evaluation error and allocation to abort.\n\nA robust expression should check for the existence of attributes before referencing them.\n\nFor ease of use, the cel.bind() function is enabled, and can be used to simplify expressions that access multiple attributes with the same domain. For example:\n\n    cel.bind(dra, device.attributes[\"dra.example.com\"], dra.someBool && dra.anotherBool)\n\nThe length of the expression must be smaller or equal to 10 Ki. The cost of evaluating it is also limited based on the estimated number of logical steps.",
             "type": "string"
           }
         },
@@ -480,8 +538,7 @@
         "description": "DeviceRequest is a request for devices required for a claim. This is typically a request for a single resource like a device, but can also ask for several identical devices.\n\nA DeviceClassName is currently required. Clients must check that it is indeed set. It's absence indicates that something changed in a way that is not supported by the client yet, in which case it must refuse to handle the request.",
         "properties": {
           "adminAccess": {
-            "default": false,
-            "description": "AdminAccess indicates that this is a claim for administrative access to the device(s). Claims with AdminAccess are expected to be used for monitoring or other management services for a device.  They ignore all ordinary claims to the device with respect to access modes and any resource allocations.",
+            "description": "AdminAccess indicates that this is a claim for administrative access to the device(s). Claims with AdminAccess are expected to be used for monitoring or other management services for a device.  They ignore all ordinary claims to the device with respect to access modes and any resource allocations.\n\nThis is an alpha field and requires enabling the DRAAdminAccess feature gate. Admin access is disabled if this field is unset or set to false, otherwise it is enabled.",
             "type": "boolean"
           },
           "allocationMode": {
@@ -526,6 +583,10 @@
       "io.k8s.api.resource.v1alpha3.DeviceRequestAllocationResult": {
         "description": "DeviceRequestAllocationResult contains the allocation result for one request.",
         "properties": {
+          "adminAccess": {
+            "description": "AdminAccess indicates that this device was allocated for administrative access. See the corresponding request field for a definition of mode.\n\nThis is an alpha field and requires enabling the DRAAdminAccess feature gate. Admin access is disabled if this field is unset or set to false, otherwise it is enabled.",
+            "type": "boolean"
+          },
           "device": {
             "default": "",
             "description": "Device references one device instance via its name in the driver's resource pool. It must be a DNS label.",
@@ -569,6 +630,29 @@
         },
         "type": "object"
       },
+      "io.k8s.api.resource.v1alpha3.NetworkDeviceData": {
+        "description": "NetworkDeviceData provides network-related details for the allocated device. This information may be filled by drivers or other components to configure or identify the device within a network context.",
+        "properties": {
+          "hardwareAddress": {
+            "description": "HardwareAddress represents the hardware address (e.g. MAC Address) of the device's network interface.\n\nMust not be longer than 128 characters.",
+            "type": "string"
+          },
+          "interfaceName": {
+            "description": "InterfaceName specifies the name of the network interface associated with the allocated device. This might be the name of a physical or virtual network interface being configured in the pod.\n\nMust not be longer than 256 characters.",
+            "type": "string"
+          },
+          "ips": {
+            "description": "IPs lists the network addresses assigned to the device's network interface. This can include both IPv4 and IPv6 addresses. The IPs are in the CIDR notation, which includes both the address and the associated subnet mask. e.g.: \"192.0.2.5/24\" for IPv4 and \"2001:db8::5/64\" for IPv6.",
+            "items": {
+              "default": "",
+              "type": "string"
+            },
+            "type": "array",
+            "x-kubernetes-list-type": "atomic"
+          }
+        },
+        "type": "object"
+      },
       "io.k8s.api.resource.v1alpha3.OpaqueDeviceConfiguration": {
         "description": "OpaqueDeviceConfiguration contains configuration parameters for a driver in a format defined by the driver vendor.",
         "properties": {
@@ -583,7 +667,7 @@
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.runtime.RawExtension"
               }
             ],
-            "description": "Parameters can contain arbitrary data. It is the responsibility of the driver developer to handle validation and versioning. Typically this includes self-identification and a version (\"kind\" + \"apiVersion\" for Kubernetes types), with conversion between different versions."
+            "description": "Parameters can contain arbitrary data. It is the responsibility of the driver developer to handle validation and versioning. Typically this includes self-identification and a version (\"kind\" + \"apiVersion\" for Kubernetes types), with conversion between different versions.\n\nThe length of the raw data must be smaller or equal to 10 Ki."
           }
         },
         "required": [
@@ -743,6 +827,24 @@
               }
             ],
             "description": "Allocation is set once the claim has been allocated successfully."
+          },
+          "devices": {
+            "description": "Devices contains the status of each device allocated for this claim, as reported by the driver. This can include driver-specific information. Entries are owned by their respective drivers.",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.AllocatedDeviceStatus"
+                }
+              ],
+              "default": {}
+            },
+            "type": "array",
+            "x-kubernetes-list-map-keys": [
+              "driver",
+              "device",
+              "pool"
+            ],
+            "x-kubernetes-list-type": "map"
           },
           "reservedFor": {
             "description": "ReservedFor indicates which entities are currently allowed to use the claim. A Pod which references a ResourceClaim which is not reserved for that Pod will not be started. A claim that is in use or might be in use because it has been reserved must not get deallocated.\n\nIn a cluster with multiple scheduler instances, two pods might get scheduled concurrently by different schedulers. When they reference the same ResourceClaim which already has reached its maximum number of consumers, only one pod can be scheduled.\n\nBoth schedulers try to add their pod to the claim.status.reservedFor field, but only the update that reaches the API server first gets stored. The other one fails with an error and the scheduler which issued it knows that it must put the pod back into the queue, waiting for the ResourceClaim to become usable again.\n\nThere can be at most 32 such reservations. This may get increased in the future, but not reduced.",
@@ -1172,6 +1274,52 @@
           }
         ]
       },
+      "io.k8s.apimachinery.pkg.apis.meta.v1.Condition": {
+        "description": "Condition contains details for one aspect of the current state of this API Resource.",
+        "properties": {
+          "lastTransitionTime": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Time"
+              }
+            ],
+            "description": "lastTransitionTime is the last time the condition transitioned from one status to another. This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable."
+          },
+          "message": {
+            "default": "",
+            "description": "message is a human readable message indicating details about the transition. This may be an empty string.",
+            "type": "string"
+          },
+          "observedGeneration": {
+            "description": "observedGeneration represents the .metadata.generation that the condition was set based upon. For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date with respect to the current state of the instance.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "reason": {
+            "default": "",
+            "description": "reason contains a programmatic identifier indicating the reason for the condition's last transition. Producers of specific condition types may define expected values and meanings for this field, and whether the values are considered a guaranteed API. The value should be a CamelCase string. This field may not be empty.",
+            "type": "string"
+          },
+          "status": {
+            "default": "",
+            "description": "status of the condition, one of True, False, Unknown.",
+            "type": "string"
+          },
+          "type": {
+            "default": "",
+            "description": "type of condition in CamelCase or in foo.example.com/CamelCase.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "status",
+          "lastTransitionTime",
+          "reason",
+          "message"
+        ],
+        "type": "object"
+      },
       "io.k8s.apimachinery.pkg.apis.meta.v1.DeleteOptions": {
         "description": "DeleteOptions may be provided when deleting an API object.",
         "properties": {
@@ -1192,6 +1340,10 @@
             "description": "The duration in seconds before the object should be deleted. Value must be non-negative integer. The value zero indicates delete immediately. If this value is nil, the default grace period for the specified type will be used. Defaults to a per object value if not specified. zero means delete immediately.",
             "format": "int64",
             "type": "integer"
+          },
+          "ignoreStoreReadErrorWithClusterBreakingPotential": {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "type": "boolean"
           },
           "kind": {
             "description": "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
@@ -1359,7 +1511,7 @@
           {
             "group": "coordination.k8s.io",
             "kind": "DeleteOptions",
-            "version": "v1alpha1"
+            "version": "v1alpha2"
           },
           {
             "group": "coordination.k8s.io",
@@ -1480,6 +1632,11 @@
             "group": "resource.k8s.io",
             "kind": "DeleteOptions",
             "version": "v1alpha3"
+          },
+          {
+            "group": "resource.k8s.io",
+            "kind": "DeleteOptions",
+            "version": "v1beta1"
           },
           {
             "group": "scheduling.k8s.io",
@@ -2043,7 +2200,7 @@
           {
             "group": "coordination.k8s.io",
             "kind": "WatchEvent",
-            "version": "v1alpha1"
+            "version": "v1alpha2"
           },
           {
             "group": "coordination.k8s.io",
@@ -2166,6 +2323,11 @@
             "version": "v1alpha3"
           },
           {
+            "group": "resource.k8s.io",
+            "kind": "WatchEvent",
+            "version": "v1beta1"
+          },
+          {
             "group": "scheduling.k8s.io",
             "kind": "WatchEvent",
             "version": "v1"
@@ -2229,6 +2391,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.APIResourceList"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.APIResourceList"
@@ -2294,6 +2461,15 @@
             "name": "gracePeriodSeconds",
             "schema": {
               "type": "integer",
+              "uniqueItems": true
+            }
+          },
+          {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
               "uniqueItems": true
             }
           },
@@ -2382,6 +2558,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
@@ -2512,6 +2693,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClassList"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClassList"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClassList"
@@ -2610,6 +2801,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
@@ -2630,6 +2826,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
@@ -2650,6 +2851,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
@@ -2707,6 +2913,15 @@
             }
           },
           {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
+              "uniqueItems": true
+            }
+          },
+          {
             "description": "Deprecated: please use the PropagationPolicy, this field will be deprecated in 1.7. Should the dependent objects be orphaned. If true/false, the \"orphan\" finalizer will be added to/removed from the object's finalizers list. Either this field or PropagationPolicy may be set, but not both.",
             "in": "query",
             "name": "orphanDependents",
@@ -2737,6 +2952,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
@@ -2757,6 +2977,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
@@ -2795,6 +3020,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
@@ -2891,6 +3121,11 @@
         ],
         "requestBody": {
           "content": {
+            "application/apply-patch+cbor": {
+              "schema": {
+                "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
+              }
+            },
             "application/apply-patch+yaml": {
               "schema": {
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
@@ -2917,6 +3152,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
@@ -2937,6 +3177,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
@@ -3014,6 +3259,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
@@ -3034,6 +3284,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.DeviceClass"
@@ -3105,6 +3360,15 @@
             "name": "gracePeriodSeconds",
             "schema": {
               "type": "integer",
+              "uniqueItems": true
+            }
+          },
+          {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
               "uniqueItems": true
             }
           },
@@ -3193,6 +3457,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
@@ -3323,6 +3592,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimList"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimList"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimList"
@@ -3431,6 +3710,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
@@ -3451,6 +3735,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
@@ -3471,6 +3760,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
@@ -3528,6 +3822,15 @@
             }
           },
           {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
+              "uniqueItems": true
+            }
+          },
+          {
             "description": "Deprecated: please use the PropagationPolicy, this field will be deprecated in 1.7. Should the dependent objects be orphaned. If true/false, the \"orphan\" finalizer will be added to/removed from the object's finalizers list. Either this field or PropagationPolicy may be set, but not both.",
             "in": "query",
             "name": "orphanDependents",
@@ -3558,6 +3861,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
@@ -3578,6 +3886,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
@@ -3616,6 +3929,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
@@ -3722,6 +4040,11 @@
         ],
         "requestBody": {
           "content": {
+            "application/apply-patch+cbor": {
+              "schema": {
+                "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
+              }
+            },
             "application/apply-patch+yaml": {
               "schema": {
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
@@ -3748,6 +4071,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
@@ -3768,6 +4096,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
@@ -3845,6 +4178,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
@@ -3865,6 +4203,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
@@ -3905,6 +4248,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
@@ -4011,6 +4359,11 @@
         ],
         "requestBody": {
           "content": {
+            "application/apply-patch+cbor": {
+              "schema": {
+                "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
+              }
+            },
             "application/apply-patch+yaml": {
               "schema": {
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
@@ -4037,6 +4390,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
@@ -4057,6 +4415,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
@@ -4134,6 +4497,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
@@ -4154,6 +4522,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaim"
@@ -4225,6 +4598,15 @@
             "name": "gracePeriodSeconds",
             "schema": {
               "type": "integer",
+              "uniqueItems": true
+            }
+          },
+          {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
               "uniqueItems": true
             }
           },
@@ -4313,6 +4695,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
@@ -4443,6 +4830,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplateList"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplateList"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplateList"
@@ -4551,6 +4948,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
@@ -4571,6 +4973,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
@@ -4591,6 +4998,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
@@ -4648,6 +5060,15 @@
             }
           },
           {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
+              "uniqueItems": true
+            }
+          },
+          {
             "description": "Deprecated: please use the PropagationPolicy, this field will be deprecated in 1.7. Should the dependent objects be orphaned. If true/false, the \"orphan\" finalizer will be added to/removed from the object's finalizers list. Either this field or PropagationPolicy may be set, but not both.",
             "in": "query",
             "name": "orphanDependents",
@@ -4678,6 +5099,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
@@ -4698,6 +5124,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
@@ -4736,6 +5167,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
@@ -4842,6 +5278,11 @@
         ],
         "requestBody": {
           "content": {
+            "application/apply-patch+cbor": {
+              "schema": {
+                "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
+              }
+            },
             "application/apply-patch+yaml": {
               "schema": {
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
@@ -4868,6 +5309,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
@@ -4888,6 +5334,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
@@ -4965,6 +5416,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
@@ -4985,6 +5441,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplate"
@@ -5025,6 +5486,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimList"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimList"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimList"
@@ -5176,6 +5647,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplateList"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplateList"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceClaimTemplateList"
@@ -5362,6 +5843,15 @@
             }
           },
           {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
+              "uniqueItems": true
+            }
+          },
+          {
             "description": "A selector to restrict the list of returned objects by their labels. Defaults to everything.",
             "in": "query",
             "name": "labelSelector",
@@ -5446,6 +5936,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Status"
@@ -5576,6 +6071,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSliceList"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSliceList"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSliceList"
@@ -5674,6 +6179,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
@@ -5694,6 +6204,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
@@ -5714,6 +6229,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
@@ -5771,6 +6291,15 @@
             }
           },
           {
+            "description": "if set to true, it will trigger an unsafe deletion of the resource in case the normal deletion flow fails with a corrupt object error. A resource is considered corrupt if it can not be retrieved from the underlying storage successfully because of a) its data can not be transformed e.g. decryption failure, or b) it fails to decode into an object. NOTE: unsafe deletion ignores finalizer constraints, skips precondition checks, and removes the object from the storage. WARNING: This may potentially break the cluster if the workload associated with the resource being unsafe-deleted relies on normal deletion flow. Use only if you REALLY know what you are doing. The default value is false, and the user must opt in to enable it",
+            "in": "query",
+            "name": "ignoreStoreReadErrorWithClusterBreakingPotential",
+            "schema": {
+              "type": "boolean",
+              "uniqueItems": true
+            }
+          },
+          {
             "description": "Deprecated: please use the PropagationPolicy, this field will be deprecated in 1.7. Should the dependent objects be orphaned. If true/false, the \"orphan\" finalizer will be added to/removed from the object's finalizers list. Either this field or PropagationPolicy may be set, but not both.",
             "in": "query",
             "name": "orphanDependents",
@@ -5801,6 +6330,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
@@ -5821,6 +6355,11 @@
           },
           "202": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
@@ -5859,6 +6398,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
@@ -5955,6 +6499,11 @@
         ],
         "requestBody": {
           "content": {
+            "application/apply-patch+cbor": {
+              "schema": {
+                "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
+              }
+            },
             "application/apply-patch+yaml": {
               "schema": {
                 "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Patch"
@@ -5981,6 +6530,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
@@ -6001,6 +6555,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
@@ -6078,6 +6637,11 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
@@ -6098,6 +6662,11 @@
           },
           "201": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.api.resource.v1alpha3.ResourceSlice"
@@ -6138,6 +6707,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -6289,6 +6868,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -6450,6 +7039,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -6611,6 +7210,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -6782,6 +7391,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -6943,6 +7562,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -7114,6 +7743,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -7265,6 +7904,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -7416,6 +8065,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
@@ -7567,6 +8226,16 @@
         "responses": {
           "200": {
             "content": {
+              "application/cbor": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
+              "application/cbor-seq": {
+                "schema": {
+                  "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"
+                }
+              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.WatchEvent"

@@ -55,17 +55,18 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/flowcontrol"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
+	"k8s.io/component-base/metrics/testutil"
 	internalapi "k8s.io/cri-api/pkg/apis"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 	remote "k8s.io/cri-client/pkg"
 	fakeremote "k8s.io/cri-client/pkg/fake"
 	"k8s.io/klog/v2"
-	"k8s.io/klog/v2/ktesting"
 	"k8s.io/kubernetes/pkg/features"
 	kubeletconfiginternal "k8s.io/kubernetes/pkg/kubelet/apis/config"
 	cadvisortest "k8s.io/kubernetes/pkg/kubelet/cadvisor/testing"
 	"k8s.io/kubernetes/pkg/kubelet/clustertrustbundle"
 	"k8s.io/kubernetes/pkg/kubelet/cm"
+	"k8s.io/kubernetes/pkg/kubelet/cm/topologymanager"
 	"k8s.io/kubernetes/pkg/kubelet/config"
 	"k8s.io/kubernetes/pkg/kubelet/configmap"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
@@ -75,6 +76,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/kuberuntime"
 	"k8s.io/kubernetes/pkg/kubelet/lifecycle"
 	"k8s.io/kubernetes/pkg/kubelet/logs"
+	"k8s.io/kubernetes/pkg/kubelet/metrics"
 	"k8s.io/kubernetes/pkg/kubelet/network/dns"
 	"k8s.io/kubernetes/pkg/kubelet/nodeshutdown"
 	"k8s.io/kubernetes/pkg/kubelet/pleg"
@@ -90,12 +92,14 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/status"
 	"k8s.io/kubernetes/pkg/kubelet/status/state"
 	statustest "k8s.io/kubernetes/pkg/kubelet/status/testing"
+	"k8s.io/kubernetes/pkg/kubelet/sysctl"
 	"k8s.io/kubernetes/pkg/kubelet/token"
 	kubetypes "k8s.io/kubernetes/pkg/kubelet/types"
 	kubeletutil "k8s.io/kubernetes/pkg/kubelet/util"
 	"k8s.io/kubernetes/pkg/kubelet/util/queue"
 	kubeletvolume "k8s.io/kubernetes/pkg/kubelet/volumemanager"
 	schedulerframework "k8s.io/kubernetes/pkg/scheduler/framework"
+	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/tainttoleration"
 	"k8s.io/kubernetes/pkg/util/oom"
 	"k8s.io/kubernetes/pkg/volume"
 	_ "k8s.io/kubernetes/pkg/volume/hostpath"
@@ -104,6 +108,7 @@ import (
 	"k8s.io/kubernetes/pkg/volume/util"
 	"k8s.io/kubernetes/pkg/volume/util/hostutil"
 	"k8s.io/kubernetes/pkg/volume/util/subpath"
+	"k8s.io/kubernetes/test/utils/ktesting"
 	"k8s.io/utils/clock"
 	testingclock "k8s.io/utils/clock/testing"
 	"k8s.io/utils/ptr"
@@ -2583,6 +2588,8 @@ func TestHandlePodResourcesResize(t *testing.T) {
 	defer testKubelet.Cleanup()
 	kubelet := testKubelet.kubelet
 
+	cpu1m := resource.MustParse("1m")
+	cpu2m := resource.MustParse("2m")
 	cpu500m := resource.MustParse("500m")
 	cpu1000m := resource.MustParse("1")
 	cpu1500m := resource.MustParse("1500m")
@@ -2665,81 +2672,241 @@ func TestHandlePodResourcesResize(t *testing.T) {
 	defer kubelet.podManager.RemovePod(testPod1)
 
 	tests := []struct {
-		name                string
-		pod                 *v1.Pod
-		newRequests         v1.ResourceList
-		expectedAllocations v1.ResourceList
-		expectedResize      v1.PodResizeStatus
+		name                  string
+		originalRequests      v1.ResourceList
+		newRequests           v1.ResourceList
+		originalLimits        v1.ResourceList
+		newLimits             v1.ResourceList
+		newResourcesAllocated bool // Whether the new requests have already been allocated (but not actuated)
+		expectedAllocatedReqs v1.ResourceList
+		expectedAllocatedLims v1.ResourceList
+		expectedResize        v1.PodResizeStatus
+		expectBackoffReset    bool
+		goos                  string
 	}{
 		{
-			name:                "Request CPU and memory decrease - expect InProgress",
-			pod:                 testPod2,
-			newRequests:         v1.ResourceList{v1.ResourceCPU: cpu500m, v1.ResourceMemory: mem500M},
-			expectedAllocations: v1.ResourceList{v1.ResourceCPU: cpu500m, v1.ResourceMemory: mem500M},
-			expectedResize:      v1.PodResizeStatusInProgress,
+			name:                  "Request CPU and memory decrease - expect InProgress",
+			originalRequests:      v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
+			newRequests:           v1.ResourceList{v1.ResourceCPU: cpu500m, v1.ResourceMemory: mem500M},
+			expectedAllocatedReqs: v1.ResourceList{v1.ResourceCPU: cpu500m, v1.ResourceMemory: mem500M},
+			expectedResize:        v1.PodResizeStatusInProgress,
+			expectBackoffReset:    true,
 		},
 		{
-			name:                "Request CPU increase, memory decrease - expect InProgress",
-			pod:                 testPod2,
-			newRequests:         v1.ResourceList{v1.ResourceCPU: cpu1500m, v1.ResourceMemory: mem500M},
-			expectedAllocations: v1.ResourceList{v1.ResourceCPU: cpu1500m, v1.ResourceMemory: mem500M},
-			expectedResize:      v1.PodResizeStatusInProgress,
+			name:                  "Request CPU increase, memory decrease - expect InProgress",
+			originalRequests:      v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
+			newRequests:           v1.ResourceList{v1.ResourceCPU: cpu1500m, v1.ResourceMemory: mem500M},
+			expectedAllocatedReqs: v1.ResourceList{v1.ResourceCPU: cpu1500m, v1.ResourceMemory: mem500M},
+			expectedResize:        v1.PodResizeStatusInProgress,
+			expectBackoffReset:    true,
 		},
 		{
-			name:                "Request CPU decrease, memory increase - expect InProgress",
-			pod:                 testPod2,
-			newRequests:         v1.ResourceList{v1.ResourceCPU: cpu500m, v1.ResourceMemory: mem1500M},
-			expectedAllocations: v1.ResourceList{v1.ResourceCPU: cpu500m, v1.ResourceMemory: mem1500M},
-			expectedResize:      v1.PodResizeStatusInProgress,
+			name:                  "Request CPU decrease, memory increase - expect InProgress",
+			originalRequests:      v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
+			newRequests:           v1.ResourceList{v1.ResourceCPU: cpu500m, v1.ResourceMemory: mem1500M},
+			expectedAllocatedReqs: v1.ResourceList{v1.ResourceCPU: cpu500m, v1.ResourceMemory: mem1500M},
+			expectedResize:        v1.PodResizeStatusInProgress,
+			expectBackoffReset:    true,
 		},
 		{
-			name:                "Request CPU and memory increase beyond current capacity - expect Deferred",
-			pod:                 testPod2,
-			newRequests:         v1.ResourceList{v1.ResourceCPU: cpu2500m, v1.ResourceMemory: mem2500M},
-			expectedAllocations: v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
-			expectedResize:      v1.PodResizeStatusDeferred,
+			name:                  "Request CPU and memory increase beyond current capacity - expect Deferred",
+			originalRequests:      v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
+			newRequests:           v1.ResourceList{v1.ResourceCPU: cpu2500m, v1.ResourceMemory: mem2500M},
+			expectedAllocatedReqs: v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
+			expectedResize:        v1.PodResizeStatusDeferred,
 		},
 		{
-			name:                "Request CPU decrease and memory increase beyond current capacity - expect Deferred",
-			pod:                 testPod2,
-			newRequests:         v1.ResourceList{v1.ResourceCPU: cpu500m, v1.ResourceMemory: mem2500M},
-			expectedAllocations: v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
-			expectedResize:      v1.PodResizeStatusDeferred,
+			name:                  "Request CPU decrease and memory increase beyond current capacity - expect Deferred",
+			originalRequests:      v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
+			newRequests:           v1.ResourceList{v1.ResourceCPU: cpu500m, v1.ResourceMemory: mem2500M},
+			expectedAllocatedReqs: v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
+			expectedResize:        v1.PodResizeStatusDeferred,
 		},
 		{
-			name:                "Request memory increase beyond node capacity - expect Infeasible",
-			pod:                 testPod2,
-			newRequests:         v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem4500M},
-			expectedAllocations: v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
-			expectedResize:      v1.PodResizeStatusInfeasible,
+			name:                  "Request memory increase beyond node capacity - expect Infeasible",
+			originalRequests:      v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
+			newRequests:           v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem4500M},
+			expectedAllocatedReqs: v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
+			expectedResize:        v1.PodResizeStatusInfeasible,
 		},
 		{
-			name:                "Request CPU increase beyond node capacity - expect Infeasible",
-			pod:                 testPod2,
-			newRequests:         v1.ResourceList{v1.ResourceCPU: cpu5000m, v1.ResourceMemory: mem1000M},
-			expectedAllocations: v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
-			expectedResize:      v1.PodResizeStatusInfeasible,
+			name:                  "Request CPU increase beyond node capacity - expect Infeasible",
+			originalRequests:      v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
+			newRequests:           v1.ResourceList{v1.ResourceCPU: cpu5000m, v1.ResourceMemory: mem1000M},
+			expectedAllocatedReqs: v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
+			expectedResize:        v1.PodResizeStatusInfeasible,
+		},
+		{
+			name:                  "CPU increase in progress - expect InProgress",
+			originalRequests:      v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
+			newRequests:           v1.ResourceList{v1.ResourceCPU: cpu1500m, v1.ResourceMemory: mem1000M},
+			newResourcesAllocated: true,
+			expectedAllocatedReqs: v1.ResourceList{v1.ResourceCPU: cpu1500m, v1.ResourceMemory: mem1000M},
+			expectedResize:        v1.PodResizeStatusInProgress,
+		},
+		{
+			name:                  "No resize",
+			originalRequests:      v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
+			newRequests:           v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
+			expectedAllocatedReqs: v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
+			expectedResize:        "",
+		},
+		{
+			name:                  "windows node, expect Infeasible",
+			originalRequests:      v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
+			newRequests:           v1.ResourceList{v1.ResourceCPU: cpu500m, v1.ResourceMemory: mem500M},
+			expectedAllocatedReqs: v1.ResourceList{v1.ResourceCPU: cpu1000m, v1.ResourceMemory: mem1000M},
+			expectedResize:        v1.PodResizeStatusInfeasible,
+			goos:                  "windows",
+		},
+		{
+			name:                  "Increase CPU from min shares",
+			originalRequests:      v1.ResourceList{v1.ResourceCPU: cpu2m},
+			newRequests:           v1.ResourceList{v1.ResourceCPU: cpu1000m},
+			expectedAllocatedReqs: v1.ResourceList{v1.ResourceCPU: cpu1000m},
+			expectedResize:        v1.PodResizeStatusInProgress,
+			expectBackoffReset:    true,
+		},
+		{
+			name:                  "Decrease CPU to min shares",
+			originalRequests:      v1.ResourceList{v1.ResourceCPU: cpu1000m},
+			newRequests:           v1.ResourceList{v1.ResourceCPU: cpu2m},
+			expectedAllocatedReqs: v1.ResourceList{v1.ResourceCPU: cpu2m},
+			expectedResize:        v1.PodResizeStatusInProgress,
+			expectBackoffReset:    true,
+		},
+		{
+			name:                  "Equivalent min CPU shares",
+			originalRequests:      v1.ResourceList{v1.ResourceCPU: cpu1m},
+			newRequests:           v1.ResourceList{v1.ResourceCPU: cpu2m},
+			expectedAllocatedReqs: v1.ResourceList{v1.ResourceCPU: cpu2m},
+			expectedResize:        "",
+			// Even though the resize isn't being actuated, we still clear the container backoff
+			// since the allocation is changing.
+			expectBackoffReset: true,
+		},
+		{
+			name:                  "Equivalent min CPU shares - already allocated",
+			originalRequests:      v1.ResourceList{v1.ResourceCPU: cpu2m},
+			newRequests:           v1.ResourceList{v1.ResourceCPU: cpu1m},
+			newResourcesAllocated: true,
+			expectedAllocatedReqs: v1.ResourceList{v1.ResourceCPU: cpu1m},
+			expectedResize:        "",
+		},
+		{
+			name:                  "Increase CPU from min limit",
+			originalRequests:      v1.ResourceList{v1.ResourceCPU: resource.MustParse("10m")},
+			originalLimits:        v1.ResourceList{v1.ResourceCPU: resource.MustParse("10m")},
+			newRequests:           v1.ResourceList{v1.ResourceCPU: resource.MustParse("10m")}, // Unchanged
+			newLimits:             v1.ResourceList{v1.ResourceCPU: resource.MustParse("20m")},
+			expectedAllocatedReqs: v1.ResourceList{v1.ResourceCPU: resource.MustParse("10m")},
+			expectedAllocatedLims: v1.ResourceList{v1.ResourceCPU: resource.MustParse("20m")},
+			expectedResize:        v1.PodResizeStatusInProgress,
+			expectBackoffReset:    true,
+		},
+		{
+			name:                  "Decrease CPU to min limit",
+			originalRequests:      v1.ResourceList{v1.ResourceCPU: resource.MustParse("10m")},
+			originalLimits:        v1.ResourceList{v1.ResourceCPU: resource.MustParse("20m")},
+			newRequests:           v1.ResourceList{v1.ResourceCPU: resource.MustParse("10m")}, // Unchanged
+			newLimits:             v1.ResourceList{v1.ResourceCPU: resource.MustParse("10m")},
+			expectedAllocatedReqs: v1.ResourceList{v1.ResourceCPU: resource.MustParse("10m")},
+			expectedAllocatedLims: v1.ResourceList{v1.ResourceCPU: resource.MustParse("10m")},
+			expectedResize:        v1.PodResizeStatusInProgress,
+			expectBackoffReset:    true,
+		},
+		{
+			name:                  "Equivalent min CPU limit",
+			originalRequests:      v1.ResourceList{v1.ResourceCPU: resource.MustParse("5m")},
+			originalLimits:        v1.ResourceList{v1.ResourceCPU: resource.MustParse("5m")},
+			newRequests:           v1.ResourceList{v1.ResourceCPU: resource.MustParse("5m")}, // Unchanged
+			newLimits:             v1.ResourceList{v1.ResourceCPU: resource.MustParse("10m")},
+			expectedAllocatedReqs: v1.ResourceList{v1.ResourceCPU: resource.MustParse("5m")},
+			expectedAllocatedLims: v1.ResourceList{v1.ResourceCPU: resource.MustParse("10m")},
+			expectedResize:        "",
+			// Even though the resize isn't being actuated, we still clear the container backoff
+			// since the allocation is changing.
+			expectBackoffReset: true,
+		},
+		{
+			name:                  "Equivalent min CPU limit - already allocated",
+			originalRequests:      v1.ResourceList{v1.ResourceCPU: resource.MustParse("5m")},
+			originalLimits:        v1.ResourceList{v1.ResourceCPU: resource.MustParse("10m")},
+			newRequests:           v1.ResourceList{v1.ResourceCPU: resource.MustParse("5m")}, // Unchanged
+			newLimits:             v1.ResourceList{v1.ResourceCPU: resource.MustParse("5m")},
+			expectedAllocatedReqs: v1.ResourceList{v1.ResourceCPU: resource.MustParse("5m")},
+			expectedAllocatedLims: v1.ResourceList{v1.ResourceCPU: resource.MustParse("5m")},
+			newResourcesAllocated: true,
+			expectedResize:        "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			oldGOOS := goos
+			defer func() { goos = oldGOOS }()
+			if tt.goos != "" {
+				goos = tt.goos
+			}
 			kubelet.statusManager = status.NewFakeManager()
-			require.NoError(t, kubelet.statusManager.SetPodAllocation(tt.pod))
 
-			pod := tt.pod.DeepCopy()
-			pod.Spec.Containers[0].Resources.Requests = tt.newRequests
-			updatedPod, err := kubelet.handlePodResourcesResize(pod)
+			originalPod := testPod1.DeepCopy()
+			originalPod.Spec.Containers[0].Resources.Requests = tt.originalRequests
+			originalPod.Spec.Containers[0].Resources.Limits = tt.originalLimits
+			kubelet.podManager.UpdatePod(originalPod)
+
+			newPod := originalPod.DeepCopy()
+			newPod.Spec.Containers[0].Resources.Requests = tt.newRequests
+			newPod.Spec.Containers[0].Resources.Limits = tt.newLimits
+
+			if !tt.newResourcesAllocated {
+				require.NoError(t, kubelet.statusManager.SetPodAllocation(originalPod))
+			} else {
+				require.NoError(t, kubelet.statusManager.SetPodAllocation(newPod))
+			}
+
+			podStatus := &kubecontainer.PodStatus{
+				ID:                originalPod.UID,
+				Name:              originalPod.Name,
+				Namespace:         originalPod.Namespace,
+				ContainerStatuses: make([]*kubecontainer.Status, len(originalPod.Spec.Containers)),
+			}
+			for i, c := range originalPod.Spec.Containers {
+				podStatus.ContainerStatuses[i] = &kubecontainer.Status{
+					Name:  c.Name,
+					State: kubecontainer.ContainerStateRunning,
+					Resources: &kubecontainer.ContainerResources{
+						CPURequest:  c.Resources.Requests.Cpu(),
+						CPULimit:    c.Resources.Limits.Cpu(),
+						MemoryLimit: c.Resources.Limits.Memory(),
+					},
+				}
+			}
+
+			now := kubelet.clock.Now()
+			// Put the container in backoff so we can confirm backoff is reset.
+			backoffKey := kuberuntime.GetStableKey(originalPod, &originalPod.Spec.Containers[0])
+			kubelet.backOff.Next(backoffKey, now)
+
+			updatedPod, err := kubelet.handlePodResourcesResize(newPod, podStatus)
 			require.NoError(t, err)
-			assert.Equal(t, tt.expectedAllocations, updatedPod.Spec.Containers[0].Resources.Requests, "updated pod spec resources")
+			assert.Equal(t, tt.expectedAllocatedReqs, updatedPod.Spec.Containers[0].Resources.Requests, "updated pod spec requests")
+			assert.Equal(t, tt.expectedAllocatedLims, updatedPod.Spec.Containers[0].Resources.Limits, "updated pod spec limits")
 
-			alloc, found := kubelet.statusManager.GetContainerResourceAllocation(string(pod.UID), pod.Spec.Containers[0].Name)
+			alloc, found := kubelet.statusManager.GetContainerResourceAllocation(string(newPod.UID), newPod.Spec.Containers[0].Name)
 			require.True(t, found, "container allocation")
-			assert.Equal(t, tt.expectedAllocations, alloc.Requests, "stored container allocation")
+			assert.Equal(t, tt.expectedAllocatedReqs, alloc.Requests, "stored container request allocation")
+			assert.Equal(t, tt.expectedAllocatedLims, alloc.Limits, "stored container limit allocation")
 
-			resizeStatus, found := kubelet.statusManager.GetPodResizeStatus(string(pod.UID))
-			require.True(t, found, "pod resize status")
+			resizeStatus := kubelet.statusManager.GetPodResizeStatus(newPod.UID)
 			assert.Equal(t, tt.expectedResize, resizeStatus)
+
+			isInBackoff := kubelet.backOff.IsInBackOffSince(backoffKey, now)
+			if tt.expectBackoffReset {
+				assert.False(t, isInBackoff, "container backoff should be reset")
+			} else {
+				assert.True(t, isInBackoff, "container backoff should not be reset")
+			}
 		})
 	}
 }
@@ -3052,6 +3219,7 @@ func createRemoteRuntimeService(endpoint string, t *testing.T, tp oteltrace.Trac
 }
 
 func TestNewMainKubeletStandAlone(t *testing.T) {
+	tCtx := ktesting.Init(t)
 	tempDir, err := os.MkdirTemp("", "logs")
 	ContainerLogsDir = tempDir
 	assert.NoError(t, err)
@@ -3067,7 +3235,7 @@ func TestNewMainKubeletStandAlone(t *testing.T) {
 	tp := noopoteltrace.NewTracerProvider()
 	cadvisor := cadvisortest.NewMockInterface(t)
 	cadvisor.EXPECT().MachineInfo().Return(&cadvisorapi.MachineInfo{}, nil).Maybe()
-	cadvisor.EXPECT().ImagesFsInfo().Return(cadvisorapiv2.FsInfo{
+	cadvisor.EXPECT().ImagesFsInfo(tCtx).Return(cadvisorapiv2.FsInfo{
 		Usage:     400,
 		Capacity:  1000,
 		Available: 600,
@@ -3225,6 +3393,7 @@ func TestSyncPodSpans(t *testing.T) {
 		int(kubeCfg.RegistryBurst),
 		"",
 		"",
+		nil,
 		kubeCfg.CPUCFSQuota,
 		kubeCfg.CPUCFSQuotaPeriod,
 		runtimeSvc,
@@ -3418,6 +3587,203 @@ func TestIsPodResizeInProgress(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			assert.Equal(t, test.expectResize, isPodResizeInProgress(pod, test.status))
+		})
+	}
+}
+
+func TestRecordAdmissionRejection(t *testing.T) {
+	metrics.Register()
+
+	testCases := []struct {
+		name   string
+		reason string
+		wants  string
+	}{
+		{
+			name:   "AppArmor",
+			reason: lifecycle.AppArmorNotAdmittedReason,
+			wants: `
+				# HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+				# TYPE kubelet_admission_rejections_total counter
+				kubelet_admission_rejections_total{reason="AppArmor"} 1
+			`,
+		},
+		{
+			name:   "PodOSSelectorNodeLabelDoesNotMatch",
+			reason: lifecycle.PodOSSelectorNodeLabelDoesNotMatch,
+			wants: `
+                # HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+                # TYPE kubelet_admission_rejections_total counter
+                kubelet_admission_rejections_total{reason="PodOSSelectorNodeLabelDoesNotMatch"} 1
+            `,
+		},
+		{
+			name:   "PodOSNotSupported",
+			reason: lifecycle.PodOSNotSupported,
+			wants: `
+                # HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+                # TYPE kubelet_admission_rejections_total counter
+                kubelet_admission_rejections_total{reason="PodOSNotSupported"} 1
+            `,
+		},
+		{
+			name:   "InvalidNodeInfo",
+			reason: lifecycle.InvalidNodeInfo,
+			wants: `
+                # HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+                # TYPE kubelet_admission_rejections_total counter
+                kubelet_admission_rejections_total{reason="InvalidNodeInfo"} 1
+            `,
+		},
+		{
+			name:   "InitContainerRestartPolicyForbidden",
+			reason: lifecycle.InitContainerRestartPolicyForbidden,
+			wants: `
+                # HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+                # TYPE kubelet_admission_rejections_total counter
+                kubelet_admission_rejections_total{reason="InitContainerRestartPolicyForbidden"} 1
+            `,
+		},
+		{
+			name:   "UnexpectedAdmissionError",
+			reason: lifecycle.UnexpectedAdmissionError,
+			wants: `
+                # HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+                # TYPE kubelet_admission_rejections_total counter
+                kubelet_admission_rejections_total{reason="UnexpectedAdmissionError"} 1
+            `,
+		},
+		{
+			name:   "UnknownReason",
+			reason: lifecycle.UnknownReason,
+			wants: `
+                # HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+                # TYPE kubelet_admission_rejections_total counter
+                kubelet_admission_rejections_total{reason="UnknownReason"} 1
+            `,
+		},
+		{
+			name:   "UnexpectedPredicateFailureType",
+			reason: lifecycle.UnexpectedPredicateFailureType,
+			wants: `
+                # HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+                # TYPE kubelet_admission_rejections_total counter
+                kubelet_admission_rejections_total{reason="UnexpectedPredicateFailureType"} 1
+            `,
+		},
+		{
+			name:   "node(s) had taints that the pod didn't tolerate",
+			reason: tainttoleration.ErrReasonNotMatch,
+			wants: `
+                # HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+                # TYPE kubelet_admission_rejections_total counter
+                kubelet_admission_rejections_total{reason="node(s) had taints that the pod didn't tolerate"} 1
+            `,
+		},
+		{
+			name:   "Evicted",
+			reason: eviction.Reason,
+			wants: `
+                # HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+                # TYPE kubelet_admission_rejections_total counter
+                kubelet_admission_rejections_total{reason="Evicted"} 1
+            `,
+		},
+		{
+			name:   "SysctlForbidden",
+			reason: sysctl.ForbiddenReason,
+			wants: `
+                # HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+                # TYPE kubelet_admission_rejections_total counter
+                kubelet_admission_rejections_total{reason="SysctlForbidden"} 1
+            `,
+		},
+		{
+			name:   "TopologyAffinityError",
+			reason: topologymanager.ErrorTopologyAffinity,
+			wants: `
+                # HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+                # TYPE kubelet_admission_rejections_total counter
+                kubelet_admission_rejections_total{reason="TopologyAffinityError"} 1
+            `,
+		},
+		{
+			name:   "NodeShutdown",
+			reason: nodeshutdown.NodeShutdownNotAdmittedReason,
+			wants: `
+                # HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+                # TYPE kubelet_admission_rejections_total counter
+                kubelet_admission_rejections_total{reason="NodeShutdown"} 1
+            `,
+		},
+		{
+			name:   "OutOfcpu",
+			reason: "OutOfcpu",
+			wants: `
+                # HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+                # TYPE kubelet_admission_rejections_total counter
+                kubelet_admission_rejections_total{reason="OutOfcpu"} 1
+            `,
+		},
+		{
+			name:   "OutOfmemory",
+			reason: "OutOfmemory",
+			wants: `
+                # HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+                # TYPE kubelet_admission_rejections_total counter
+                kubelet_admission_rejections_total{reason="OutOfmemory"} 1
+            `,
+		},
+		{
+			name:   "OutOfephemeral-storage",
+			reason: "OutOfephemeral-storage",
+			wants: `
+                # HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+                # TYPE kubelet_admission_rejections_total counter
+                kubelet_admission_rejections_total{reason="OutOfephemeral-storage"} 1
+            `,
+		},
+		{
+			name:   "OutOfpods",
+			reason: "OutOfpods",
+			wants: `
+                # HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+                # TYPE kubelet_admission_rejections_total counter
+                kubelet_admission_rejections_total{reason="OutOfpods"} 1
+            `,
+		},
+		{
+			name:   "OutOfgpu",
+			reason: "OutOfgpu",
+			wants: `
+                # HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+                # TYPE kubelet_admission_rejections_total counter
+                kubelet_admission_rejections_total{reason="OutOfExtendedResources"} 1
+            `,
+		},
+		{
+			name:   "OtherReason",
+			reason: "OtherReason",
+			wants: `
+                # HELP kubelet_admission_rejections_total [ALPHA] Cumulative number pod admission rejections by the Kubelet.
+                # TYPE kubelet_admission_rejections_total counter
+                kubelet_admission_rejections_total{reason="Other"} 1
+            `,
+		},
+	}
+
+	// Run tests.
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Clear the metrics after the test.
+			metrics.AdmissionRejectionsTotal.Reset()
+
+			// Call the function.
+			recordAdmissionRejection(tc.reason)
+
+			if err := testutil.GatherAndCompare(metrics.GetGather(), strings.NewReader(tc.wants), "kubelet_admission_rejections_total"); err != nil {
+				t.Error(err)
+			}
 		})
 	}
 }

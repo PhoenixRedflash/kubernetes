@@ -26,11 +26,11 @@ import (
 	"google.golang.org/grpc"
 	"k8s.io/klog/v2"
 
-	resourceapi "k8s.io/api/resource/v1alpha3"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/dynamic-resource-allocation/resourceslice"
-	drapb "k8s.io/kubelet/pkg/apis/dra/v1alpha4"
+	drapbv1alpha4 "k8s.io/kubelet/pkg/apis/dra/v1alpha4"
+	drapbv1beta1 "k8s.io/kubelet/pkg/apis/dra/v1beta1"
 	registerapi "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
 )
 
@@ -54,22 +54,23 @@ type DRAPlugin interface {
 	// after it returns before all information is actually written
 	// to the API server.
 	//
-	// The caller must not modify the content after the call.
+	// It is the responsibility of the caller to ensure that the pools and
+	// slices described in the driver resources parameters are valid
+	// according to the restrictions defined in the resource.k8s.io API.
 	//
-	// Returns an error if KubeClient or NodeName options were not
-	// set in Start() to create the DRAPlugin instance.
-	PublishResources(ctx context.Context, resources Resources) error
+	// Invalid ResourceSlices will be rejected by the apiserver during
+	// publishing, which happens asynchronously and thus does not
+	// get returned as error here. The only error returned here is
+	// when publishing was not set up properly, for example missing
+	// [KubeClient] or [NodeName] options.
+	//
+	// The caller may modify the resources after this call returns.
+	PublishResources(ctx context.Context, resources resourceslice.DriverResources) error
 
 	// This unexported method ensures that we can modify the interface
 	// without causing an API break of the package
 	// (https://pkg.go.dev/golang.org/x/exp/apidiff#section-readme).
 	internal()
-}
-
-// Resources currently only supports devices. Might get extended in the
-// future.
-type Resources struct {
-	Devices []resourceapi.Device
 }
 
 // Option implements the functional options pattern for Start.
@@ -172,11 +173,20 @@ func GRPCStreamInterceptor(interceptor grpc.StreamServerInterceptor) Option {
 	}
 }
 
-// NodeV1alpha3 explicitly chooses whether the DRA gRPC API v1alpha3
+// NodeV1alpha4 explicitly chooses whether the DRA gRPC API v1alpha4
 // gets enabled.
-func NodeV1alpha3(enabled bool) Option {
+func NodeV1alpha4(enabled bool) Option {
 	return func(o *options) error {
-		o.nodeV1alpha3 = enabled
+		o.nodeV1alpha4 = enabled
+		return nil
+	}
+}
+
+// NodeV1beta1 explicitly chooses whether the DRA gRPC API v1beta1
+// gets enabled.
+func NodeV1beta1(enabled bool) Option {
+	return func(o *options) error {
+		o.nodeV1beta1 = enabled
 		return nil
 	}
 }
@@ -226,7 +236,8 @@ type options struct {
 	streamInterceptors         []grpc.StreamServerInterceptor
 	kubeClient                 kubernetes.Interface
 
-	nodeV1alpha3 bool
+	nodeV1alpha4 bool
+	nodeV1beta1  bool
 }
 
 // draPlugin combines the kubelet registration service and the DRA node plugin
@@ -260,12 +271,19 @@ type draPlugin struct {
 //
 // If the plugin will be used to publish resources, [KubeClient] and [NodeName]
 // options are mandatory.
-func Start(ctx context.Context, nodeServer interface{}, opts ...Option) (result DRAPlugin, finalErr error) {
+//
+// The DRA driver decides which gRPC interfaces it implements. At least one
+// implementation of [drapbv1alpha4.NodeServer] or [drapbv1beta1.DRAPluginServer]
+// is required. Implementing drapbv1beta1.DRAPluginServer is recommended for
+// DRA driver targeting Kubernetes >= 1.32. To be compatible with Kubernetes 1.31,
+// DRA drivers must implement only [drapbv1alpha4.NodeServer].
+func Start(ctx context.Context, nodeServers []interface{}, opts ...Option) (result DRAPlugin, finalErr error) {
 	logger := klog.FromContext(ctx)
 	o := options{
 		logger:        klog.Background(),
 		grpcVerbosity: 6, // Logs requests and responses, which can be large.
-		nodeV1alpha3:  true,
+		nodeV1alpha4:  true,
+		nodeV1beta1:   true,
 	}
 	for _, option := range opts {
 		if err := option(&o); err != nil {
@@ -318,24 +336,40 @@ func Start(ctx context.Context, nodeServer interface{}, opts ...Option) (result 
 	}()
 
 	// Run the node plugin gRPC server first to ensure that it is ready.
-	implemented := false
+	var supportedServices []string
 	plugin, err := startGRPCServer(klog.NewContext(ctx, klog.LoggerWithName(logger, "dra")), o.grpcVerbosity, o.unaryInterceptors, o.streamInterceptors, o.draEndpoint, func(grpcServer *grpc.Server) {
-		if nodeServer, ok := nodeServer.(drapb.NodeServer); ok && o.nodeV1alpha3 {
-			logger.V(5).Info("registering drapbv1alpha3.NodeServer")
-			drapb.RegisterNodeServer(grpcServer, nodeServer)
-			implemented = true
+		for _, nodeServer := range nodeServers {
+			if nodeServer, ok := nodeServer.(drapbv1alpha4.NodeServer); ok && o.nodeV1alpha4 {
+				logger.V(5).Info("registering v1alpha4.Node gGRPC service")
+				drapbv1alpha4.RegisterNodeServer(grpcServer, nodeServer)
+				supportedServices = append(supportedServices, drapbv1alpha4.NodeService)
+			}
+			if nodeServer, ok := nodeServer.(drapbv1beta1.DRAPluginServer); ok && o.nodeV1beta1 {
+				logger.V(5).Info("registering v1beta1.DRAPlugin gRPC service")
+				drapbv1beta1.RegisterDRAPluginServer(grpcServer, nodeServer)
+				supportedServices = append(supportedServices, drapbv1beta1.DRAPluginService)
+			}
 		}
 	})
 	if err != nil {
 		return nil, fmt.Errorf("start node client: %v", err)
 	}
 	d.plugin = plugin
-	if !implemented {
+	if len(supportedServices) == 0 {
 		return nil, errors.New("no supported DRA gRPC API is implemented and enabled")
 	}
 
+	// Backwards compatibility hack: if only the alpha gRPC service is enabled,
+	// then we can support registration against a 1.31 kubelet by reporting "1.0.0"
+	// as version. That also works with 1.32 because 1.32 supports that legacy
+	// behavior and 1.31 works because it doesn't fail while parsing "v1alpha3.Node"
+	// as version.
+	if len(supportedServices) == 1 && supportedServices[0] == drapbv1alpha4.NodeService {
+		supportedServices = []string{"1.0.0"}
+	}
+
 	// Now make it available to kubelet.
-	registrar, err := startRegistrar(klog.NewContext(ctx, klog.LoggerWithName(logger, "registrar")), o.grpcVerbosity, o.unaryInterceptors, o.streamInterceptors, o.driverName, o.draAddress, o.pluginRegistrationEndpoint)
+	registrar, err := startRegistrar(klog.NewContext(ctx, klog.LoggerWithName(logger, "registrar")), o.grpcVerbosity, o.unaryInterceptors, o.streamInterceptors, o.driverName, supportedServices, o.draAddress, o.pluginRegistrationEndpoint)
 	if err != nil {
 		return nil, fmt.Errorf("start registrar: %v", err)
 	}
@@ -373,7 +407,7 @@ func (d *draPlugin) Stop() {
 
 // PublishResources implements [DRAPlugin.PublishResources]. Returns en error if
 // kubeClient or nodeName are unset.
-func (d *draPlugin) PublishResources(ctx context.Context, resources Resources) error {
+func (d *draPlugin) PublishResources(_ context.Context, resources resourceslice.DriverResources) error {
 	if d.kubeClient == nil {
 		return errors.New("no KubeClient found to publish resources")
 	}
@@ -391,12 +425,9 @@ func (d *draPlugin) PublishResources(ctx context.Context, resources Resources) e
 		UID:        d.nodeUID, // Optional, will be determined by controller if empty.
 	}
 	driverResources := &resourceslice.DriverResources{
-		Pools: map[string]resourceslice.Pool{
-			d.nodeName: {
-				Devices: resources.Devices,
-			},
-		},
+		Pools: resources.Pools,
 	}
+
 	if d.resourceSliceController == nil {
 		// Start publishing the information. The controller is using
 		// our background context, not the one passed into this
@@ -407,7 +438,13 @@ func (d *draPlugin) PublishResources(ctx context.Context, resources Resources) e
 		controllerLogger = klog.LoggerWithName(controllerLogger, "ResourceSlice controller")
 		controllerCtx = klog.NewContext(controllerCtx, controllerLogger)
 		var err error
-		if d.resourceSliceController, err = resourceslice.StartController(controllerCtx, d.kubeClient, d.driverName, owner, driverResources); err != nil {
+		if d.resourceSliceController, err = resourceslice.StartController(controllerCtx,
+			resourceslice.Options{
+				DriverName: d.driverName,
+				KubeClient: d.kubeClient,
+				Owner:      &owner,
+				Resources:  driverResources,
+			}); err != nil {
 			return fmt.Errorf("start ResourceSlice controller: %w", err)
 		}
 		return nil

@@ -222,7 +222,7 @@ func checkErr(err error, handleErr func(string, int)) {
 
 func statusCausesToAggrError(scs []metav1.StatusCause) utilerrors.Aggregate {
 	errs := make([]error, 0, len(scs))
-	errorMsgs := sets.NewString()
+	errorMsgs := sets.New[string]()
 	for _, sc := range scs {
 		// check for duplicate error messages and skip them
 		msg := fmt.Sprintf("%s: %s", sc.Field, sc.Message)
@@ -519,7 +519,7 @@ func AddChunkSizeFlag(cmd *cobra.Command, value *int64) {
 }
 
 func AddLabelSelectorFlagVar(cmd *cobra.Command, p *string) {
-	cmd.Flags().StringVarP(p, "selector", "l", *p, "Selector (label query) to filter on, supports '=', '==', and '!='.(e.g. -l key1=value1,key2=value2). Matching objects must satisfy all of the specified label constraints.")
+	cmd.Flags().StringVarP(p, "selector", "l", *p, "Selector (label query) to filter on, supports '=', '==', '!=', 'in', 'notin'.(e.g. -l key1=value1,key2=value2,key3 in (value3)). Matching objects must satisfy all of the specified label constraints.")
 }
 
 func AddPruningFlags(cmd *cobra.Command, prune *bool, pruneAllowlist *[]string, all *bool, applySetRef *string) {
@@ -537,10 +537,11 @@ func AddPruningFlags(cmd *cobra.Command, prune *bool, pruneAllowlist *[]string, 
 	}
 }
 
-func AddSubresourceFlags(cmd *cobra.Command, subresource *string, usage string, allowedSubresources ...string) {
-	cmd.Flags().StringVar(subresource, "subresource", "", fmt.Sprintf("%s Must be one of %v. This flag is beta and may change in the future.", usage, allowedSubresources))
+func AddSubresourceFlags(cmd *cobra.Command, subresource *string, usage string) {
+	cmd.Flags().StringVar(subresource, "subresource", "", fmt.Sprintf("%s This flag is beta and may change in the future.", usage))
 	CheckErr(cmd.RegisterFlagCompletionFunc("subresource", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-		return allowedSubresources, cobra.ShellCompDirectiveNoFileComp
+		var commonSubresources = []string{"status", "scale", "resize"}
+		return commonSubresources, cobra.ShellCompDirectiveNoFileComp
 	}))
 }
 

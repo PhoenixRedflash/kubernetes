@@ -229,6 +229,10 @@ type KubeletConfiguration struct {
 	CgroupsPerQOS bool
 	// driver that the kubelet uses to manipulate cgroups on the host (cgroupfs or systemd)
 	CgroupDriver string
+	// SingleProcessOOMKill, if true, will prevent the `memory.oom.group` flag from being set for container
+	// cgroups in cgroups v2. This causes processes in the container to be OOM killed individually instead of as
+	// a group. It means that if true, the behavior aligns with the behavior of cgroups v1.
+	SingleProcessOOMKill *bool
 	// CPUManagerPolicy is the name of the policy to use.
 	// Requires the CPUManager feature gate to be enabled.
 	CPUManagerPolicy string
@@ -281,6 +285,7 @@ type KubeletConfiguration struct {
 	ResolverConfig string
 	// RunOnce causes the Kubelet to check the API server once for pods,
 	// run those in addition to the pods specified by static pod files, and exit.
+	// Deprecated: no longer has any effect.
 	RunOnce bool
 	// cpuCFSQuota enables CPU CFS quota enforcement for containers that
 	// specify CPU limits
@@ -501,6 +506,12 @@ type KubeletConfiguration struct {
 	// option is explicitly enabled.
 	// +optional
 	FailCgroupV1 bool
+
+	// CrashLoopBackOff contains config to modify node-level parameters for
+	// container restart behavior
+	// +featureGate=KubeletCrashLoopBackoffMax
+	// +optional
+	CrashLoopBackOff CrashLoopBackOffConfig
 }
 
 // KubeletAuthorizationMode denotes the authorization mode for the kubelet
@@ -678,4 +689,14 @@ type MemorySwapConfiguration struct {
 	// +featureGate=NodeSwap
 	// +optional
 	SwapBehavior string
+}
+
+// CrashLoopBackOffConfig is used for setting configuration for this kubelet's
+// container restart behavior
+type CrashLoopBackOffConfig struct {
+	// MaxContainerRestartPeriod is the maximum duration the backoff delay can accrue
+	// to for container restarts, minimum 1 second, maximum 300 seconds.
+	// +featureGate=KubeletCrashLoopBackOffMax
+	// +optional
+	MaxContainerRestartPeriod *metav1.Duration
 }

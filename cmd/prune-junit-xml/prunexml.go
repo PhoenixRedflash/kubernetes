@@ -135,22 +135,54 @@ func pruneTESTS(suites *junitxml.JUnitTestSuites) {
 		updatedTestcase.Classname = match[1]
 		updatedTestcase.Name = match[2]
 		updatedTestcase.Time = suite.Time
+		updatedSystemOut := ""
+		updatedSystemErr := ""
 		for _, testcase := range suite.TestCases {
 			// The top level testcase element in a JUnit xml file does not have the / character.
 			if testcase.Failure != nil {
 				failflag = true
-				updatedTestcaseFailure.Message = updatedTestcaseFailure.Message + testcase.Failure.Message + ";"
-				updatedTestcaseFailure.Contents = updatedTestcaseFailure.Contents + testcase.Failure.Contents + ";"
-				updatedTestcaseFailure.Type = updatedTestcaseFailure.Type + testcase.Failure.Type
+				updatedTestcaseFailure.Message = joinTexts(updatedTestcaseFailure.Message, testcase.Failure.Message)
+				updatedTestcaseFailure.Contents = joinTexts(updatedTestcaseFailure.Contents, testcase.Failure.Contents)
+				updatedTestcaseFailure.Type = joinTexts(updatedTestcaseFailure.Type, testcase.Failure.Type)
+				updatedSystemOut = joinTexts(updatedSystemOut, testcase.SystemOut)
+				updatedSystemErr = joinTexts(updatedSystemErr, testcase.SystemErr)
 			}
 		}
 		if failflag {
 			updatedTestcase.Failure = &updatedTestcaseFailure
+			updatedTestcase.SystemOut = updatedSystemOut
+			updatedTestcase.SystemErr = updatedSystemErr
 		}
 		suite.TestCases = append(updatedTestcases, updatedTestcase)
 		updatedTestsuites = append(updatedTestsuites, suite)
 	}
 	suites.Suites = updatedTestsuites
+}
+
+// joinTexts returns "<a><empty line><b>" if both are non-empty,
+// otherwise just the non-empty string, if there is one.
+//
+// If <b> is contained completely in <a>, <a> gets returned because repeating
+// exactly the same string again doesn't add any information. Typically
+// this occurs when joining the failure message because that is the fixed
+// string "Failed" for all tests, regardless of what the test logged.
+// The test log output is typically different because it cointains "=== RUN
+// <test name>" and thus doesn't get dropped.
+func joinTexts(a, b string) string {
+	if a == "" {
+		return b
+	}
+	if b == "" {
+		return a
+	}
+	if strings.Contains(a, b) {
+		return a
+	}
+	sep := "\n"
+	if !strings.HasSuffix(a, "\n") {
+		sep = "\n\n"
+	}
+	return a + sep + b
 }
 
 func fetchXML(xmlReader io.Reader) (*junitxml.JUnitTestSuites, error) {

@@ -796,8 +796,8 @@ func NewProxier(
 		terminatedEndpoints:   make(map[string]bool),
 	}
 
-	serviceChanges := proxy.NewServiceChangeTracker(proxier.newServiceInfo, ipFamily, recorder, proxier.serviceMapChange)
-	endPointChangeTracker := proxy.NewEndpointsChangeTracker(hostname, proxier.newEndpointInfo, ipFamily, recorder, proxier.endpointsMapChange)
+	serviceChanges := proxy.NewServiceChangeTracker(ipFamily, proxier.newServiceInfo, proxier.serviceMapChange)
+	endPointChangeTracker := proxy.NewEndpointsChangeTracker(ipFamily, hostname, proxier.newEndpointInfo, proxier.endpointsMapChange)
 	proxier.endpointsChanges = endPointChangeTracker
 	proxier.serviceChanges = serviceChanges
 
@@ -933,7 +933,7 @@ func (proxier *Proxier) Sync() {
 	if proxier.healthzServer != nil {
 		proxier.healthzServer.QueuedUpdate(proxier.ipFamily)
 	}
-	metrics.SyncProxyRulesLastQueuedTimestamp.SetToCurrentTime()
+	metrics.SyncProxyRulesLastQueuedTimestamp.WithLabelValues(string(proxier.ipFamily)).SetToCurrentTime()
 	proxier.syncRunner.Run()
 }
 
@@ -944,7 +944,7 @@ func (proxier *Proxier) SyncLoop() {
 		proxier.healthzServer.Updated(proxier.ipFamily)
 	}
 	// synthesize "last change queued" time as the informers are syncing.
-	metrics.SyncProxyRulesLastQueuedTimestamp.SetToCurrentTime()
+	metrics.SyncProxyRulesLastQueuedTimestamp.WithLabelValues(string(proxier.ipFamily)).SetToCurrentTime()
 	proxier.syncRunner.Loop(wait.NeverStop)
 }
 
@@ -1140,7 +1140,7 @@ func (proxier *Proxier) syncProxyRules() {
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
-		metrics.SyncProxyRulesLatency.Observe(metrics.SinceInSeconds(start))
+		metrics.SyncProxyRulesLatency.WithLabelValues(string(proxier.ipFamily)).Observe(metrics.SinceInSeconds(start))
 		klog.V(4).InfoS("Syncing proxy rules complete", "elapsed", time.Since(start))
 	}()
 
@@ -1166,17 +1166,9 @@ func (proxier *Proxier) syncProxyRules() {
 	// We assume that if this was called, we really want to sync them,
 	// even if nothing changed in the meantime. In other words, callers are
 	// responsible for detecting no-op changes and not calling this function.
-	serviceUpdateResult := proxier.svcPortMap.Update(proxier.serviceChanges)
-	endpointUpdateResult := proxier.endpointsMap.Update(proxier.endpointsChanges)
+	_ = proxier.svcPortMap.Update(proxier.serviceChanges)
+	_ = proxier.endpointsMap.Update(proxier.endpointsChanges)
 
-	deletedUDPClusterIPs := serviceUpdateResult.DeletedUDPClusterIPs
-	// merge stale services gathered from EndpointsMap.Update
-	for _, svcPortName := range endpointUpdateResult.NewlyActiveUDPServices {
-		if svcInfo, ok := proxier.svcPortMap[svcPortName]; ok && svcInfo != nil && svcInfo.Protocol() == v1.ProtocolUDP {
-			klog.V(2).InfoS("Newly-active UDP service may have stale conntrack entries", "servicePortName", svcPortName)
-			deletedUDPClusterIPs.Insert(svcInfo.ClusterIP().String())
-		}
-	}
 	// Query HNS for endpoints and load balancers
 	queriedEndpoints, err := hns.getAllEndpointsByNetwork(hnsNetworkName)
 	if err != nil {
@@ -1703,7 +1695,7 @@ func (proxier *Proxier) syncProxyRules() {
 	if proxier.healthzServer != nil {
 		proxier.healthzServer.Updated(proxier.ipFamily)
 	}
-	metrics.SyncProxyRulesLastTimestamp.SetToCurrentTime()
+	metrics.SyncProxyRulesLastTimestamp.WithLabelValues(string(proxier.ipFamily)).SetToCurrentTime()
 
 	// Update service healthchecks.  The endpoints list might include services that are
 	// not "OnlyLocal", but the services list will not, and the serviceHealthServer
@@ -1713,13 +1705,6 @@ func (proxier *Proxier) syncProxyRules() {
 	}
 	if err := proxier.serviceHealthServer.SyncEndpoints(proxier.endpointsMap.LocalReadyEndpoints()); err != nil {
 		klog.ErrorS(err, "Error syncing healthcheck endpoints")
-	}
-
-	// Finish housekeeping.
-	// TODO: these could be made more consistent.
-	for _, svcIP := range deletedUDPClusterIPs.UnsortedList() {
-		// TODO : Check if this is required to cleanup stale services here
-		klog.V(5).InfoS("Pending delete stale service IP connections", "IP", svcIP)
 	}
 
 	// remove stale endpoint refcount entries

@@ -132,14 +132,9 @@ func init() {
 	otel.SetMeterProvider(noop.NewMeterProvider())
 }
 
-const (
-	// Kubelet component name
-	componentKubelet = "kubelet"
-)
-
 // NewKubeletCommand creates a *cobra.Command object with default parameters
 func NewKubeletCommand() *cobra.Command {
-	cleanFlagSet := pflag.NewFlagSet(componentKubelet, pflag.ContinueOnError)
+	cleanFlagSet := pflag.NewFlagSet(server.ComponentKubelet, pflag.ContinueOnError)
 	cleanFlagSet.SetNormalizeFunc(cliflag.WordSepNormalizeFunc)
 	kubeletFlags := options.NewKubeletFlags()
 
@@ -151,7 +146,7 @@ func NewKubeletCommand() *cobra.Command {
 	}
 
 	cmd := &cobra.Command{
-		Use: componentKubelet,
+		Use: server.ComponentKubelet,
 		Long: `The kubelet is the primary "node agent" that runs on each
 node. It can register the node with the apiserver using one of: the hostname; a flag to
 override the hostname; or specific logic for a cloud provider.
@@ -367,6 +362,7 @@ func mergeKubeletConfigurations(kubeletConfig *kubeletconfiginternal.KubeletConf
 	}
 	// apply defaulting after decoding
 	kubeletconfigv1beta1conversion.SetDefaults_KubeletConfiguration(versionedConfig)
+
 	// convert back to internal config
 	if err := kubeletconfigv1beta1conversion.Convert_v1beta1_KubeletConfiguration_To_config_KubeletConfiguration(versionedConfig, kubeletConfig, nil); err != nil {
 		return fmt.Errorf("failed to convert merged config to internal kubelet configuration: %w", err)
@@ -561,7 +557,7 @@ func makeEventRecorder(ctx context.Context, kubeDeps *kubelet.Dependencies, node
 		return
 	}
 	eventBroadcaster := record.NewBroadcaster(record.WithContext(ctx))
-	kubeDeps.Recorder = eventBroadcaster.NewRecorder(legacyscheme.Scheme, v1.EventSource{Component: componentKubelet, Host: string(nodeName)})
+	kubeDeps.Recorder = eventBroadcaster.NewRecorder(legacyscheme.Scheme, v1.EventSource{Component: server.ComponentKubelet, Host: string(nodeName)})
 	eventBroadcaster.StartStructuredLogging(3)
 	if kubeDeps.EventClient != nil {
 		klog.V(4).InfoS("Sending events to api server")
@@ -606,7 +602,7 @@ func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
 
 	// Warn if MemoryQoS enabled with cgroups v1
 	if utilfeature.DefaultFeatureGate.Enabled(features.MemoryQoS) &&
-		!isCgroup2UnifiedMode() {
+		!kubeletutil.IsCgroup2UnifiedMode() {
 		klog.InfoS("Warning: MemoryQoS feature only works with cgroups v2 on Linux, but enabled with cgroups v1")
 	}
 	// Obtain Kubelet Lock File
@@ -831,7 +827,7 @@ func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
 				s.TopologyManagerPolicyOptions, features.TopologyManagerPolicyOptions)
 		}
 		if utilfeature.DefaultFeatureGate.Enabled(features.NodeSwap) {
-			if !isCgroup2UnifiedMode() && s.MemorySwap.SwapBehavior == kubelettypes.LimitedSwap {
+			if !kubeletutil.IsCgroup2UnifiedMode() && s.MemorySwap.SwapBehavior == kubelettypes.LimitedSwap {
 				// This feature is not supported for cgroupv1 so we are failing early.
 				return fmt.Errorf("swap feature is enabled and LimitedSwap but it is only supported with cgroupv2")
 			}
@@ -901,7 +897,7 @@ func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
 		klog.InfoS("Failed to ApplyOOMScoreAdj", "err", err)
 	}
 
-	if err := RunKubelet(ctx, s, kubeDeps, s.RunOnce); err != nil {
+	if err := RunKubelet(ctx, s, kubeDeps); err != nil {
 		return err
 	}
 
@@ -914,10 +910,6 @@ func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
 				klog.ErrorS(err, "Failed to start healthz server")
 			}
 		}, 5*time.Second, wait.NeverStop)
-	}
-
-	if s.RunOnce {
-		return nil
 	}
 
 	// If systemd is used, notify it that we have started
@@ -1232,7 +1224,7 @@ func setContentTypeForClient(cfg *restclient.Config, contentType string) {
 //	3 Standalone 'kubernetes' binary
 //
 // Eventually, #2 will be replaced with instances of #3
-func RunKubelet(ctx context.Context, kubeServer *options.KubeletServer, kubeDeps *kubelet.Dependencies, runOnce bool) error {
+func RunKubelet(ctx context.Context, kubeServer *options.KubeletServer, kubeDeps *kubelet.Dependencies) error {
 	hostname, err := nodeutil.GetHostname(kubeServer.HostnameOverride)
 	if err != nil {
 		return err
@@ -1286,16 +1278,9 @@ func RunKubelet(ctx context.Context, kubeServer *options.KubeletServer, kubeDeps
 		klog.ErrorS(err, "Failed to set rlimit on max file handles")
 	}
 
-	// process pods and exit.
-	if runOnce {
-		if _, err := k.RunOnce(podCfg.Updates()); err != nil {
-			return fmt.Errorf("runonce failed: %w", err)
-		}
-		klog.InfoS("Started kubelet as runonce")
-	} else {
-		startKubelet(k, podCfg, &kubeServer.KubeletConfiguration, kubeDeps, kubeServer.EnableServer)
-		klog.InfoS("Started kubelet")
-	}
+	startKubelet(k, podCfg, &kubeServer.KubeletConfiguration, kubeDeps, kubeServer.EnableServer)
+	klog.InfoS("Started kubelet")
+
 	return nil
 }
 
@@ -1396,7 +1381,7 @@ func newTracerProvider(s *options.KubeletServer) (oteltrace.TracerProvider, erro
 	}
 	resourceOpts := []otelsdkresource.Option{
 		otelsdkresource.WithAttributes(
-			semconv.ServiceNameKey.String(componentKubelet),
+			semconv.ServiceNameKey.String(server.ComponentKubelet),
 			semconv.HostNameKey.String(hostname),
 		),
 	}

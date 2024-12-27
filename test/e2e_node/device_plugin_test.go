@@ -49,10 +49,10 @@ import (
 	kubeletpodresourcesv1 "k8s.io/kubelet/pkg/apis/podresources/v1"
 	kubeletpodresourcesv1alpha1 "k8s.io/kubelet/pkg/apis/podresources/v1alpha1"
 	"k8s.io/kubernetes/pkg/features"
+	"k8s.io/kubernetes/test/e2e/feature"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
-	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	e2etestfiles "k8s.io/kubernetes/test/e2e/framework/testfiles"
 	"k8s.io/kubernetes/test/e2e/nodefeature"
 )
@@ -211,7 +211,7 @@ func testDevicePlugin(f *framework.Framework, pluginSockDir string) {
 				e2epod.NewPodClient(f).DeleteSync(ctx, p.Name, metav1.DeleteOptions{}, 2*time.Minute)
 			}
 
-			restartKubelet(true)
+			restartKubelet(ctx, true)
 
 			ginkgo.By("Waiting for devices to become unavailable on the local node")
 			gomega.Eventually(ctx, func(ctx context.Context) bool {
@@ -283,8 +283,7 @@ func testDevicePlugin(f *framework.Framework, pluginSockDir string) {
 			gomega.Expect(v1ResourcesForOurPod.Containers[0].Devices[0].DeviceIds).To(gomega.HaveLen(1))
 		})
 
-		ginkgo.It("[NodeSpecialFeature:CDI] can make a CDI device accessible in a container", func(ctx context.Context) {
-			e2eskipper.SkipUnlessFeatureGateEnabled(features.DevicePluginCDIDevices)
+		f.It("can make a CDI device accessible in a container", feature.DevicePluginCDIDevices, func(ctx context.Context) {
 			// check if CDI_DEVICE env variable is set
 			// and only one correspondent device node /tmp/<CDI_DEVICE> is available inside a container
 			podObj := makeBusyboxPod(SampleDeviceResourceName, "[ $(ls /tmp/CDI-Dev-[1,2] | wc -l) -eq 1 -a -b /tmp/$CDI_DEVICE ]")
@@ -365,7 +364,7 @@ func testDevicePlugin(f *framework.Framework, pluginSockDir string) {
 			framework.Logf("testing pod: pre-restart  UID=%s namespace=%s name=%s ready=%v", pod1.UID, pod1.Namespace, pod1.Name, podutils.IsPodReady(pod1))
 
 			ginkgo.By("Restarting Kubelet")
-			restartKubelet(true)
+			restartKubelet(ctx, true)
 
 			ginkgo.By("Wait for node to be ready again")
 			e2enode.WaitForAllNodesSchedulable(ctx, f.ClientSet, 5*time.Minute)
@@ -430,7 +429,7 @@ func testDevicePlugin(f *framework.Framework, pluginSockDir string) {
 			gomega.Expect(devIDRestart1).To(gomega.Equal(devID1))
 
 			ginkgo.By("Restarting Kubelet")
-			restartKubelet(true)
+			restartKubelet(ctx, true)
 
 			ginkgo.By("Wait for node to be ready again")
 			e2enode.WaitForAllNodesSchedulable(ctx, f.ClientSet, 5*time.Minute)
@@ -499,7 +498,7 @@ func testDevicePlugin(f *framework.Framework, pluginSockDir string) {
 			gomega.Eventually(getNodeResourceValues, devicePluginGracefulTimeout, f.Timeouts.Poll).WithContext(ctx).WithArguments(SampleDeviceResourceName).Should(gomega.Equal(ResourceValue{Allocatable: 0, Capacity: int(expectedSampleDevsAmount)}))
 
 			ginkgo.By("Restarting Kubelet")
-			restartKubelet(true)
+			restartKubelet(ctx, true)
 
 			ginkgo.By("Wait for node to be ready again")
 			gomega.Expect(e2enode.WaitForAllNodesSchedulable(ctx, f.ClientSet, 5*time.Minute)).To(gomega.Succeed())
@@ -587,7 +586,7 @@ func testDevicePlugin(f *framework.Framework, pluginSockDir string) {
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Restarting Kubelet")
-			restartKubelet(true)
+			restartKubelet(ctx, true)
 
 			ginkgo.By("Wait for node to be ready again")
 			e2enode.WaitForAllNodesSchedulable(ctx, f.ClientSet, 5*time.Minute)
@@ -652,7 +651,7 @@ func testDevicePlugin(f *framework.Framework, pluginSockDir string) {
 			framework.ExpectNoError(err)
 
 			ginkgo.By("stopping the kubelet")
-			startKubelet := stopKubelet()
+			restartKubelet := mustStopKubelet(ctx, f)
 
 			// wait until the kubelet health check will fail
 			gomega.Eventually(ctx, func() bool {
@@ -666,7 +665,7 @@ func testDevicePlugin(f *framework.Framework, pluginSockDir string) {
 			deletePodSyncByName(ctx, f, pod.Name)
 
 			framework.Logf("Starting the kubelet")
-			startKubelet()
+			restartKubelet(ctx)
 
 			// wait until the kubelet health check will succeed
 			gomega.Eventually(ctx, func() bool {
@@ -947,7 +946,7 @@ func testDevicePluginNodeReboot(f *framework.Framework, pluginSockDir string) {
 			framework.ExpectNoError(err)
 
 			ginkgo.By("stopping the kubelet")
-			startKubelet := stopKubelet()
+			restartKubelet := mustStopKubelet(ctx, f)
 
 			ginkgo.By("stopping all the local containers - using CRI")
 			rs, _, err := getCRIClient()
@@ -963,7 +962,7 @@ func testDevicePluginNodeReboot(f *framework.Framework, pluginSockDir string) {
 			}
 
 			ginkgo.By("restarting the kubelet")
-			startKubelet()
+			restartKubelet(ctx)
 
 			ginkgo.By("Wait for node to be ready again")
 			e2enode.WaitForAllNodesSchedulable(ctx, f.ClientSet, 5*time.Minute)

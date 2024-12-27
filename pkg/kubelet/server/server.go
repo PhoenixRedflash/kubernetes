@@ -41,9 +41,9 @@ import (
 	oteltrace "go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"k8s.io/klog/v2"
-	"k8s.io/kubernetes/pkg/kubelet/metrics/collectors"
 	"k8s.io/utils/clock"
 	netutils "k8s.io/utils/net"
+	"k8s.io/utils/ptr"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -67,6 +67,8 @@ import (
 	metricsfeatures "k8s.io/component-base/metrics/features"
 	"k8s.io/component-base/metrics/legacyregistry"
 	"k8s.io/component-base/metrics/prometheus/slis"
+	zpagesfeatures "k8s.io/component-base/zpages/features"
+	"k8s.io/component-base/zpages/statusz"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 	"k8s.io/cri-client/pkg/util"
 	podresourcesapi "k8s.io/kubelet/pkg/apis/podresources/v1"
@@ -83,6 +85,7 @@ import (
 	apisgrpc "k8s.io/kubernetes/pkg/kubelet/apis/grpc"
 	"k8s.io/kubernetes/pkg/kubelet/apis/podresources"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
+	"k8s.io/kubernetes/pkg/kubelet/metrics/collectors"
 	"k8s.io/kubernetes/pkg/kubelet/prober"
 	servermetrics "k8s.io/kubernetes/pkg/kubelet/server/metrics"
 	"k8s.io/kubernetes/pkg/kubelet/server/stats"
@@ -106,6 +109,11 @@ const (
 	runningPodsPath     = "/runningpods/"
 )
 
+const (
+	// Kubelet component name
+	ComponentKubelet = "kubelet"
+)
+
 // Server is a http.Handler which exposes kubelet functionality over HTTP.
 type Server struct {
 	auth                 AuthInterface
@@ -114,6 +122,7 @@ type Server struct {
 	metricsBuckets       sets.Set[string]
 	metricsMethodBuckets sets.Set[string]
 	resourceAnalyzer     stats.ResourceAnalyzer
+	extendedCheckers     []healthz.HealthChecker
 }
 
 // TLSOptions holds the TLS options.
@@ -156,6 +165,7 @@ func (a *filteringContainer) RegisteredHandlePaths() []string {
 func ListenAndServeKubeletServer(
 	host HostInterface,
 	resourceAnalyzer stats.ResourceAnalyzer,
+	checkers []healthz.HealthChecker,
 	kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	tlsOptions *TLSOptions,
 	auth AuthInterface,
@@ -164,7 +174,7 @@ func ListenAndServeKubeletServer(
 	address := netutils.ParseIPSloppy(kubeCfg.Address)
 	port := uint(kubeCfg.Port)
 	klog.InfoS("Starting to listen", "address", address, "port", port)
-	handler := NewServer(host, resourceAnalyzer, auth, kubeCfg)
+	handler := NewServer(host, resourceAnalyzer, checkers, auth, kubeCfg)
 
 	if utilfeature.DefaultFeatureGate.Enabled(features.KubeletTracing) {
 		handler.InstallTracingFilter(tp)
@@ -198,11 +208,12 @@ func ListenAndServeKubeletServer(
 func ListenAndServeKubeletReadOnlyServer(
 	host HostInterface,
 	resourceAnalyzer stats.ResourceAnalyzer,
+	checkers []healthz.HealthChecker,
 	address net.IP,
 	port uint,
 	tp oteltrace.TracerProvider) {
 	klog.InfoS("Starting to listen read-only", "address", address, "port", port)
-	s := NewServer(host, resourceAnalyzer, nil, nil)
+	s := NewServer(host, resourceAnalyzer, checkers, nil, nil)
 
 	if utilfeature.DefaultFeatureGate.Enabled(features.KubeletTracing) {
 		s.InstallTracingFilter(tp, otelrestful.WithPublicEndpoint())
@@ -278,6 +289,7 @@ type HostInterface interface {
 func NewServer(
 	host HostInterface,
 	resourceAnalyzer stats.ResourceAnalyzer,
+	checkers []healthz.HealthChecker,
 	auth AuthInterface,
 	kubeCfg *kubeletconfiginternal.KubeletConfiguration) Server {
 
@@ -288,6 +300,7 @@ func NewServer(
 		restfulCont:          &filteringContainer{Container: restful.NewContainer()},
 		metricsBuckets:       sets.New[string](),
 		metricsMethodBuckets: sets.New[string]("OPTIONS", "GET", "HEAD", "POST", "PUT", "DELETE", "TRACE", "CONNECT"),
+		extendedCheckers:     checkers,
 	}
 	if auth != nil {
 		server.InstallAuthFilter()
@@ -392,11 +405,13 @@ func (s *Server) getMetricMethodBucket(method string) string {
 // patterns with the restful Container.
 func (s *Server) InstallDefaultHandlers() {
 	s.addMetricsBucketMatcher("healthz")
-	healthz.InstallHandler(s.restfulCont,
+	checkers := []healthz.HealthChecker{
 		healthz.PingHealthz,
 		healthz.LogHealthz,
 		healthz.NamedCheck("syncloop", s.host.SyncLoopHealthCheck),
-	)
+	}
+	checkers = append(checkers, s.extendedCheckers...)
+	healthz.InstallHandler(s.restfulCont, checkers...)
 
 	slis.SLIMetricsWithReset{}.Install(s.restfulCont)
 
@@ -559,6 +574,11 @@ func (s *Server) InstallDebuggingHandlers() {
 	s.addMetricsBucketMatcher("configz")
 	configz.InstallHandler(s.restfulCont)
 
+	if utilfeature.DefaultFeatureGate.Enabled(zpagesfeatures.ComponentStatusz) {
+		s.addMetricsBucketMatcher("statusz")
+		statusz.Install(s.restfulCont, ComponentKubelet, statusz.NewRegistry())
+	}
+
 	// The /runningpods endpoint is used for testing only.
 	s.addMetricsBucketMatcher("runningpods")
 	ws = new(restful.WebService)
@@ -716,6 +736,13 @@ func (s *Server) getContainerLogs(request *restful.Request, response *restful.Re
 		response.WriteError(http.StatusBadRequest, fmt.Errorf(`{"message": "Unable to decode query."}`))
 		return
 	}
+	if utilfeature.DefaultFeatureGate.Enabled(features.PodLogsQuerySplitStreams) {
+		// Even with defaulters, logOptions.Stream can be nil if no arguments are provided at all.
+		if logOptions.Stream == nil {
+			// Default to "All" to maintain backward compatibility.
+			logOptions.Stream = ptr.To(v1.LogStreamAll)
+		}
+	}
 	logOptions.TypeMeta = metav1.TypeMeta{}
 	if errs := validation.ValidatePodLogOptions(logOptions); len(errs) > 0 {
 		response.WriteError(http.StatusUnprocessableEntity, fmt.Errorf(`{"message": "Invalid request."}`))
@@ -737,9 +764,40 @@ func (s *Server) getContainerLogs(request *restful.Request, response *restful.Re
 		response.WriteError(http.StatusInternalServerError, fmt.Errorf("unable to convert %v into http.Flusher, cannot show logs", reflect.TypeOf(response)))
 		return
 	}
-	fw := flushwriter.Wrap(response.ResponseWriter)
+
+	var (
+		stdout io.Writer
+		stderr io.Writer
+		fw     = flushwriter.Wrap(response.ResponseWriter)
+	)
+	if utilfeature.DefaultFeatureGate.Enabled(features.PodLogsQuerySplitStreams) {
+		wantedStream := logOptions.Stream
+		// No stream type specified, default to All
+		if wantedStream == nil {
+			allStream := v1.LogStreamAll
+			wantedStream = &allStream
+		}
+		switch *wantedStream {
+		case v1.LogStreamStdout:
+			stdout, stderr = fw, nil
+		case v1.LogStreamStderr:
+			stdout, stderr = nil, fw
+		case v1.LogStreamAll:
+			stdout, stderr = fw, fw
+		default:
+			_ = response.WriteError(http.StatusBadRequest, fmt.Errorf("invalid stream type %q", *logOptions.Stream))
+			return
+		}
+	} else {
+		if logOptions.Stream != nil && *logOptions.Stream != v1.LogStreamAll {
+			_ = response.WriteError(http.StatusBadRequest, fmt.Errorf("unable to return the given log stream: %q. Please enable PodLogsQuerySplitStreams feature gate in kubelet", *logOptions.Stream))
+			return
+		}
+		stdout, stderr = fw, fw
+	}
+
 	response.Header().Set("Transfer-Encoding", "chunked")
-	if err := s.host.GetKubeletContainerLogs(ctx, kubecontainer.GetPodFullName(pod), containerName, logOptions, fw, fw); err != nil {
+	if err := s.host.GetKubeletContainerLogs(ctx, kubecontainer.GetPodFullName(pod), containerName, logOptions, stdout, stderr); err != nil {
 		response.WriteError(http.StatusBadRequest, err)
 		return
 	}

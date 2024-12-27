@@ -49,11 +49,11 @@ func podRequests(pod *corev1.Pod) corev1.ResourceList {
 	for _, container := range pod.Spec.Containers {
 		containerReqs := container.Resources.Requests
 		cs, found := containerStatuses[container.Name]
-		if found {
+		if found && cs.Resources != nil {
 			if pod.Status.Resize == corev1.PodResizeStatusInfeasible {
-				containerReqs = cs.AllocatedResources.DeepCopy()
+				containerReqs = cs.Resources.Requests.DeepCopy()
 			} else {
-				containerReqs = max(container.Resources.Requests, cs.AllocatedResources)
+				containerReqs = max(container.Resources.Requests, cs.Resources.Requests)
 			}
 		}
 		addResourceList(reqs, containerReqs)
@@ -254,7 +254,7 @@ func convertResourceEphemeralStorageToString(ephemeralStorage *resource.Quantity
 	return strconv.FormatInt(m, 10), nil
 }
 
-var standardContainerResources = sets.NewString(
+var standardContainerResources = sets.New[string](
 	string(corev1.ResourceCPU),
 	string(corev1.ResourceMemory),
 	string(corev1.ResourceEphemeralStorage),

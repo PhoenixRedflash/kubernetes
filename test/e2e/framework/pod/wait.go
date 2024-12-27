@@ -475,7 +475,7 @@ func WaitForPodSuccessInNamespaceTimeout(ctx context.Context, c clientset.Interf
 			ginkgo.By("Saw pod success")
 			return true, nil
 		case v1.PodFailed:
-			return true, gomega.StopTrying(fmt.Sprintf("pod %q failed with status: %+v", podName, pod.Status))
+			return true, gomega.StopTrying(fmt.Sprintf("pod %q failed with status: \n%s", podName, format.Object(pod.Status, 1)))
 		default:
 			return false, nil
 		}
@@ -801,11 +801,23 @@ func WaitForPodScheduled(ctx context.Context, c clientset.Interface, namespace, 
 func WaitForPodContainerStarted(ctx context.Context, c clientset.Interface, namespace, podName string, containerIndex int, timeout time.Duration) error {
 	conditionDesc := fmt.Sprintf("container %d started", containerIndex)
 	return WaitForPodCondition(ctx, c, namespace, podName, conditionDesc, timeout, func(pod *v1.Pod) (bool, error) {
-		if containerIndex > len(pod.Status.ContainerStatuses)-1 {
+		if containerIndex >= len(pod.Status.ContainerStatuses) {
 			return false, nil
 		}
 		containerStatus := pod.Status.ContainerStatuses[containerIndex]
 		return *containerStatus.Started, nil
+	})
+}
+
+// WaitForPodInitContainerStarted waits for the given Pod init container to start.
+func WaitForPodInitContainerStarted(ctx context.Context, c clientset.Interface, namespace, podName string, initContainerIndex int, timeout time.Duration) error {
+	conditionDesc := fmt.Sprintf("init container %d started", initContainerIndex)
+	return WaitForPodCondition(ctx, c, namespace, podName, conditionDesc, timeout, func(pod *v1.Pod) (bool, error) {
+		if initContainerIndex >= len(pod.Status.InitContainerStatuses) {
+			return false, nil
+		}
+		initContainerStatus := pod.Status.InitContainerStatuses[initContainerIndex]
+		return *initContainerStatus.Started, nil
 	})
 }
 

@@ -298,7 +298,7 @@ func Run(ctx context.Context, c *config.CompletedConfig) error {
 			"kube-controller-manager",
 			binaryVersion.FinalizeVersion(),
 			emulationVersion.FinalizeVersion(),
-			[]coordinationv1.CoordinatedLeaseStrategy{coordinationv1.OldestEmulationVersion},
+			coordinationv1.OldestEmulationVersion,
 		)
 		if err != nil {
 			return err
@@ -567,8 +567,10 @@ func NewControllerDescriptors() map[string]*ControllerDescriptor {
 	register(newClusterRoleAggregrationControllerDescriptor())
 	register(newPersistentVolumeClaimProtectionControllerDescriptor())
 	register(newPersistentVolumeProtectionControllerDescriptor())
+	register(newVolumeAttributesClassProtectionControllerDescriptor())
 	register(newTTLAfterFinishedControllerDescriptor())
 	register(newRootCACertificatePublisherControllerDescriptor())
+	register(newKubeAPIServerSignerClusterTrustBundledPublisherDescriptor())
 	register(newEphemeralVolumeControllerDescriptor())
 
 	// feature gated
@@ -579,6 +581,7 @@ func NewControllerDescriptors() map[string]*ControllerDescriptor {
 	register(newTaintEvictionControllerDescriptor())
 	register(newServiceCIDRsControllerDescriptor())
 	register(newStorageVersionMigratorControllerDescriptor())
+	register(newSELinuxWarningControllerDescriptor())
 
 	for _, alias := range aliases.UnsortedList() {
 		if _, ok := controllers[alias]; ok {
@@ -802,6 +805,7 @@ func startServiceAccountTokenController(ctx context.Context, controllerContext C
 		return nil, false, fmt.Errorf("failed to build token generator: %v", err)
 	}
 	tokenController, err := serviceaccountcontroller.NewTokensController(
+		logger,
 		controllerContext.InformerFactory.Core().V1().ServiceAccounts(),
 		controllerContext.InformerFactory.Core().V1().Secrets(),
 		rootClientBuilder.ClientOrDie("tokens-controller"),
