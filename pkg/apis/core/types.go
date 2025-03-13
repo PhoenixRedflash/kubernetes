@@ -3958,7 +3958,7 @@ type AppArmorProfile struct {
 	//   Localhost - a profile pre-loaded on the node.
 	//   RuntimeDefault - the container runtime's default profile.
 	//   Unconfined - no AppArmor enforcement.
-	// +unionDescriminator
+	// +unionDiscriminator
 	Type AppArmorProfileType
 
 	// localhostProfile indicates a profile loaded on the node that should be used.
@@ -6048,6 +6048,9 @@ const (
 	ResourceQuotaScopePriorityClass ResourceQuotaScope = "PriorityClass"
 	// Match all pod objects that have cross-namespace pod (anti)affinity mentioned
 	ResourceQuotaScopeCrossNamespacePodAffinity ResourceQuotaScope = "CrossNamespacePodAffinity"
+
+	// Match all pvc objects that have volume attributes class mentioned.
+	ResourceQuotaScopeVolumeAttributesClass ResourceQuotaScope = "VolumeAttributesClass"
 )
 
 // ResourceQuotaSpec defines the desired hard limits to enforce for Quota
