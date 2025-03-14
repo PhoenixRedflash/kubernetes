@@ -1,5 +1,5 @@
 /*
-Copyright 2014 The Kubernetes Authors.
+Copyright 2025 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,7 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// +k8s:openapi-gen=true
+package userns
 
-// Package version supplies the type for version information.
-package version
+import "k8s.io/apimachinery/pkg/types"
+
+// Here go types that are common for all supported OS (windows, linux).
+
+type userNsPodsManager interface {
+	HandlerSupportsUserNamespaces(runtimeHandler string) (bool, error)
+	GetPodDir(podUID types.UID) string
+	ListPodsFromDisk() ([]types.UID, error)
+	GetKubeletMappings() (uint32, uint32, error)
+	GetMaxPods() int
+}
