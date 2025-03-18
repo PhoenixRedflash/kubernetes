@@ -1117,6 +1117,10 @@
     lockToDefault: false
     preRelease: Alpha
     version: "1.32"
+  - default: true
+    lockToDefault: false
+    preRelease: Beta
+    version: "1.33"
 - name: ResilientWatchCacheInitialization
   versionedSpecs:
   - default: true
@@ -1367,6 +1371,12 @@
     lockToDefault: true
     preRelease: GA
     version: "1.31"
+- name: StorageCapacityScoring
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "1.33"
 - name: StorageNamespaceIndex
   versionedSpecs:
   - default: true
@@ -1577,12 +1587,6 @@
     lockToDefault: false
     preRelease: Beta
     version: "1.31"
-- name: VolumeCapacityPriority
-  versionedSpecs:
-  - default: false
-    lockToDefault: false
-    preRelease: Alpha
-    version: "1.21"
 - name: WatchCacheInitializationPostStartHook
   versionedSpecs:
   - default: false
