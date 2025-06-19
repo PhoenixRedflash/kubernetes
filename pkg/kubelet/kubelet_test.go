@@ -381,7 +381,6 @@ func newTestKubeletWithImageList(
 	// setup shutdown manager
 	shutdownManager := nodeshutdown.NewManager(&nodeshutdown.Config{
 		Logger:                          logger,
-		ProbeManager:                    kubelet.probeManager,
 		Recorder:                        fakeRecorder,
 		NodeRef:                         nodeRef,
 		GetPodsFunc:                     kubelet.podManager.GetPods,
@@ -424,7 +423,6 @@ func newTestKubeletWithImageList(
 		kubelet.podWorkers,
 		fakeKubeClient,
 		kubelet.volumePluginMgr,
-		fakeRuntime,
 		kubelet.mounter,
 		kubelet.hostutil,
 		kubelet.getPodsDir(),
