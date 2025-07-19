@@ -51,6 +51,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
@@ -686,6 +687,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		klet.GetActivePods,
 		klet.podManager.GetPodByUID,
 		klet.sourcesReady,
+		kubeDeps.Recorder,
 	)
 
 	klet.resourceAnalyzer = serverstats.NewResourceAnalyzer(klet, kubeCfg.VolumeStatsAggPeriod.Duration, kubeDeps.Recorder)
@@ -2648,11 +2650,12 @@ func (kl *Kubelet) HandlePodAdditions(pods []*v1.Pod) {
 		})
 	}
 	if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
+		kl.statusManager.BackfillPodResizeConditions(pods)
 		for _, uid := range pendingResizes {
 			kl.allocationManager.PushPendingResize(uid)
 		}
 		if len(pendingResizes) > 0 {
-			kl.allocationManager.RetryPendingResizes()
+			kl.allocationManager.RetryPendingResizes(allocation.TriggerReasonPodsAdded)
 		}
 	}
 }
@@ -2662,6 +2665,7 @@ func (kl *Kubelet) HandlePodAdditions(pods []*v1.Pod) {
 func (kl *Kubelet) HandlePodUpdates(pods []*v1.Pod) {
 	start := kl.clock.Now()
 	for _, pod := range pods {
+		oldPod, _ := kl.podManager.GetPodByUID(pod.UID)
 		kl.podManager.UpdatePod(pod)
 
 		pod, mirrorPod, wasMirror := kl.podManager.GetPodAndMirrorPod(pod)
@@ -2673,16 +2677,18 @@ func (kl *Kubelet) HandlePodUpdates(pods []*v1.Pod) {
 		}
 
 		if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
-			_, updatedFromAllocation := kl.allocationManager.UpdatePodFromAllocation(pod)
-			if updatedFromAllocation {
-				kl.allocationManager.PushPendingResize(pod.UID)
-				// TODO (natasha41575): If the resize is immediately actuated, it will trigger a pod sync
-				// and we will end up calling UpdatePod twice. Figure out if there is a way to avoid this.
-				kl.allocationManager.RetryPendingResizes()
-			} else {
-				// We can hit this case if a pending resize has been reverted,
-				// so we need to clear the pending resize condition.
-				kl.statusManager.ClearPodResizePendingCondition(pod.UID)
+			if recordContainerResizeOperations(oldPod, pod) {
+				_, updatedFromAllocation := kl.allocationManager.UpdatePodFromAllocation(pod)
+				if updatedFromAllocation {
+					kl.allocationManager.PushPendingResize(pod.UID)
+					// TODO(natasha41575): If the resize is immediately actuated, it will trigger a pod sync
+					// and we will end up calling UpdatePod twice. Figure out if there is a way to avoid this.
+					kl.allocationManager.RetryPendingResizes(allocation.TriggerReasonPodUpdated)
+				} else {
+					// We can hit this case if a pending resize has been reverted,
+					// so we need to clear the pending resize condition.
+					kl.statusManager.ClearPodResizePendingCondition(pod.UID)
+				}
 			}
 		}
 
@@ -2693,6 +2699,69 @@ func (kl *Kubelet) HandlePodUpdates(pods []*v1.Pod) {
 			StartTime:  start,
 		})
 	}
+}
+
+// recordContainerResizeOperations records if any of the pod's containers needs to be resized, and returns
+// true if so
+func recordContainerResizeOperations(oldPod, newPod *v1.Pod) bool {
+	hasResize := false
+	if oldPod == nil {
+		// This should never happen.
+		return true
+	}
+	for oldContainer, containerType := range podutil.ContainerIter(&oldPod.Spec, podutil.InitContainers|podutil.Containers) {
+		if !allocation.IsResizableContainer(oldContainer, containerType) {
+			continue
+		}
+
+		var newContainer *v1.Container
+		for new, newType := range podutil.ContainerIter(&newPod.Spec, podutil.InitContainers|podutil.Containers) {
+			if !allocation.IsResizableContainer(new, newType) {
+				continue
+			}
+			if new.Name == oldContainer.Name && containerType == newType {
+				newContainer = new
+			}
+		}
+
+		newResources := newContainer.Resources
+		oldResources := oldContainer.Resources
+
+		if op := resizeOperationForResources(newResources.Requests.Memory(), oldResources.Requests.Memory()); op != "" {
+			hasResize = true
+			metrics.ContainerRequestedResizes.WithLabelValues("memory", "requests", op).Inc()
+		}
+		if op := resizeOperationForResources(newResources.Limits.Memory(), oldResources.Limits.Memory()); op != "" {
+			hasResize = true
+			metrics.ContainerRequestedResizes.WithLabelValues("memory", "limits", op).Inc()
+		}
+		if op := resizeOperationForResources(newResources.Requests.Cpu(), oldResources.Requests.Cpu()); op != "" {
+			hasResize = true
+			metrics.ContainerRequestedResizes.WithLabelValues("cpu", "requests", op).Inc()
+		}
+		if op := resizeOperationForResources(newResources.Limits.Cpu(), oldResources.Limits.Cpu()); op != "" {
+			hasResize = true
+			metrics.ContainerRequestedResizes.WithLabelValues("cpu", "limits", op).Inc()
+		}
+	}
+
+	return hasResize
+}
+
+func resizeOperationForResources(new, old *resource.Quantity) string {
+	if new.IsZero() && !old.IsZero() {
+		return "remove"
+	}
+	if old.IsZero() && !new.IsZero() {
+		return "add"
+	}
+	if new.Cmp(*old) < 0 {
+		return "decrease"
+	}
+	if new.Cmp(*old) > 0 {
+		return "increase"
+	}
+	return ""
 }
 
 // HandlePodRemoves is the callback in the SyncHandler interface for pods
@@ -2726,7 +2795,7 @@ func (kl *Kubelet) HandlePodRemoves(pods []*v1.Pod) {
 	}
 
 	if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
-		kl.allocationManager.RetryPendingResizes()
+		kl.allocationManager.RetryPendingResizes(allocation.TriggerReasonPodsRemoved)
 	}
 }
 
