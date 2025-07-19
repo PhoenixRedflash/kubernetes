@@ -70,6 +70,7 @@ import (
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/component-base/zpages/flagz"
 	"k8s.io/component-helpers/apimachinery/lease"
+	resourcehelper "k8s.io/component-helpers/resource"
 	internalapi "k8s.io/cri-api/pkg/apis"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 	remote "k8s.io/cri-client/pkg"
@@ -287,7 +288,7 @@ type Bootstrap interface {
 	StartGarbageCollection()
 	ListenAndServe(kubeCfg *kubeletconfiginternal.KubeletConfiguration, tlsOptions *server.TLSOptions, auth server.AuthInterface, tp trace.TracerProvider)
 	ListenAndServeReadOnly(address net.IP, port uint, tp trace.TracerProvider)
-	ListenAndServePodResources()
+	ListenAndServePodResources(ctx context.Context)
 	Run(<-chan kubetypes.PodUpdate)
 }
 
@@ -1900,10 +1901,9 @@ func (kl *Kubelet) SyncPod(ctx context.Context, updateType kubetypes.SyncPodType
 	if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
 		// Check whether a resize is in progress so we can set the PodResizeInProgressCondition accordingly.
 		kl.allocationManager.CheckPodResizeInProgress(pod, podStatus)
-		// TODO(natasha41575): There is a race condition here, where the goroutine in the
+		// TODO(#132851): There is a race condition here, where the goroutine in the
 		// allocation manager may allocate a new resize and unconditionally set the
 		// PodResizeInProgressCondition before we set the status below.
-		// See https://github.com/kubernetes/kubernetes/issues/132851.
 	}
 
 	// Generate final API pod status with pod and status manager status
@@ -2006,7 +2006,7 @@ func (kl *Kubelet) SyncPod(ctx context.Context, updateType kubetypes.SyncPodType
 	}
 
 	// Create Mirror Pod for Static Pod if it doesn't already exist
-	kl.tryReconcileMirrorPods(pod, mirrorPod)
+	kl.tryReconcileMirrorPods(ctx, pod, mirrorPod)
 
 	// Make data directories for the pod
 	if err := kl.makePodDataDirs(pod); err != nil {
@@ -2804,9 +2804,12 @@ func (kl *Kubelet) HandlePodRemoves(pods []*v1.Pod) {
 // pod is updated in the API.
 func (kl *Kubelet) HandlePodReconcile(pods []*v1.Pod) {
 	start := kl.clock.Now()
+	retryPendingResizes := false
+	hasPendingResizes := kl.allocationManager.HasPendingResizes()
 	for _, pod := range pods {
 		// Update the pod in pod manager, status manager will do periodically reconcile according
 		// to the pod manager.
+		oldPod, _ := kl.podManager.GetPodByUID(pod.UID)
 		kl.podManager.UpdatePod(pod)
 
 		pod, mirrorPod, wasMirror := kl.podManager.GetPodAndMirrorPod(pod)
@@ -2816,6 +2819,28 @@ func (kl *Kubelet) HandlePodReconcile(pods []*v1.Pod) {
 				continue
 			}
 			// Static pods should be reconciled the same way as regular pods
+		}
+
+		if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
+			// If there are pending resizes, check whether the requests shrank as a result of the status
+			// resources changing.
+			if hasPendingResizes && !retryPendingResizes && oldPod != nil {
+				opts := resourcehelper.PodResourcesOptions{
+					UseStatusResources:    true,
+					SkipPodLevelResources: !utilfeature.DefaultFeatureGate.Enabled(features.PodLevelResources),
+				}
+
+				// Ignore desired resources when aggregating the resources.
+				allocatedOldPod, _ := kl.allocationManager.UpdatePodFromAllocation(oldPod)
+				allocatedPod, _ := kl.allocationManager.UpdatePodFromAllocation(pod)
+
+				oldRequest := resourcehelper.PodRequests(allocatedOldPod, opts)
+				newRequest := resourcehelper.PodRequests(allocatedPod, opts)
+
+				// If cpu or memory requests shrank, then retry the pending resizes.
+				retryPendingResizes = newRequest.Memory().Cmp(*oldRequest.Memory()) < 0 ||
+					newRequest.Cpu().Cmp(*oldRequest.Cpu()) < 0
+			}
 		}
 
 		// TODO: reconcile being calculated in the config manager is questionable, and avoiding
@@ -2844,6 +2869,12 @@ func (kl *Kubelet) HandlePodReconcile(pods []*v1.Pod) {
 			if podStatus, err := kl.podCache.Get(pod.UID); err == nil {
 				kl.containerDeletor.deleteContainersInPod("", podStatus, true)
 			}
+		}
+	}
+
+	if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
+		if retryPendingResizes {
+			kl.allocationManager.RetryPendingResizes(allocation.TriggerReasonPodResized)
 		}
 	}
 }
@@ -2984,7 +3015,7 @@ func (pp *kubeletPodsProvider) GetPodByName(namespace, name string) (*v1.Pod, bo
 }
 
 // ListenAndServePodResources runs the kubelet podresources grpc service
-func (kl *Kubelet) ListenAndServePodResources() {
+func (kl *Kubelet) ListenAndServePodResources(ctx context.Context) {
 	endpoint, err := util.LocalEndpoint(kl.getPodResourcesDir(), podresources.Socket)
 	if err != nil {
 		klog.V(2).InfoS("Failed to get local endpoint for PodResources endpoint", "err", err)
@@ -2999,7 +3030,7 @@ func (kl *Kubelet) ListenAndServePodResources() {
 		DynamicResources: kl.containerManager,
 	}
 
-	server.ListenAndServePodResources(endpoint, providers)
+	server.ListenAndServePodResources(ctx, endpoint, providers)
 }
 
 // Delete the eligible dead container instances in a pod. Depending on the configuration, the latest dead containers may be kept around.
@@ -3105,7 +3136,7 @@ func (kl *Kubelet) UnprepareDynamicResources(ctx context.Context, pod *v1.Pod) e
 
 // Ensure Mirror Pod for Static Pod exists and matches the current pod definition.
 // The function logs and ignores any errors.
-func (kl *Kubelet) tryReconcileMirrorPods(staticPod, mirrorPod *v1.Pod) {
+func (kl *Kubelet) tryReconcileMirrorPods(ctx context.Context, staticPod, mirrorPod *v1.Pod) {
 	if !kubetypes.IsStaticPod(staticPod) {
 		return
 	}
@@ -3114,9 +3145,9 @@ func (kl *Kubelet) tryReconcileMirrorPods(staticPod, mirrorPod *v1.Pod) {
 		if mirrorPod.DeletionTimestamp != nil || !kubepod.IsMirrorPodOf(mirrorPod, staticPod) {
 			// The mirror pod is semantically different from the static pod. Remove
 			// it. The mirror pod will get recreated later.
-			klog.InfoS("Trying to delete pod", "pod", klog.KObj(mirrorPod), "podUID", mirrorPod.ObjectMeta.UID)
+			klog.InfoS("Trying to delete pod", "pod", klog.KObj(mirrorPod), "podUID", mirrorPod.UID)
 			podFullName := kubecontainer.GetPodFullName(staticPod)
-			if ok, err := kl.mirrorPodClient.DeleteMirrorPod(podFullName, &mirrorPod.ObjectMeta.UID); err != nil {
+			if ok, err := kl.mirrorPodClient.DeleteMirrorPod(ctx, podFullName, &mirrorPod.UID); err != nil {
 				klog.ErrorS(err, "Failed deleting mirror pod", "pod", klog.KObj(mirrorPod))
 			} else if ok {
 				deleted = ok
@@ -3132,7 +3163,7 @@ func (kl *Kubelet) tryReconcileMirrorPods(staticPod, mirrorPod *v1.Pod) {
 			klog.InfoS("No need to create a mirror pod, since node has been removed from the cluster", "node", klog.KRef("", string(kl.nodeName)))
 		} else {
 			klog.InfoS("Creating a mirror pod for static pod", "pod", klog.KObj(staticPod))
-			if err := kl.mirrorPodClient.CreateMirrorPod(staticPod); err != nil {
+			if err := kl.mirrorPodClient.CreateMirrorPod(ctx, staticPod); err != nil {
 				klog.ErrorS(err, "Failed creating a mirror pod", "pod", klog.KObj(staticPod))
 			}
 		}
@@ -3155,7 +3186,7 @@ func (kl *Kubelet) fastStaticPodsRegistration(ctx context.Context) {
 
 	staticPodToMirrorPodMap := kl.podManager.GetStaticPodToMirrorPodMap()
 	for staticPod, mirrorPod := range staticPodToMirrorPodMap {
-		kl.tryReconcileMirrorPods(staticPod, mirrorPod)
+		kl.tryReconcileMirrorPods(ctx, staticPod, mirrorPod)
 	}
 }
 
