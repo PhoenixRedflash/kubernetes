@@ -157,6 +157,12 @@ func New(c *kubernetes.Client, compactor Compactor, codec runtime.Codec, newFunc
 	if resourcePrefix == "" {
 		return nil, fmt.Errorf("resourcePrefix cannot be empty")
 	}
+	if resourcePrefix == "/" {
+		return nil, fmt.Errorf("resourcePrefix cannot be /")
+	}
+	if !strings.HasPrefix(resourcePrefix, "/") {
+		return nil, fmt.Errorf("resourcePrefix needs to start from /")
+	}
 
 	listErrAggrFactory := defaultListErrorAggregatorFactory
 	if utilfeature.DefaultFeatureGate.Enabled(features.AllowUnsafeMalformedObjectDeletion) {
@@ -1105,32 +1111,14 @@ func (s *store) validateMinimumResourceVersion(minimumResourceVersion string, ac
 }
 
 func (s *store) prepareKey(key string, recursive bool) (string, error) {
-	if key == ".." ||
-		strings.HasPrefix(key, "../") ||
-		strings.HasSuffix(key, "/..") ||
-		strings.Contains(key, "/../") {
-		return "", fmt.Errorf("invalid key: %q", key)
-	}
-	if key == "." ||
-		strings.HasPrefix(key, "./") ||
-		strings.HasSuffix(key, "/.") ||
-		strings.Contains(key, "/./") {
-		return "", fmt.Errorf("invalid key: %q", key)
-	}
-	if key == "" || key == "/" {
-		return "", fmt.Errorf("empty key: %q", key)
+	key, err := storage.PrepareKey(s.resourcePrefix, key, recursive)
+	if err != nil {
+		return "", err
 	}
 	// We ensured that pathPrefix ends in '/' in construction, so skip any leading '/' in the key now.
 	startIndex := 0
 	if key[0] == '/' {
 		startIndex = 1
-	}
-	// For recursive requests, we need to make sure the key ended with "/" so that we only
-	// get children "directories". e.g. if we have key "/a", "/a/b", "/ab", getting keys
-	// with prefix "/a" will return all three, while with prefix "/a/" will return only
-	// "/a/b" which is the correct answer.
-	if recursive && !strings.HasSuffix(key, "/") {
-		key += "/"
 	}
 	return s.pathPrefix + key[startIndex:], nil
 }
