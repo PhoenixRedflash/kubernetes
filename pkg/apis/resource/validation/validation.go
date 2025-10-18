@@ -236,7 +236,7 @@ func validateDeviceRequest(request resource.DeviceRequest, fldPath *field.Path, 
 
 func validateDeviceSubRequest(subRequest resource.DeviceSubRequest, fldPath *field.Path, stored bool) field.ErrorList {
 	allErrs := validateRequestName(subRequest.Name, fldPath.Child("name"))
-	allErrs = append(allErrs, validateDeviceClass(subRequest.DeviceClassName, fldPath.Child("deviceClassName"))...)
+	allErrs = append(allErrs, validateDeviceClass(subRequest.DeviceClassName, fldPath.Child("deviceClassName")).MarkCoveredByDeclarative()...)
 	allErrs = append(allErrs, validateSelectorSlice(subRequest.Selectors, fldPath.Child("selectors"), stored)...)
 	allErrs = append(allErrs, validateDeviceAllocationMode(subRequest.AllocationMode, subRequest.Count, fldPath.Child("allocationMode"), fldPath.Child("count"))...)
 	for i, toleration := range subRequest.Tolerations {
@@ -424,7 +424,7 @@ func validateResourceClaimStatusUpdate(status, oldStatus *resource.ResourceClaim
 			deviceID := structured.MakeDeviceID(device.Driver, device.Pool, device.Device)
 			return structured.MakeSharedDeviceID(deviceID, (*types.UID)(device.ShareID))
 		},
-		fldPath.Child("devices"))...)
+		fldPath.Child("devices"), uniquenessCovered)...)
 
 	// Now check for invariants that must be valid for a ResourceClaim.
 	if len(status.ReservedFor) > 0 {
@@ -525,10 +525,10 @@ func validateAllocationConfigSource(source resource.AllocationConfigSource, fldP
 	var allErrs field.ErrorList
 	switch source {
 	case "":
-		allErrs = append(allErrs, field.Required(fldPath, ""))
+		allErrs = append(allErrs, field.Required(fldPath, "").MarkCoveredByDeclarative())
 	case resource.AllocationConfigSourceClaim, resource.AllocationConfigSourceClass:
 	default:
-		allErrs = append(allErrs, field.NotSupported(fldPath, source, []resource.AllocationConfigSource{resource.AllocationConfigSourceClaim, resource.AllocationConfigSourceClass}))
+		allErrs = append(allErrs, field.NotSupported(fldPath, source, []resource.AllocationConfigSource{resource.AllocationConfigSourceClaim, resource.AllocationConfigSourceClass}).MarkCoveredByDeclarative())
 	}
 	return allErrs
 }

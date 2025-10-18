@@ -124,6 +124,16 @@ func Validate_AllocatedDeviceStatus(ctx context.Context, op operation.Operation,
 	return errs
 }
 
+var symbolsForAllocationConfigSource = sets.New(resourcev1.AllocationConfigSourceClaim, resourcev1.AllocationConfigSourceClass)
+
+// Validate_AllocationConfigSource validates an instance of AllocationConfigSource according
+// to declarative validation rules in the API schema.
+func Validate_AllocationConfigSource(ctx context.Context, op operation.Operation, fldPath *field.Path, obj, oldObj *resourcev1.AllocationConfigSource) (errs field.ErrorList) {
+	errs = append(errs, validate.Enum(ctx, op, fldPath, obj, oldObj, symbolsForAllocationConfigSource, nil)...)
+
+	return errs
+}
+
 // Validate_AllocationResult validates an instance of AllocationResult according
 // to declarative validation rules in the API schema.
 func Validate_AllocationResult(ctx context.Context, op operation.Operation, fldPath *field.Path, obj, oldObj *resourcev1.AllocationResult) (errs field.ErrorList) {
@@ -147,7 +157,29 @@ func Validate_AllocationResult(ctx context.Context, op operation.Operation, fldP
 // Validate_DeviceAllocationConfiguration validates an instance of DeviceAllocationConfiguration according
 // to declarative validation rules in the API schema.
 func Validate_DeviceAllocationConfiguration(ctx context.Context, op operation.Operation, fldPath *field.Path, obj, oldObj *resourcev1.DeviceAllocationConfiguration) (errs field.ErrorList) {
-	// field resourcev1.DeviceAllocationConfiguration.Source has no validation
+	// field resourcev1.DeviceAllocationConfiguration.Source
+	errs = append(errs,
+		func(fldPath *field.Path, obj, oldObj *resourcev1.AllocationConfigSource) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if op.Type == operation.Update && (obj == oldObj || (obj != nil && oldObj != nil && *obj == *oldObj)) {
+				return nil
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			// call the type's validation function
+			errs = append(errs, Validate_AllocationConfigSource(ctx, op, fldPath, obj, oldObj)...)
+			return
+		}(fldPath.Child("source"), &obj.Source, safe.Field(oldObj, func(oldObj *resourcev1.DeviceAllocationConfiguration) *resourcev1.AllocationConfigSource {
+			return &oldObj.Source
+		}))...)
+
 	// field resourcev1.DeviceAllocationConfiguration.Requests has no validation
 
 	// field resourcev1.DeviceAllocationConfiguration.DeviceConfiguration
@@ -637,7 +669,26 @@ func Validate_DeviceRequestAllocationResult(ctx context.Context, op operation.Op
 // to declarative validation rules in the API schema.
 func Validate_DeviceSubRequest(ctx context.Context, op operation.Operation, fldPath *field.Path, obj, oldObj *resourcev1.DeviceSubRequest) (errs field.ErrorList) {
 	// field resourcev1.DeviceSubRequest.Name has no validation
-	// field resourcev1.DeviceSubRequest.DeviceClassName has no validation
+
+	// field resourcev1.DeviceSubRequest.DeviceClassName
+	errs = append(errs,
+		func(fldPath *field.Path, obj, oldObj *string) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if op.Type == operation.Update && (obj == oldObj || (obj != nil && oldObj != nil && *obj == *oldObj)) {
+				return nil
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			errs = append(errs, validate.LongName(ctx, op, fldPath, obj, oldObj)...)
+			return
+		}(fldPath.Child("deviceClassName"), &obj.DeviceClassName, safe.Field(oldObj, func(oldObj *resourcev1.DeviceSubRequest) *string { return &oldObj.DeviceClassName }))...)
 
 	// field resourcev1.DeviceSubRequest.Selectors
 	errs = append(errs,
@@ -962,8 +1013,14 @@ func Validate_ResourceClaimStatus(ctx context.Context, op operation.Operation, f
 			if earlyReturn {
 				return // do not proceed
 			}
+			// lists with map semantics require unique keys
+			errs = append(errs, validate.Unique(ctx, op, fldPath, obj, oldObj, func(a resourcev1.AllocatedDeviceStatus, b resourcev1.AllocatedDeviceStatus) bool {
+				return a.Driver == b.Driver && a.Device == b.Device && a.Pool == b.Pool && ((a.ShareID == nil && b.ShareID == nil) || (a.ShareID != nil && b.ShareID != nil && *a.ShareID == *b.ShareID))
+			})...)
 			// iterate the list and call the type's validation function
-			errs = append(errs, validate.EachSliceVal(ctx, op, fldPath, obj, oldObj, nil, nil, Validate_AllocatedDeviceStatus)...)
+			errs = append(errs, validate.EachSliceVal(ctx, op, fldPath, obj, oldObj, func(a resourcev1.AllocatedDeviceStatus, b resourcev1.AllocatedDeviceStatus) bool {
+				return a.Driver == b.Driver && a.Device == b.Device && a.Pool == b.Pool && ((a.ShareID == nil && b.ShareID == nil) || (a.ShareID != nil && b.ShareID != nil && *a.ShareID == *b.ShareID))
+			}, validate.SemanticDeepEqual, Validate_AllocatedDeviceStatus)...)
 			return
 		}(fldPath.Child("devices"), obj.Devices, safe.Field(oldObj, func(oldObj *resourcev1.ResourceClaimStatus) []resourcev1.AllocatedDeviceStatus { return oldObj.Devices }))...)
 
