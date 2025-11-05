@@ -590,6 +590,12 @@ const (
 	// update the number of volumes that can be allocated on a node
 	MutableCSINodeAllocatableCount featuregate.Feature = "MutableCSINodeAllocatableCount"
 
+	// owner: @kannon92
+	// kep: https://kep.k8s.io/5440
+	//
+	// Enables mutable pod resources for suspended Jobs, regardless of whether they have started before.
+	MutablePodResourcesForSuspendedJobs featuregate.Feature = "MutablePodResourcesForSuspendedJobs"
+
 	// owner: @danwinship
 	// kep: https://kep.k8s.io/3866
 	//
@@ -1006,6 +1012,13 @@ const (
 	//
 	// Enables user specified volume attributes for persistent volumes, like iops and throughput.
 	VolumeAttributesClass featuregate.Feature = "VolumeAttributesClass"
+
+	// owner: @gnufied
+	// kep: https://kep.k8s.io/5030
+	//
+	// Enables volume limit scaling for CSI drivers. This allows scheduler to
+	// co-ordinate better with cluster-autoscaler for storage limits.
+	VolumeLimitScaling featuregate.Feature = "VolumeLimitScaling"
 
 	// owner: @ksubrmnn
 	//
@@ -1444,6 +1457,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 		{Version: version.MustParse("1.35"), Default: true, PreRelease: featuregate.Beta},
 	},
 
+	MutablePodResourcesForSuspendedJobs: {
+		{Version: version.MustParse("1.35"), Default: false, PreRelease: featuregate.Alpha},
+	},
+
 	NFTablesProxyMode: {
 		{Version: version.MustParse("1.29"), Default: false, PreRelease: featuregate.Alpha},
 		{Version: version.MustParse("1.31"), Default: true, PreRelease: featuregate.Beta},
@@ -1778,6 +1795,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 		{Version: version.MustParse("1.34"), Default: true, PreRelease: featuregate.GA},
 	},
 
+	VolumeLimitScaling: {
+		{Version: version.MustParse("1.35"), Default: false, PreRelease: featuregate.Alpha},
+	},
+
 	WinDSR: {
 		{Version: version.MustParse("1.14"), Default: false, PreRelease: featuregate.Alpha},
 		{Version: version.MustParse("1.33"), Default: true, PreRelease: featuregate.Beta},
@@ -1843,6 +1864,7 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 	genericfeatures.AggregatedDiscoveryRemoveBetaType: {
 		{Version: version.MustParse("1.0"), Default: false, PreRelease: featuregate.GA},
 		{Version: version.MustParse("1.33"), Default: true, PreRelease: featuregate.Deprecated},
+		{Version: version.MustParse("1.35"), Default: true, PreRelease: featuregate.Deprecated, LockToDefault: true},
 	},
 
 	genericfeatures.AllowParsingUserUIDFromCertAuth: {
@@ -2188,6 +2210,8 @@ var defaultKubernetesFeatureGateDependencies = map[featuregate.Feature][]feature
 
 	MutableCSINodeAllocatableCount: {},
 
+	MutablePodResourcesForSuspendedJobs: {},
+
 	NFTablesProxyMode: {},
 
 	NodeInclusionPolicyInPodTopologySpread: {},
@@ -2315,6 +2339,8 @@ var defaultKubernetesFeatureGateDependencies = map[featuregate.Feature][]feature
 	UserNamespacesSupport: {},
 
 	VolumeAttributesClass: {},
+
+	VolumeLimitScaling: {},
 
 	WinDSR: {},
 
