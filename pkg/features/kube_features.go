@@ -327,6 +327,16 @@ const (
 	// If enabled, it allows passing --service-account-signing-endpoint flag to configure external signer.
 	ExternalServiceAccountTokenSigner featuregate.Feature = "ExternalServiceAccountTokenSigner"
 
+	// owner: @erictune @wojtek-t
+	//
+	// Enables support for gang scheduling in kube-scheduler.
+	GangScheduling featuregate.Feature = "GangScheduling"
+
+	// owner: @erictune @wojtek-t
+	//
+	// Enables support for generic Workload API.
+	GenericWorkload featuregate.Feature = "GenericWorkload"
+
 	// owner: @vinayakankugoyal @thockin
 	//
 	// Controls if the gitRepo volume plugin is supported or not.
@@ -596,6 +606,13 @@ const (
 	// update the number of volumes that can be allocated on a node
 	MutableCSINodeAllocatableCount featuregate.Feature = "MutableCSINodeAllocatableCount"
 
+	// owner: huww98
+	// kep: https://kep.k8s.io/5381
+	//
+	// Makes PersistentVolume.Spec.NodeAffinity mutable, allowing CSI drivers to
+	// update the topology info when the data is migrated
+	MutablePVNodeAffinity featuregate.Feature = "MutablePVNodeAffinity"
+
 	// owner: @kannon92
 	// kep: https://kep.k8s.io/5440
 	//
@@ -613,6 +630,12 @@ const (
 	//
 	// Allows running kube-proxy with `--mode nftables`.
 	NFTablesProxyMode featuregate.Feature = "NFTablesProxyMode"
+
+	// owner: @pravk03, @tallclair
+	// kep: https://kep.k8s.io/5328
+	//
+	// Enables the DeclaredFeatures API in the NodeStatus, populated by the Kubelet. Also enables the scheduler filter using DeclaredFeatures.
+	NodeDeclaredFeatures featuregate.Feature = "NodeDeclaredFeatures"
 
 	// owner: @kerthcet
 	// kep: https://kep.k8s.io/3094
@@ -1264,6 +1287,14 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 		{Version: version.MustParse("1.34"), Default: true, PreRelease: featuregate.Beta},
 	},
 
+	GangScheduling: {
+		{Version: version.MustParse("1.35"), Default: false, PreRelease: featuregate.Alpha},
+	},
+
+	GenericWorkload: {
+		{Version: version.MustParse("1.35"), Default: false, PreRelease: featuregate.Alpha},
+	},
+
 	GitRepoVolumeDriver: {
 		{Version: version.MustParse("1.0"), Default: true, PreRelease: featuregate.GA},
 		{Version: version.MustParse("1.33"), Default: false, PreRelease: featuregate.Deprecated},
@@ -1474,6 +1505,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 		{Version: version.MustParse("1.35"), Default: true, PreRelease: featuregate.Beta},
 	},
 
+	MutablePVNodeAffinity: {
+		{Version: version.MustParse("1.35"), Default: false, PreRelease: featuregate.Alpha},
+	},
+
 	MutablePodResourcesForSuspendedJobs: {
 		{Version: version.MustParse("1.35"), Default: false, PreRelease: featuregate.Alpha},
 	},
@@ -1486,6 +1521,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 		{Version: version.MustParse("1.29"), Default: false, PreRelease: featuregate.Alpha},
 		{Version: version.MustParse("1.31"), Default: true, PreRelease: featuregate.Beta},
 		{Version: version.MustParse("1.33"), Default: true, PreRelease: featuregate.GA, LockToDefault: true},
+	},
+
+	NodeDeclaredFeatures: {
+		{Version: version.MustParse("1.35"), Default: false, PreRelease: featuregate.Alpha},
 	},
 
 	NodeInclusionPolicyInPodTopologySpread: {
@@ -2152,6 +2191,10 @@ var defaultKubernetesFeatureGateDependencies = map[featuregate.Feature][]feature
 
 	ExternalServiceAccountTokenSigner: {},
 
+	GangScheduling: {GenericWorkload},
+
+	GenericWorkload: {},
+
 	GitRepoVolumeDriver: {},
 
 	GracefulNodeShutdown: {},
@@ -2234,11 +2277,15 @@ var defaultKubernetesFeatureGateDependencies = map[featuregate.Feature][]feature
 
 	MutableCSINodeAllocatableCount: {},
 
+	MutablePVNodeAffinity: {},
+
 	MutablePodResourcesForSuspendedJobs: {},
 
 	MutableSchedulingDirectivesForSuspendedJobs: {},
 
 	NFTablesProxyMode: {},
+
+	NodeDeclaredFeatures: {},
 
 	NodeInclusionPolicyInPodTopologySpread: {},
 

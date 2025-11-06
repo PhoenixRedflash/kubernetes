@@ -46,6 +46,8 @@ type Features struct {
 	EnableAsyncPreemption                        bool
 	EnablePodLevelResources                      bool
 	EnableStorageCapacityScoring                 bool
+	EnableNodeDeclaredFeatures                   bool
+	EnableGangScheduling                         bool
 }
 
 // NewSchedulerFeaturesFromGates copies the current state of the feature gates into the struct.
@@ -72,5 +74,7 @@ func NewSchedulerFeaturesFromGates(featureGate featuregate.FeatureGate) Features
 		EnablePodLevelResources:                      featureGate.Enabled(features.PodLevelResources),
 		EnableDRAPartitionableDevices:                featureGate.Enabled(features.DRAPartitionableDevices),
 		EnableStorageCapacityScoring:                 featureGate.Enabled(features.StorageCapacityScoring),
+		EnableNodeDeclaredFeatures:                   featureGate.Enabled(features.NodeDeclaredFeatures),
+		EnableGangScheduling:                         featureGate.Enabled(features.GangScheduling),
 	}
 }

@@ -599,6 +599,18 @@
     lockToDefault: false
     preRelease: Beta
     version: "1.34"
+- name: GangScheduling
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "1.35"
+- name: GenericWorkload
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "1.35"
 - name: GitRepoVolumeDriver
   versionedSpecs:
   - default: true
@@ -1071,6 +1083,12 @@
     lockToDefault: false
     preRelease: Alpha
     version: "1.35"
+- name: MutablePVNodeAffinity
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "1.35"
 - name: MutableSchedulingDirectivesForSuspendedJobs
   versionedSpecs:
   - default: false
@@ -1101,6 +1119,12 @@
     lockToDefault: true
     preRelease: GA
     version: "1.33"
+- name: NodeDeclaredFeatures
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "1.35"
 - name: NodeInclusionPolicyInPodTopologySpread
   versionedSpecs:
   - default: false
