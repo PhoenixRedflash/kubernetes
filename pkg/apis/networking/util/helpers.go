@@ -1,6 +1,3 @@
-//go:build usegocmp
-// +build usegocmp
-
 /*
 Copyright 2025 The Kubernetes Authors.
 
@@ -17,15 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package diff
+package util
 
 import (
-	"github.com/google/go-cmp/cmp" //nolint:depguard
+	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Diff returns a string representation of the difference between two objects.
-// When built with the usegocmp tag, it uses go-cmp/cmp to generate a diff
-// between the objects.
-func Diff(a, b any) string {
-	return cmp.Diff(a, b)
+// HasDefaultAnnotation returns true if the object metadata has the default annotation set.
+func HasDefaultAnnotation(obj metav1.ObjectMeta) bool {
+	return obj.Annotations[networkingv1.AnnotationIsDefaultIngressClass] == "true"
 }
