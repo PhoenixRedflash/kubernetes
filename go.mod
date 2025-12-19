@@ -15,7 +15,6 @@ require (
 	github.com/JeffAshton/win_pdh v0.0.0-20161109143554-76bb4ee9f0ab
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/Microsoft/hnslib v0.1.2
-	github.com/armon/circbuf v0.0.0-20190214190532-5111143e8da2
 	github.com/blang/semver/v4 v4.0.0
 	github.com/container-storage-interface/spec v1.9.0
 	github.com/coredns/corefile-migration v1.0.29
@@ -41,8 +40,8 @@ require (
 	github.com/moby/ipvs v1.1.0
 	github.com/moby/sys/userns v0.1.0
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
-	github.com/onsi/ginkgo/v2 v2.27.2
-	github.com/onsi/gomega v1.38.2
+	github.com/onsi/ginkgo/v2 v2.27.3
+	github.com/onsi/gomega v1.38.3
 	github.com/opencontainers/cgroups v0.0.6
 	github.com/opencontainers/selinux v1.13.0
 	github.com/pmezard/go-difflib v1.0.0
@@ -115,7 +114,7 @@ require (
 	k8s.io/pod-security-admission v0.0.0
 	k8s.io/sample-apiserver v0.0.0
 	k8s.io/system-validators v1.12.1
-	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4
+	k8s.io/utils v0.0.0-20251219084037-98d557b7f1e7
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730
 	sigs.k8s.io/knftables v0.0.17
 	sigs.k8s.io/randfill v1.0.0

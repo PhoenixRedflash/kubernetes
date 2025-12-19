@@ -11,7 +11,7 @@ require (
 	github.com/go-logr/logr v1.4.3
 	github.com/google/cel-go v0.26.0
 	github.com/google/go-cmp v0.7.0
-	github.com/onsi/gomega v1.38.2
+	github.com/onsi/gomega v1.38.3
 	github.com/stretchr/testify v1.11.1
 	go.etcd.io/etcd/client/pkg/v3 v3.6.6
 	google.golang.org/grpc v1.72.2
@@ -22,7 +22,7 @@ require (
 	k8s.io/component-helpers v0.0.0
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/kubelet v0.0.0
-	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4
+	k8s.io/utils v0.0.0-20251219084037-98d557b7f1e7
 )
 
 require (
