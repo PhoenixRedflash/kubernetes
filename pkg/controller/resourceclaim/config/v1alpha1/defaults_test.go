@@ -1,5 +1,5 @@
 /*
-Copyright 2024 The Kubernetes Authors.
+Copyright The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,19 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package ktesting
+package v1alpha1
 
 import (
-	"fmt"
-	"time"
+	"testing"
+
+	kubectrlmgrconfigv1alpha1 "k8s.io/kube-controller-manager/config/v1alpha1"
 )
 
-var timeNow = time.Now // Can be stubbed out for testing.
-
-func klogHeader() string {
-	now := timeNow()
-	_, month, day := now.Date()
-	hour, minute, second := now.Clock()
-	return fmt.Sprintf("I%02d%02d %02d:%02d:%02d.%06d]",
-		month, day, hour, minute, second, now.Nanosecond()/1000)
+func TestRecommendedDefaultResourceClaimControllerConfiguration(t *testing.T) {
+	config := new(kubectrlmgrconfigv1alpha1.ResourceClaimControllerConfiguration)
+	RecommendedDefaultResourceClaimControllerConfiguration(config)
+	if config.ConcurrentSyncs != 50 {
+		t.Errorf("incorrect default value, expected 50 but got %v", config.ConcurrentSyncs)
+	}
 }

@@ -1,5 +1,5 @@
 /*
-Copyright 2024 The Kubernetes Authors.
+Copyright The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,19 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package ktesting
+package config
 
-import (
-	"fmt"
-	"time"
-)
-
-var timeNow = time.Now // Can be stubbed out for testing.
-
-func klogHeader() string {
-	now := timeNow()
-	_, month, day := now.Date()
-	hour, minute, second := now.Clock()
-	return fmt.Sprintf("I%02d%02d %02d:%02d:%02d.%06d]",
-		month, day, hour, minute, second, now.Nanosecond()/1000)
+// ResourceClaimControllerConfiguration contains elements configuring the resource claim controller.
+type ResourceClaimControllerConfiguration struct {
+	// ConcurrentSyncs is the number of operations (deleting a pod, updating a ResourcClaim status, etc.)
+	// that will be done concurrently. Larger number = processing, but more CPU (and network) load.
+	//
+	// The default is 50.
+	ConcurrentSyncs int32
 }

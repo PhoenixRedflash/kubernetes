@@ -1,5 +1,5 @@
 /*
-Copyright 2024 The Kubernetes Authors.
+Copyright The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,19 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package ktesting
+// +k8s:deepcopy-gen=package
+// +k8s:conversion-gen=k8s.io/kubernetes/pkg/controller/resourceclaim/config
+// +k8s:conversion-gen-external-types=k8s.io/kube-controller-manager/config/v1alpha1
 
-import (
-	"fmt"
-	"time"
-)
-
-var timeNow = time.Now // Can be stubbed out for testing.
-
-func klogHeader() string {
-	now := timeNow()
-	_, month, day := now.Date()
-	hour, minute, second := now.Clock()
-	return fmt.Sprintf("I%02d%02d %02d:%02d:%02d.%06d]",
-		month, day, hour, minute, second, now.Nanosecond()/1000)
-}
+package v1alpha1
