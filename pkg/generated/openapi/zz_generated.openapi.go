@@ -27054,7 +27054,7 @@ func schema_k8sio_api_core_v1_PodCondition(ref common.ReferenceCallback) common.
 					},
 					"observedGeneration": {
 						SchemaProps: spec.SchemaProps{
-							Description: "If set, this represents the .metadata.generation that the pod condition was set based upon. The PodObservedGenerationTracking feature gate must be enabled to use this field.",
+							Description: "If set, this represents the .metadata.generation that the pod condition was set based upon.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
@@ -64233,8 +64233,16 @@ func schema_controllers_node_config_v1alpha1_NodeControllerConfiguration(ref com
 							Format:      "int32",
 						},
 					},
+					"ConcurrentNodeStatusUpdates": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ConcurrentNodeStatusUpdates is the number of workers concurrently updating node statuses. If unspecified or 0, ConcurrentNodeSyncs is used instead",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
 				},
-				Required: []string{"ConcurrentNodeSyncs"},
+				Required: []string{"ConcurrentNodeSyncs", "ConcurrentNodeStatusUpdates"},
 			},
 		},
 	}
