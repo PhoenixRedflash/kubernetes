@@ -171,7 +171,7 @@ func testDeclarativeValidateUpdate(t *testing.T, apiVersion string) {
 			updateObj: mkValidStorageClass(TweakVolumeBindingModeNil()),
 			expectedErrs: field.ErrorList{
 				field.Invalid(field.NewPath("volumeBindingMode"), nil, "").WithOrigin("immutable"),
-				field.Required(field.NewPath("volumeBindingMode"), ""),
+				field.Required(field.NewPath("volumeBindingMode"), "").MarkFromImperative(),
 			},
 		},
 	}
