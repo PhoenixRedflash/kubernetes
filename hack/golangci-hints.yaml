@@ -121,7 +121,7 @@ linters:
       - linters:
         - kubeapilinter
         path-except: staging/src/k8s.io/api/.*
-        
+
       # Exceptions for kube-api-linter.
       # Exceptions are used for kube-api-linter to ignore existing issues that cannot be fixed without breaking changes.
       
@@ -479,7 +479,7 @@ linters:
           pkg: ^k8s\.io/client-go/applyconfigurations/
           msg: should not be used because managedFields was removed
         - pattern: \.Add$
-          pkg: ^k8s\.io/component-base/featuregate$         
+          pkg: ^k8s\.io/component-base/featuregate$
           msg: should not use Add, use AddVersioned instead
         - pattern: \.(ReportBeforeSuite|ReportAfterSuite)
           pkg: ^github\.com/onsi/ginkgo/v2$
