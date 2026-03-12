@@ -313,6 +313,12 @@
     lockToDefault: false
     preRelease: Beta
     version: "1.30"
+- name: ControllerManagerReleaseLeaderElectionLockOnExit
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "1.36"
 - name: CoordinatedLeaderElection
   versionedSpecs:
   - default: false
@@ -639,6 +645,12 @@
     lockToDefault: true
     preRelease: GA
     version: "1.35"
+- name: ExtendWebSocketsToKubelet
+  versionedSpecs:
+  - default: true
+    lockToDefault: false
+    preRelease: Beta
+    version: "1.36"
 - name: ExternalServiceAccountTokenSigner
   versionedSpecs:
   - default: false
@@ -1577,6 +1589,10 @@
     lockToDefault: false
     preRelease: Alpha
     version: "1.35"
+  - default: true
+    lockToDefault: false
+    preRelease: Beta
+    version: "1.36"
 - name: RetryGenerateName
   versionedSpecs:
   - default: false
