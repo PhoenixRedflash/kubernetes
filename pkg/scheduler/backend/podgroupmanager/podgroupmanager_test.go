@@ -269,7 +269,7 @@ func TestPodGroupManager_DeletePod(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Unexpected error getting pod group state: %v", err)
 			}
-			if len(state.AllPods()) == 0 {
+			if state.AllPodsCount() == 0 {
 				t.Errorf("Expected AllPods to be non-empty")
 			}
 			if state.AllPods().Has(p1.UID) {
