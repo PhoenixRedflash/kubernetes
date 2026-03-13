@@ -29,7 +29,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	v1 "k8s.io/api/core/v1"
 	resourceapi "k8s.io/api/resource/v1"
-	resourcealphaapi "k8s.io/api/resource/v1alpha3"
+	resourcebetaapi "k8s.io/api/resource/v1beta2"
 	schedulingapi "k8s.io/api/scheduling/v1alpha2"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -521,13 +521,13 @@ func TestAddAllEventHandlers(t *testing.T) {
 			enableDRADeviceTaints:     true,
 			enableDRADeviceTaintRules: true,
 			expectStaticInformers: map[reflect.Type]bool{
-				reflect.TypeOf(&v1.Pod{}):                           true,
-				reflect.TypeOf(&v1.Node{}):                          true,
-				reflect.TypeOf(&v1.Namespace{}):                     true,
-				reflect.TypeOf(&resourceapi.ResourceClaim{}):        true,
-				reflect.TypeOf(&resourceapi.ResourceSlice{}):        true,
-				reflect.TypeOf(&resourcealphaapi.DeviceTaintRule{}): true,
-				reflect.TypeOf(&resourceapi.DeviceClass{}):          true,
+				reflect.TypeOf(&v1.Pod{}):                          true,
+				reflect.TypeOf(&v1.Node{}):                         true,
+				reflect.TypeOf(&v1.Namespace{}):                    true,
+				reflect.TypeOf(&resourceapi.ResourceClaim{}):       true,
+				reflect.TypeOf(&resourceapi.ResourceSlice{}):       true,
+				reflect.TypeOf(&resourcebetaapi.DeviceTaintRule{}): true,
+				reflect.TypeOf(&resourceapi.DeviceClass{}):         true,
 			},
 			expectDynamicInformers: map[schema.GroupVersionResource]bool{},
 		},
@@ -658,7 +658,7 @@ func TestAddAllEventHandlers(t *testing.T) {
 					SliceInformer:          informerFactory.Resource().V1().ResourceSlices(),
 				}
 				if opts.EnableDeviceTaintRules {
-					opts.TaintInformer = informerFactory.Resource().V1alpha3().DeviceTaintRules()
+					opts.TaintInformer = informerFactory.Resource().V1beta2().DeviceTaintRules()
 					opts.ClassInformer = informerFactory.Resource().V1().DeviceClasses()
 
 				}
