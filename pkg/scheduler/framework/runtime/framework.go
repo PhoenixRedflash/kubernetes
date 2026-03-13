@@ -354,7 +354,7 @@ func NewFramework(ctx context.Context, r Registry, profile *config.KubeScheduler
 	}
 
 	if utilfeature.DefaultFeatureGate.Enabled(features.OpportunisticBatching) {
-		f.batch = newOpportunisticBatch(f, signUsingFramework)
+		f.batch = newOpportunisticBatch(f)
 	}
 
 	if len(f.extenders) > 0 {
@@ -854,16 +854,14 @@ func (f *frameworkImpl) computeBatchablePlugins() {
 // is unable to construct a signature for the pod, the result will be nil, which means
 // there is no way to compare this pod against others, and will turn off a number of optimizations
 // for this pod.
-func (f *frameworkImpl) SignPod(ctx context.Context, pod *v1.Pod, recordPluginStats bool) fwk.PodSignature {
+func (f *frameworkImpl) SignPod(ctx context.Context, pod *v1.Pod) fwk.PodSignature {
 	logger := klog.FromContext(ctx)
 	var status *fwk.Status
 
-	if recordPluginStats {
-		startTime := time.Now()
-		defer func() {
-			metrics.FrameworkExtensionPointDuration.WithLabelValues(metrics.Sign, status.Code().String(), f.profileName).Observe(metrics.SinceInSeconds(startTime))
-		}()
-	}
+	startTime := time.Now()
+	defer func() {
+		f.metricsRecorder.ObserveFrameworkExtensionPointDurationAsync(metrics.Sign, status.Code().String(), f.profileName, metrics.SinceInSeconds(startTime))
+	}()
 
 	if !f.enableSignatures {
 		return nil
@@ -1580,8 +1578,8 @@ func (f *frameworkImpl) runPlacementScoreExtension(ctx context.Context, pl fwk.P
 	return status
 }
 
-func (f *frameworkImpl) GetNodeHint(ctx context.Context, pod *v1.Pod, state fwk.CycleState, cycleCount int64) (hint string, signature fwk.PodSignature) {
-	return f.batch.GetNodeHint(ctx, pod, state, cycleCount)
+func (f *frameworkImpl) GetNodeHint(ctx context.Context, pod *v1.Pod, signature fwk.PodSignature, state fwk.CycleState, cycleCount int64) string {
+	return f.batch.GetNodeHint(ctx, pod, signature, state, cycleCount)
 }
 
 func (f *frameworkImpl) StoreScheduleResults(ctx context.Context, signature fwk.PodSignature, hintedNode, chosenNode string, otherNodes framework.SortedScoredNodes, cycleCount int64) {
@@ -2241,7 +2239,7 @@ func (f *frameworkImpl) APICacher() fwk.APICacher {
 	return f.apiCacher
 }
 
-// Used only for tests
+// TotalBatchedPods returns the total number of batched pods. Used only for tests
 func (f *frameworkImpl) TotalBatchedPods() int64 {
 	return f.batch.batchedPods
 }
