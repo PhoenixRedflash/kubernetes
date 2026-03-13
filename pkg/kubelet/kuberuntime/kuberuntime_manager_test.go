@@ -251,14 +251,6 @@ func verifyPods(a, b []*kubecontainer.Pod) bool {
 		return false
 	}
 
-	// Sort the containers within a pod.
-	for i := range a {
-		sort.Sort(containersByID(a[i].Containers))
-	}
-	for i := range b {
-		sort.Sort(containersByID(b[i].Containers))
-	}
-
 	// Sort the pods by UID.
 	sort.Sort(podsByID(a))
 	sort.Sort(podsByID(b))

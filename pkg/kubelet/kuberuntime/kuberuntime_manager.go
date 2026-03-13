@@ -482,7 +482,7 @@ func (m *kubeGenericRuntimeManager) getPods(ctx context.Context, opts listOption
 		return nil, err
 	}
 	// Sort sandboxes by creation time, newest first.
-	sort.Sort(podSandboxByCreated(sandboxes))
+	sort.Sort(podSandboxByCreatedThenID(sandboxes))
 	for i := range sandboxes {
 		s := sandboxes[i]
 		if s.Metadata == nil {
@@ -511,6 +511,13 @@ func (m *kubeGenericRuntimeManager) getPods(ctx context.Context, opts listOption
 	if err != nil {
 		return nil, err
 	}
+	// Sort containers: newest CreatedAt first, then by container ID for stability.
+	// There are scenarios where multiple pods are running in parallel having
+	// the same name, because one of them have not been fully terminated yet.
+	// To avoid unexpected behavior on container name based search (for example
+	// by calling *Kubelet.findContainer() without specifying a pod ID), we
+	// return the list of pods ordered by their creation time.
+	sort.Sort(containerByCreatedThenID(containers))
 	for i := range containers {
 		c := containers[i]
 		if c.Metadata == nil {
