@@ -603,7 +603,7 @@ var _ = SIGDescribe("Pods Extended (pod generation)", func() {
 
 			// Verify pod observedGeneration converges to the expected generation.
 			expectedPodGeneration := int64(500)
-			framework.ExpectNoError(e2epod.WaitForPodObservedGeneration(ctx, f.ClientSet, f.Namespace.Name, pod.Name, expectedPodGeneration, 30*time.Second))
+			framework.ExpectNoError(e2epod.WaitForPodObservedGeneration(ctx, f.ClientSet, f.Namespace.Name, pod.Name, expectedPodGeneration, framework.PodStartTimeout))
 
 			// Verify pod generation converges to the expected generation.
 			pod, err := podClient.Get(ctx, pod.Name, metav1.GetOptions{})
@@ -640,8 +640,22 @@ var _ = SIGDescribe("Pods Extended (pod generation)", func() {
 			ginkgo.By("verifying the pod conditions have observedGeneration values")
 			expectedObservedGeneration := int64(1)
 			for _, condition := range expectedPodConditions {
-				framework.ExpectNoError(e2epod.WaitForPodConditionObservedGeneration(ctx, f.ClientSet, f.Namespace.Name, pod.Name, condition, expectedObservedGeneration, 30*time.Second))
+				framework.ExpectNoError(e2epod.WaitForPodConditionObservedGeneration(ctx, f.ClientSet, f.Namespace.Name, pod.Name, condition, expectedObservedGeneration, framework.PodStartTimeout))
 			}
+
+			ginkgo.By("waiting for the container to fail to pull the image")
+			// We need to wait for the container to fail to pull the image to avoid a race condition
+			// where the pod is still being initialized by kubelet while the pod update is received.
+			framework.ExpectNoError(e2epod.WaitForPodCondition(ctx, f.ClientSet, f.Namespace.Name, pod.Name, "image pull failure", framework.PodStartTimeout, func(pod *v1.Pod) (bool, error) {
+				if len(pod.Status.ContainerStatuses) > 0 {
+					status := pod.Status.ContainerStatuses[0]
+					if status.State.Waiting != nil {
+						reason := status.State.Waiting.Reason
+						return reason == "ErrImagePull" || reason == "ImagePullBackOff", nil
+					}
+				}
+				return false, nil
+			}))
 
 			ginkgo.By("updating pod to have a valid image")
 			podClient.Update(ctx, pod.Name, func(pod *v1.Pod) {
@@ -651,7 +665,7 @@ var _ = SIGDescribe("Pods Extended (pod generation)", func() {
 
 			ginkgo.By("verifying the pod conditions have updated observedGeneration values")
 			for _, condition := range expectedPodConditions {
-				framework.ExpectNoError(e2epod.WaitForPodConditionObservedGeneration(ctx, f.ClientSet, f.Namespace.Name, pod.Name, condition, expectedObservedGeneration, 30*time.Second))
+				framework.ExpectNoError(e2epod.WaitForPodConditionObservedGeneration(ctx, f.ClientSet, f.Namespace.Name, pod.Name, condition, expectedObservedGeneration, framework.PodStartTimeout))
 			}
 		})
 	})
