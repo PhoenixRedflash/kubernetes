@@ -35,6 +35,10 @@ const (
 	// special ResourceClaim. Its single valid value is "true".
 	// This is used only inside the scheduler.
 	ExtendedResourceClaimAnnotation = "resource.kubernetes.io/extended-resource-claim"
+	// PodResourceClaimAnnotation is the annotation set on template-generated
+	// ResourceClaims by the ResourceClaim controller. Its value is the
+	// pod.spec.resourceClaims[].name for which the claim was generated.
+	PodResourceClaimAnnotation = "resource.kubernetes.io/pod-claim-name"
 	// Resource device class prefix is for generating implicit extended resource
 	// name for a device class when its ExtendedResourceName field is not
 	// specified. The generated name is this prefix + the device class name.
@@ -361,7 +365,7 @@ type Device struct {
 	// If set to true, the scheduler will set the ResourceClaim.Status.Allocation.NodeSelector
 	// to match the node where the allocation was made.
 	//
-	// This is an alpha field and requires enabling the DRADeviceBindingConditions and DRAResourceClaimDeviceStatus
+	// This is a beta field and requires enabling the DRADeviceBindingConditions and DRAResourceClaimDeviceStatus
 	// feature gates.
 	//
 	// +optional
@@ -377,7 +381,7 @@ type Device struct {
 	// All entries are condition types, which means
 	// they must be labels.
 	//
-	// This is an alpha field and requires enabling the DRADeviceBindingConditions and DRAResourceClaimDeviceStatus
+	// This is a beta field and requires enabling the DRADeviceBindingConditions and DRAResourceClaimDeviceStatus
 	// feature gates.
 	//
 	// +optional
@@ -393,7 +397,7 @@ type Device struct {
 	// All entries are condition types, which means
 	// they must be labels.
 	//
-	// This is an alpha field and requires enabling the DRADeviceBindingConditions and DRAResourceClaimDeviceStatus
+	// This is a beta field and requires enabling the DRADeviceBindingConditions and DRAResourceClaimDeviceStatus
 	// feature gates.
 	//
 	// +optional
@@ -1459,7 +1463,7 @@ type AllocationResult struct {
 	// AllocationTimestamp stores the time when the resources were allocated.
 	// This field is not guaranteed to be set, in which case that time is unknown.
 	//
-	// This is an alpha field and requires enabling the DRADeviceBindingConditions and DRAResourceClaimDeviceStatus
+	// This is a beta field and requires enabling the DRADeviceBindingConditions and DRAResourceClaimDeviceStatus
 	// feature gate.
 	//
 	// +optional
@@ -1557,7 +1561,7 @@ type DeviceRequestAllocationResult struct {
 	// BindingConditions contains a copy of the BindingConditions
 	// from the corresponding ResourceSlice at the time of allocation.
 	//
-	// This is an alpha field and requires enabling the DRADeviceBindingConditions and DRAResourceClaimDeviceStatus
+	// This is a beta field and requires enabling the DRADeviceBindingConditions and DRAResourceClaimDeviceStatus
 	// feature gates.
 	//
 	// +optional
@@ -1568,7 +1572,7 @@ type DeviceRequestAllocationResult struct {
 	// BindingFailureConditions contains a copy of the BindingFailureConditions
 	// from the corresponding ResourceSlice at the time of allocation.
 	//
-	// This is an alpha field and requires enabling the DRADeviceBindingConditions and DRAResourceClaimDeviceStatus
+	// This is a beta field and requires enabling the DRADeviceBindingConditions and DRAResourceClaimDeviceStatus
 	// feature gates.
 	//
 	// +optional

@@ -34,8 +34,8 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/component-helpers/storage/ephemeral"
 	"k8s.io/klog/v2"
+	"k8s.io/kubernetes/pkg/controller/util/protectionutil"
 	"k8s.io/kubernetes/pkg/controller/volume/common"
-	"k8s.io/kubernetes/pkg/controller/volume/protectionutil"
 	"k8s.io/kubernetes/pkg/util/slice"
 	volumeutil "k8s.io/kubernetes/pkg/volume/util"
 )
