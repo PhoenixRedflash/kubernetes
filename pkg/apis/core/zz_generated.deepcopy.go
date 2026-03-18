@@ -6563,7 +6563,11 @@ func (in *VolumeMountStatus) DeepCopyInto(out *VolumeMountStatus) {
 		*out = new(RecursiveReadOnlyMode)
 		**out = **in
 	}
-	in.VolumeStatus.DeepCopyInto(&out.VolumeStatus)
+	if in.VolumeStatus != nil {
+		in, out := &in.VolumeStatus, &out.VolumeStatus
+		*out = new(VolumeStatus)
+		(*in).DeepCopyInto(*out)
+	}
 	return
 }
 

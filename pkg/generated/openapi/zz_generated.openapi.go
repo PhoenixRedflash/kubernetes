@@ -32944,7 +32944,6 @@ func schema_k8sio_api_core_v1_VolumeMountStatus(ref common.ReferenceCallback) co
 					"volumeStatus": {
 						SchemaProps: spec.SchemaProps{
 							Description: "volumeStatus represents volume-type-specific status about the mounted volume.",
-							Default:     map[string]interface{}{},
 							Ref:         ref(corev1.VolumeStatus{}.OpenAPIModelName()),
 						},
 					},

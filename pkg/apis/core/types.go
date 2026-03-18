@@ -3204,7 +3204,7 @@ type VolumeMountStatus struct {
 	// volumeStatus represents volume-type-specific status about the mounted
 	// volume.
 	// +optional
-	VolumeStatus
+	VolumeStatus *VolumeStatus
 }
 
 // VolumeStatus represents the status of a mounted volume.

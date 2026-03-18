@@ -8757,7 +8757,6 @@
                 "$ref": "#/components/schemas/io.k8s.api.core.v1.VolumeStatus"
               }
             ],
-            "default": {},
             "description": "volumeStatus represents volume-type-specific status about the mounted volume."
           }
         },

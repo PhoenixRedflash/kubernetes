@@ -4325,7 +4325,7 @@ func TestConvertToAPIContainerStatusesWithImageVolumeDigest(t *testing.T) {
 						{
 							Name:         imageVolumeName,
 							MountPath:    imageVolumeMountPath,
-							VolumeStatus: v1.VolumeStatus{Image: &v1.ImageVolumeStatus{ImageRef: imageDigest}},
+							VolumeStatus: &v1.VolumeStatus{Image: &v1.ImageVolumeStatus{ImageRef: imageDigest}},
 						},
 					}
 					return containerStatus

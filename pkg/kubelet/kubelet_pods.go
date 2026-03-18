@@ -2332,7 +2332,9 @@ func (kl *Kubelet) convertToAPIContainerStatuses(ctx context.Context, pod *v1.Po
 					logger.Error(err, "error getting image volume digest", "volume", volumeName)
 					continue
 				}
-
+				if status.VolumeMounts[i].VolumeStatus == nil {
+					status.VolumeMounts[i].VolumeStatus = &v1.VolumeStatus{}
+				}
 				if status.VolumeMounts[i].VolumeStatus.Image == nil {
 					status.VolumeMounts[i].VolumeStatus.Image = &v1.ImageVolumeStatus{}
 				}

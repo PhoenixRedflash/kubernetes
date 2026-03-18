@@ -16132,7 +16132,7 @@ func TestValidatePodStatusUpdate(t *testing.T) {
 					podtest.SetContainerStatuses(core.ContainerStatus{
 						VolumeMounts: []core.VolumeMountStatus{
 							{
-								VolumeStatus: core.VolumeStatus{
+								VolumeStatus: &core.VolumeStatus{
 									Image: &core.ImageVolumeStatus{
 										ImageRef: "imageref",
 									},
@@ -16149,7 +16149,7 @@ func TestValidatePodStatusUpdate(t *testing.T) {
 					podtest.SetContainerStatuses(core.ContainerStatus{
 						VolumeMounts: []core.VolumeMountStatus{
 							{
-								VolumeStatus: core.VolumeStatus{
+								VolumeStatus: &core.VolumeStatus{
 									Image: nil,
 								},
 							},
@@ -16167,7 +16167,7 @@ func TestValidatePodStatusUpdate(t *testing.T) {
 					podtest.SetContainerStatuses(core.ContainerStatus{
 						VolumeMounts: []core.VolumeMountStatus{
 							{
-								VolumeStatus: core.VolumeStatus{
+								VolumeStatus: &core.VolumeStatus{
 									Image: &core.ImageVolumeStatus{
 										ImageRef: "",
 									},
@@ -16184,7 +16184,7 @@ func TestValidatePodStatusUpdate(t *testing.T) {
 					podtest.SetContainerStatuses(core.ContainerStatus{
 						VolumeMounts: []core.VolumeMountStatus{
 							{
-								VolumeStatus: core.VolumeStatus{
+								VolumeStatus: &core.VolumeStatus{
 									Image: &core.ImageVolumeStatus{
 										ImageRef: "",
 									},
@@ -16205,7 +16205,7 @@ func TestValidatePodStatusUpdate(t *testing.T) {
 					podtest.SetContainerStatuses(core.ContainerStatus{
 						VolumeMounts: []core.VolumeMountStatus{
 							{
-								VolumeStatus: core.VolumeStatus{
+								VolumeStatus: &core.VolumeStatus{
 									Image: &core.ImageVolumeStatus{
 										ImageRef: strings.Repeat("x", 257),
 									},
@@ -16222,7 +16222,7 @@ func TestValidatePodStatusUpdate(t *testing.T) {
 					podtest.SetContainerStatuses(core.ContainerStatus{
 						VolumeMounts: []core.VolumeMountStatus{
 							{
-								VolumeStatus: core.VolumeStatus{
+								VolumeStatus: &core.VolumeStatus{
 									Image: &core.ImageVolumeStatus{
 										ImageRef: strings.Repeat("x", 257),
 									},

@@ -46,7 +46,9 @@ const acceptV1JSON = "application/json"
 const acceptV2JSON = "application/json;g=apidiscovery.k8s.io;v=v2;as=APIGroupDiscoveryList"
 const acceptV2JSONNoPeer = "application/json;g=apidiscovery.k8s.io;v=v2;as=APIGroupDiscoveryList;profile=nopeer"
 
-const maxTimeout = 30 * time.Second
+// Discovery integration tests frequently need to wait through aggregator,
+// API registration, and discovery document convergence on contended CI nodes.
+const maxTimeout = 120 * time.Second
 
 type testClient interface {
 	kubernetes.Interface

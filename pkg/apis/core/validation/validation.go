@@ -9651,8 +9651,12 @@ func validateImageVolumeStatus(imageVolumeStatus *core.ImageVolumeStatus, fldPat
 }
 
 // validateVolumeStatus returns an error if the given struct has more than 1 populated field.
-func validateVolumeStatus(volumeStatus core.VolumeStatus, fldPath *field.Path) field.ErrorList {
+func validateVolumeStatus(volumeStatus *core.VolumeStatus, fldPath *field.Path) field.ErrorList {
 	allErrors := field.ErrorList{}
+
+	if volumeStatus == nil {
+		return allErrors
+	}
 
 	numStatuses := 0
 
