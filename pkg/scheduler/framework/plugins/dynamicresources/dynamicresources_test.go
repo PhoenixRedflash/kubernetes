@@ -2114,12 +2114,11 @@ func testPlugin(tCtx ktesting.TContext) {
 			want: want{
 				filter: perNodeResult{
 					workerNode.Name: {
-						status: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, `timed out trying to allocate devices`),
+						// Timeouts return Error so the pod retries via backoff.
+						status: fwk.AsStatus(fmt.Errorf("node %s: timed out trying to allocate devices", workerNode.Name)),
 					},
 				},
-				postfilter: result{
-					status: fwk.NewStatus(fwk.Unschedulable, `still not schedulable`),
-				},
+				// No postfilter: Error aborts scheduling immediately.
 			},
 			// Skipping this test case on Windows as a 1ns timeout is not guaranteed to
 			// expire immediately on Windows due to its coarser timer granularity -

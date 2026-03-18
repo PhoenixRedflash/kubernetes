@@ -133,7 +133,7 @@ func run(tCtx ktesting.TContext, whatRE string) {
 				runSubTest(tCtx, "EvictClusterWithSlices", func(tCtx ktesting.TContext) { testEvictCluster(tCtx, useNoRule) })
 				// Number of devices per slice is chosen so that Filter takes a few seconds:
 				// without a timeout, the test doesn't run too long, but long enough that a short timeout triggers.
-				runSubTest(tCtx, "FilterTimeout", func(tCtx ktesting.TContext) { testFilterTimeout(tCtx, 20) })
+				runSubTest(tCtx, "FilterTimeout", func(tCtx ktesting.TContext) { testFilterTimeout(tCtx, 21) })
 				runSubTest(tCtx, "UsesAllResources", testUsesAllResources)
 			},
 		},
@@ -243,7 +243,7 @@ func run(tCtx ktesting.TContext, whatRE string) {
 				// Number of devices per slice is chosen so that Filter takes a few seconds: The allocator
 				// in the experimental channel has an improvement that requires a higher number here than
 				// in the incubating and stable channels.
-				runSubTest(tCtx, "FilterTimeout", func(tCtx ktesting.TContext) { testFilterTimeout(tCtx, 20) })
+				runSubTest(tCtx, "FilterTimeout", func(tCtx ktesting.TContext) { testFilterTimeout(tCtx, 21) })
 				runSubTest(tCtx, "ShareResourceClaimSequentially", testShareResourceClaimSequentially)
 				runSubTest(tCtx, "UsesAllResources", testUsesAllResources)
 			},
