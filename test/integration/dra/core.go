@@ -558,6 +558,15 @@ func testControllerManagerMetrics(tCtx ktesting.TContext) {
 	initialSuccessNoAdmin := getMetricValue("success", "false")
 	initialSuccessWithAdmin := getMetricValue("success", "true")
 
+	expectMetricValue := func(status, adminAccess string, want float64, message string) {
+		tCtx.Eventually(func(tCtx ktesting.TContext) float64 {
+			return getMetricValue(status, adminAccess)
+		}).
+			WithTimeout(30*time.Second).
+			WithPolling(200*time.Millisecond).
+			Should(gomega.BeNumerically("~", want, 0.1), message)
+	}
+
 	// Test 1: Create Pod with ResourceClaimTemplate without admin access (should succeed and trigger controller)
 	template1 := &resourceapi.ResourceClaimTemplate{
 		ObjectMeta: metav1.ObjectMeta{
@@ -604,11 +613,8 @@ func testControllerManagerMetrics(tCtx ktesting.TContext) {
 	_, err = tCtx.Client().CoreV1().Pods(namespace).Create(tCtx, pod1, metav1.CreateOptions{FieldValidation: "Strict"})
 	tCtx.ExpectNoError(err, "create Pod with ResourceClaimTemplate without admin access")
 
-	time.Sleep(200 * time.Millisecond)
-
-	// Verify metrics: success counter with admin_access=false should increment
-	successNoAdmin := getMetricValue("success", "false")
-	require.InDelta(tCtx, initialSuccessNoAdmin+1, successNoAdmin, 0.1, "success metric with admin_access=false should increment")
+	expectMetricValue("success", "false", initialSuccessNoAdmin+1,
+		"success metric with admin_access=false should increment")
 
 	// Test 2: Create admin namespace and Pod with ResourceClaimTemplate with admin access (should succeed)
 	adminNS := createTestNamespace(tCtx, map[string]string{"resource.kubernetes.io/admin-access": "true"})
@@ -658,11 +664,8 @@ func testControllerManagerMetrics(tCtx ktesting.TContext) {
 	_, err = tCtx.Client().CoreV1().Pods(adminNS).Create(tCtx, pod2, metav1.CreateOptions{FieldValidation: "Strict"})
 	tCtx.ExpectNoError(err, "create Pod with ResourceClaimTemplate with admin access in admin namespace")
 
-	time.Sleep(200 * time.Millisecond)
-
-	// Verify metrics: success counter with admin_access=true should increment
-	successWithAdmin := getMetricValue("success", "true")
-	require.InDelta(tCtx, initialSuccessWithAdmin+1, successWithAdmin, 0.1, "success metric with admin_access=true should increment")
+	expectMetricValue("success", "true", initialSuccessWithAdmin+1,
+		"success metric with admin_access=true should increment")
 
 	// Test 3: Try to create ResourceClaimTemplate with admin access in non-admin namespace
 	// should fail at API level, controller not triggered, no metrics change expected
@@ -733,14 +736,10 @@ func testControllerManagerMetrics(tCtx ktesting.TContext) {
 	_, err = tCtx.Client().CoreV1().Pods(namespace).Create(tCtx, pod4, metav1.CreateOptions{FieldValidation: "Strict"})
 	tCtx.ExpectNoError(err, "create second Pod with ResourceClaimTemplate without admin access")
 
-	time.Sleep(200 * time.Millisecond)
-
-	// Verify final metrics
-	finalSuccessNoAdmin := getMetricValue("success", "false")
-	finalSuccessWithAdmin := getMetricValue("success", "true")
-
-	require.InDelta(tCtx, initialSuccessNoAdmin+2, finalSuccessNoAdmin, 0.1, "should have 2 more success metrics with admin_access=false")
-	require.InDelta(tCtx, initialSuccessWithAdmin+1, finalSuccessWithAdmin, 0.1, "should have 1 more success metric with admin_access=true")
+	expectMetricValue("success", "false", initialSuccessNoAdmin+2,
+		"should have 2 more success metrics with admin_access=false")
+	expectMetricValue("success", "true", initialSuccessWithAdmin+1,
+		"should have 1 more success metric with admin_access=true")
 
 	tCtx.Log("ResourceClaim controller success metrics correctly track operations with admin_access labels")
 }

@@ -137,6 +137,9 @@ func (sched *Scheduler) podGroupInfoForPod(ctx context.Context, pInfo *framework
 
 	// Pop all unscheduled pods from the scheduling queue
 	for _, pod := range unscheduledPods {
+		if pod.Name == pInfo.Pod.Name {
+			continue
+		}
 		unscheduledPodInfo := sched.SchedulingQueue.PopSpecificPod(logger, pod)
 		if unscheduledPodInfo == nil {
 			logger.V(5).Info("Pod available in pod group state not available in scheduling queue", "podGroup", klog.KObj(podGroupInfo), "pod", klog.KObj(pod))

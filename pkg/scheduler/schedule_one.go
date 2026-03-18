@@ -358,8 +358,8 @@ func (sched *Scheduler) assumeAndReserve(
 }
 
 // unreserveAndForget unreserves and forgets the pod from scheduler's memory.
-// This function shouldn't be called during binding cycle with a pod that has the NeedsPodGroupScheduling set to true,
-// but this shouldn't happen, because such pods cannot reach binding.
+// This function shouldn't be called during binding cycle with a state, where IsPodGroupSchedulingCycle is set to true,
+// but this shouldn't happen, because such pods with such state cannot reach binding.
 func (sched *Scheduler) unreserveAndForget(
 	ctx context.Context,
 	state fwk.CycleState,

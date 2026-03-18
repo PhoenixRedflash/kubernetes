@@ -178,6 +178,13 @@ type PodGroupTemplate struct {
 	//
 	// +required
 	SchedulingPolicy PodGroupSchedulingPolicy
+
+	// SchedulingConstraints defines optional scheduling constraints (e.g. topology) for this PodGroupTemplate.
+	// This field is only available when the TopologyAwareWorkloadScheduling feature gate is enabled.
+	//
+	// +optional
+	// +featureGate=TopologyAwareWorkloadScheduling
+	SchedulingConstraints *PodGroupSchedulingConstraints
 }
 
 // PodGroupSchedulingPolicy defines the scheduling configuration for a PodGroup.
@@ -269,6 +276,15 @@ type PodGroupSpec struct {
 	//
 	// +required
 	SchedulingPolicy PodGroupSchedulingPolicy
+
+	// SchedulingConstraints defines optional scheduling constraints (e.g. topology) for this PodGroup.
+	// Controllers are expected to fill this field by copying it from a PodGroupTemplate.
+	// This field is immutable.
+	// This field is only available when the TopologyAwareWorkloadScheduling feature gate is enabled.
+	//
+	// +optional
+	// +featureGate=TopologyAwareWorkloadScheduling
+	SchedulingConstraints *PodGroupSchedulingConstraints
 }
 
 // PodGroupStatus represents information about the status of a pod group.
@@ -342,4 +358,25 @@ type WorkloadPodGroupTemplateReference struct {
 	//
 	// +required
 	PodGroupTemplateName string
+}
+
+// PodGroupSchedulingConstraints defines scheduling constraints (e.g. topology) for a PodGroup.
+type PodGroupSchedulingConstraints struct {
+	// Topology defines the topology constraints for the pod group.
+	// Currently only a single topology constraint can be specified. This may change in the future.
+	//
+	// +optional
+	// +listType=atomic
+	Topology []TopologyConstraint
+}
+
+// TopologyConstraint defines a topology constraint for a PodGroup.
+type TopologyConstraint struct {
+	// Key specifies the key of the node label representing the topology domain.
+	// All pods within the PodGroup must be colocated within the same domain instance.
+	// Different PodGroups can land on different domain instances even if they derive from the same PodGroupTemplate.
+	// Examples: "topology.kubernetes.io/rack"
+	//
+	// +required
+	Key string
 }

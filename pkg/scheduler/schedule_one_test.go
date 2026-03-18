@@ -1029,6 +1029,21 @@ func TestSchedulerScheduleOne(t *testing.T) {
 		var gotBinding *v1.Binding
 		var gotNominatingInfo *fwk.NominatingInfo
 
+		if scheduleAsPodGroup {
+			group := &v1.PodSchedulingGroup{
+				PodGroupName: new("pg"),
+			}
+			// When scheduling a pod as a pod group, set scheduling group to all relevant pods.
+			item.sendPod = withSchedulingGroup(item.sendPod, group)
+			item.expectErrorPod = withSchedulingGroup(item.expectErrorPod, group)
+			item.expectPodInBackoffQ = withSchedulingGroup(item.expectPodInBackoffQ, group)
+			if item.expectPodInUnschedulable != nil {
+				// Pods from a pod group skip unschedulablePods structure and land directly in the backoffQ.
+				item.expectPodInBackoffQ = withSchedulingGroup(item.expectPodInUnschedulable, group)
+				item.expectPodInUnschedulable = nil
+			}
+		}
+
 		client := clientsetfake.NewClientset(item.sendPod)
 		informerFactory := informers.NewSharedInformerFactory(client, 0)
 		client.PrependReactor("create", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
@@ -1049,14 +1064,6 @@ func TestSchedulerScheduleOne(t *testing.T) {
 		internalCache := internalcache.New(ctx, apiDispatcher, scheduleAsPodGroup)
 
 		if scheduleAsPodGroup {
-			group := &v1.PodSchedulingGroup{
-				PodGroupName: new("pg"),
-			}
-			// When scheduling a pod as a pod group, set scheduling group to all relevant pods.
-			item.sendPod = withSchedulingGroup(item.sendPod, group)
-			item.expectErrorPod = withSchedulingGroup(item.expectErrorPod, group)
-			item.expectPodInBackoffQ = withSchedulingGroup(item.expectPodInBackoffQ, group)
-			item.expectPodInUnschedulable = withSchedulingGroup(item.expectPodInUnschedulable, group)
 			internalCache.AddPodGroupMember(item.sendPod)
 		}
 		cache := &fakecache.Cache{

@@ -55,6 +55,12 @@
     lockToDefault: false
     preRelease: Beta
     version: "1.33"
+- name: AllowServiceExternalIPs
+  versionedSpecs:
+  - default: true
+    lockToDefault: false
+    preRelease: GA
+    version: "1.0"
 - name: AllowUnsafeMalformedObjectDeletion
   versionedSpecs:
   - default: false
@@ -1837,6 +1843,12 @@
     lockToDefault: true
     preRelease: GA
     version: "1.32"
+- name: ShardedListAndWatch
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "1.36"
 - name: SidecarContainers
   versionedSpecs:
   - default: false

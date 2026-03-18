@@ -36,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/ktesting"
+	kubeletconfig "k8s.io/kubernetes/pkg/kubelet/apis/config"
 )
 
 func activeTestPods() []*v1.Pod {
@@ -124,10 +125,11 @@ func createTestQOSContainerManager(logger klog.Logger) (*qosContainerManagerImpl
 	cgroupRoot = NewCgroupName(cgroupRoot, defaultNodeAllocatableCgroupName)
 
 	qosContainerManager := &qosContainerManagerImpl{
-		subsystems:    subsystems,
-		cgroupManager: NewCgroupManager(logger, subsystems, "cgroupfs"),
-		cgroupRoot:    cgroupRoot,
-		qosReserved:   nil,
+		subsystems:              subsystems,
+		cgroupManager:           NewCgroupManager(logger, subsystems, "cgroupfs"),
+		cgroupRoot:              cgroupRoot,
+		qosReserved:             nil,
+		memoryReservationPolicy: kubeletconfig.NoneMemoryReservationPolicy,
 	}
 
 	qosContainerManager.activePods = activeTestPods
@@ -206,6 +208,8 @@ func TestQoSContainerCgroup(t *testing.T) {
 			logger, _ := ktesting.NewTestContext(t)
 			m, err := createTestQOSContainerManager(logger)
 			require.NoError(t, err)
+			// Set memory reservation policy to HardReservation to enable memory.min
+			m.memoryReservationPolicy = kubeletconfig.HardReservationMemoryReservationPolicy
 			m.activePods = func() []*v1.Pod { return tc.pods }
 
 			guaranteedUnified := map[string]string{}
@@ -240,6 +244,62 @@ func TestQoSContainerCgroup(t *testing.T) {
 
 			assert.Equal(t, tc.expectedGuaranteed, qosConfigs[v1.PodQOSGuaranteed].ResourceParameters.Unified[Cgroup2MemoryMin])
 			assert.Equal(t, tc.expectedBurstable, qosConfigs[v1.PodQOSBurstable].ResourceParameters.Unified[Cgroup2MemoryMin])
+		})
+	}
+}
+
+func TestQoSContainerCgroupWithMemoryReservationPolicyNone(t *testing.T) {
+	tests := []struct {
+		name              string
+		initialGuaranteed map[string]string
+		initialBurstable  map[string]string
+	}{
+		{
+			name:              "explicitly resets memory.min to 0 when unset",
+			initialGuaranteed: nil,
+			initialBurstable:  nil,
+		},
+		{
+			name: "sets memory.min to zero when MemoryReservationPolicyNone ",
+			initialGuaranteed: map[string]string{
+				Cgroup2MemoryMin: "1234",
+			},
+			initialBurstable: map[string]string{
+				Cgroup2MemoryMin: "5678",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			logger, _ := ktesting.NewTestContext(t)
+			m, err := createTestQOSContainerManager(logger)
+			require.NoError(t, err)
+
+			qosConfigs := map[v1.PodQOSClass]*CgroupConfig{
+				v1.PodQOSGuaranteed: {
+					Name: m.qosContainersInfo.Guaranteed,
+					ResourceParameters: &ResourceConfig{
+						Unified: tc.initialGuaranteed,
+					},
+				},
+				v1.PodQOSBurstable: {
+					Name: m.qosContainersInfo.Burstable,
+					ResourceParameters: &ResourceConfig{
+						Unified: tc.initialBurstable,
+					},
+				},
+				v1.PodQOSBestEffort: {
+					Name:               m.qosContainersInfo.BestEffort,
+					ResourceParameters: &ResourceConfig{},
+				},
+			}
+
+			m.setMemoryQoS(logger, qosConfigs)
+
+			assert.Equal(t, "0", qosConfigs[v1.PodQOSGuaranteed].ResourceParameters.Unified[Cgroup2MemoryMin])
+			assert.Equal(t, "0", qosConfigs[v1.PodQOSBurstable].ResourceParameters.Unified[Cgroup2MemoryMin])
+			assert.NotContains(t, qosConfigs[v1.PodQOSBestEffort].ResourceParameters.Unified, Cgroup2MemoryMin)
 		})
 	}
 }

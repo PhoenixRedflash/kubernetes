@@ -2241,7 +2241,9 @@ func (kl *Kubelet) convertToAPIPodLevelResourcesStatus(logger klog.Logger, alloc
 			SkipPodLevelResources: !utilfeature.DefaultFeatureGate.Enabled(features.PodLevelResources),
 		}
 		aggregatedResources := resourcehelper.PodRequests(allocatedPod, opts)
-		resources.Requests[v1.ResourceMemory] = aggregatedResources[v1.ResourceMemory]
+		if val, ok := aggregatedResources[v1.ResourceMemory]; ok {
+			resources.Requests[v1.ResourceMemory] = val
+		}
 	}
 
 	// TODO: Once we begin persisting memory Request from the PodSpec to cgroups,

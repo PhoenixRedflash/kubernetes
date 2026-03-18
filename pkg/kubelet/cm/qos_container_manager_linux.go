@@ -37,6 +37,7 @@ import (
 	"k8s.io/component-helpers/resource"
 	v1qos "k8s.io/kubernetes/pkg/apis/core/v1/helper/qos"
 	kubefeatures "k8s.io/kubernetes/pkg/features"
+	kubeletconfig "k8s.io/kubernetes/pkg/kubelet/apis/config"
 )
 
 const (
@@ -53,13 +54,14 @@ type QOSContainerManager interface {
 
 type qosContainerManagerImpl struct {
 	sync.Mutex
-	qosContainersInfo  QOSContainersInfo
-	subsystems         *CgroupSubsystems
-	cgroupManager      CgroupManager
-	activePods         ActivePodsFunc
-	getNodeAllocatable func() v1.ResourceList
-	cgroupRoot         CgroupName
-	qosReserved        map[v1.ResourceName]int64
+	qosContainersInfo       QOSContainersInfo
+	subsystems              *CgroupSubsystems
+	cgroupManager           CgroupManager
+	activePods              ActivePodsFunc
+	getNodeAllocatable      func() v1.ResourceList
+	cgroupRoot              CgroupName
+	qosReserved             map[v1.ResourceName]int64
+	memoryReservationPolicy kubeletconfig.MemoryReservationPolicy
 }
 
 func NewQOSContainerManager(subsystems *CgroupSubsystems, cgroupRoot CgroupName, nodeConfig NodeConfig, cgroupManager CgroupManager) (QOSContainerManager, error) {
@@ -70,10 +72,11 @@ func NewQOSContainerManager(subsystems *CgroupSubsystems, cgroupRoot CgroupName,
 	}
 
 	return &qosContainerManagerImpl{
-		subsystems:    subsystems,
-		cgroupManager: cgroupManager,
-		cgroupRoot:    cgroupRoot,
-		qosReserved:   nodeConfig.QOSReserved,
+		subsystems:              subsystems,
+		cgroupManager:           cgroupManager,
+		cgroupRoot:              cgroupRoot,
+		qosReserved:             nodeConfig.QOSReserved,
+		memoryReservationPolicy: nodeConfig.MemoryReservationPolicy,
 	}, nil
 }
 
@@ -294,6 +297,12 @@ func (m *qosContainerManagerImpl) setMemoryQoS(logger klog.Logger, configs map[v
 		}
 		configs[qos].ResourceParameters.Unified[Cgroup2MemoryMin] = strconv.FormatInt(memoryMin, 10)
 		logger.V(4).Info("MemoryQoS config for qos", "qos", qos, "memoryMin", memoryMin)
+	}
+
+	if m.memoryReservationPolicy != kubeletconfig.HardReservationMemoryReservationPolicy {
+		setMemoryMin(v1.PodQOSGuaranteed, 0)
+		setMemoryMin(v1.PodQOSBurstable, 0)
+		return
 	}
 
 	qosMemoryRequests := m.getQoSMemoryRequests()
