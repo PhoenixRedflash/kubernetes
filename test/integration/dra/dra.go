@@ -87,8 +87,10 @@ var (
 )
 
 const (
-	numNodes       = 8
-	maxPodsPerNode = 5000 // This should never be the limiting factor, no matter how many tests run in parallel.
+	numNodes           = 8
+	maxPodsPerNode     = 5000 // This should never be the limiting factor, no matter how many tests run in parallel.
+	nodeCPUCapacity    = "100"
+	nodeMemoryCapacity = "1k"
 
 	// schedulingTimeout is the time we grant the scheduler for one scheduling attempt,
 	// whether it's successful or not.
@@ -220,6 +222,7 @@ func run(tCtx ktesting.TContext, whatRE string) {
 				features.DRAPrioritizedList:           true,
 				features.DRAResourceClaimDeviceStatus: true,
 				features.DRAExtendedResource:          true,
+				features.DRANodeAllocatableResources:  true,
 			},
 			f: func(tCtx ktesting.TContext) {
 				// These tests must run in parallel as much as possible to keep overall runtime low!
@@ -246,6 +249,7 @@ func run(tCtx ktesting.TContext, whatRE string) {
 				runSubTest(tCtx, "FilterTimeout", func(tCtx ktesting.TContext) { testFilterTimeout(tCtx, 21) })
 				runSubTest(tCtx, "ShareResourceClaimSequentially", testShareResourceClaimSequentially)
 				runSubTest(tCtx, "UsesAllResources", testUsesAllResources)
+				runSubTest(tCtx, "DRANodeAllocatableResources", func(tCtx ktesting.TContext) { testNodeAllocatableResources(tCtx, true) })
 			},
 		},
 	} {
@@ -368,8 +372,8 @@ func createNodes(tCtx ktesting.TContext) {
 		// Make the node ready.
 		node.Status = v1.NodeStatus{
 			Capacity: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("100"),
-				v1.ResourceMemory: resource.MustParse("1000"),
+				v1.ResourceCPU:    resource.MustParse(nodeCPUCapacity),
+				v1.ResourceMemory: resource.MustParse(nodeMemoryCapacity),
 				v1.ResourcePods:   *resource.NewScaledQuantity(maxPodsPerNode, 0),
 			},
 			Phase: v1.NodeRunning,

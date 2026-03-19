@@ -587,6 +587,12 @@
     lockToDefault: false
     preRelease: Beta
     version: "1.36"
+- name: DRANodeAllocatableResources
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "1.36"
 - name: DRAPartitionableDevices
   versionedSpecs:
   - default: false
@@ -1005,6 +1011,10 @@
     lockToDefault: false
     preRelease: Beta
     version: "1.34"
+  - default: true
+    lockToDefault: true
+    preRelease: GA
+    version: "1.36"
 - name: KubeletRegistrationGetOnExistsOnly
   versionedSpecs:
   - default: true

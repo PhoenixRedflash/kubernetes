@@ -191,7 +191,10 @@ var createPodInternal = func(tCtx ktesting.TContext, namespace string, suffix st
 			container.Resources.Limits[res] = resource.MustParse(qty)
 		}
 	}
-	pod.Spec.ResourceClaims = resourceClaims
+	if len(claims) > 0 {
+		// Update the field only if claims are passed.
+		pod.Spec.ResourceClaims = resourceClaims
+	}
 	pod, err := tCtx.Client().CoreV1().Pods(namespace).Create(tCtx, pod, metav1.CreateOptions{})
 	tCtx.ExpectNoError(err, "create pod "+podName)
 	tCtx.CleanupCtx(func(tCtx ktesting.TContext) {

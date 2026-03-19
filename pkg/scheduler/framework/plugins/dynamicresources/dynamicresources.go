@@ -133,6 +133,9 @@ type nodeAllocation struct {
 	// containerResourceRequestMappings has the container, extended resource, and device request mappings
 	// calculated at the Filter phase, and used at the PreBind phase.
 	containerResourceRequestMappings []v1.ContainerExtendedResourceRequest
+	// nodeAllocatableResourceClaimStatuses stores the calculated node allocatable resource allocations through DRA.
+	// This is populated during Filter stage and passed to PreBind.
+	nodeAllocatableResourceClaimStatuses []v1.NodeAllocatableResourceClaimStatus
 }
 
 // DynamicResources is a plugin that ensures that ResourceClaims are allocated.
@@ -689,10 +692,18 @@ func (pl *DynamicResources) Filter(ctx context.Context, cs fwk.CycleState, pod *
 				unavailableClaims = append(unavailableClaims, index)
 			}
 		}
-	}
 
+		// The claim is allocated, check if its a node-allocatable resource claim that is already allocated.
+		if pl.fts.EnableDRANodeAllocatableResources {
+			status := pl.validateNodeAllocatableDRAClaimSharing(pod, nodeInfo, claim)
+			if status != nil {
+				return status
+			}
+		}
+	}
 	// Use allocator to check the node and cache the result in case that the node is picked.
 	var allocations []resourceapi.AllocationResult
+	var nodeAllocatableClaimStatus []v1.NodeAllocatableResourceClaimStatus
 	if state.allocator != nil {
 		allocCtx := ctx
 		if loggerV := logger.V(5); loggerV.Enabled() {
@@ -718,7 +729,7 @@ func (pl *DynamicResources) Filter(ctx context.Context, cs fwk.CycleState, pod *
 			}
 			claimsToAllocate = append(claimsToAllocate, claim)
 		}
-		a, err := state.allocator.Allocate(allocCtx, node, claimsToAllocate)
+		allocationResult, err := state.allocator.Allocate(allocCtx, node, claimsToAllocate)
 		switch {
 		case errors.Is(err, context.DeadlineExceeded):
 			// Timeouts are potentially transient. Return Error
@@ -748,11 +759,22 @@ func (pl *DynamicResources) Filter(ctx context.Context, cs fwk.CycleState, pod *
 			return statusError(logger, err, "pod", klog.KObj(pod), "node", klog.KObj(node), "resourceclaims", klog.KObjSlice(claimsToAllocate))
 		}
 		// Check for exact length just to be sure. In practice this is all-or-nothing.
-		if len(a) != len(claimsToAllocate) {
+		if len(allocationResult) != len(claimsToAllocate) {
 			return statusUnschedulable(logger, "cannot allocate all claims", "pod", klog.KObj(pod), "node", klog.KObj(node), "resourceclaims", klog.KObjSlice(claimsToAllocate))
 		}
+
+		if pl.fts.EnableDRANodeAllocatableResources {
+			allocationsMap := make(map[types.UID]*resourceapi.AllocationResult)
+			for i, claim := range claimsToAllocate {
+				allocationsMap[claim.UID] = &allocationResult[i]
+			}
+			nodeAllocatableClaimStatus, status = pl.calculateAndCheckNodeAllocatableResources(ctx, state, pod, nodeInfo, allocationsMap)
+			if status != nil {
+				return status
+			}
+		}
 		// Reserve uses this information.
-		allocations = a
+		allocations = allocationResult
 	}
 
 	// Store information in state while holding the mutex.
@@ -777,9 +799,10 @@ func (pl *DynamicResources) Filter(ctx context.Context, cs fwk.CycleState, pod *
 
 	if state.allocator != nil {
 		state.nodeAllocations[node.Name] = nodeAllocation{
-			allocationResults:                allocations,
-			extendedResourceClaim:            nodeExtendedResourceClaim,
-			containerResourceRequestMappings: containerResourceRequestMappings,
+			allocationResults:                    allocations,
+			extendedResourceClaim:                nodeExtendedResourceClaim,
+			containerResourceRequestMappings:     containerResourceRequestMappings,
+			nodeAllocatableResourceClaimStatuses: nodeAllocatableClaimStatus,
 		}
 	}
 
@@ -1056,6 +1079,13 @@ func (pl *DynamicResources) Unreserve(ctx context.Context, cs fwk.CycleState, po
 		}
 	}
 	pl.unreserveExtendedResourceClaim(ctx, pod, state)
+
+	if pl.fts.EnableDRANodeAllocatableResources {
+		nodeAllocations, ok := state.nodeAllocations[nodeName]
+		if ok && len(nodeAllocations.nodeAllocatableResourceClaimStatuses) > 0 {
+			pl.clearNodeAllocatableResourceClaimStatus(ctx, pod)
+		}
+	}
 }
 
 // PreBind gets called in a separate goroutine after it has been determined
@@ -1088,6 +1118,15 @@ func (pl *DynamicResources) PreBind(ctx context.Context, cs fwk.CycleState, pod 
 			}
 			// Updated here such that Unreserve can work with patched claim.
 			state.claims.set(index, claim)
+		}
+	}
+
+	if pl.fts.EnableDRANodeAllocatableResources {
+		nodeAllocations, ok := state.nodeAllocations[nodeName]
+		if ok && len(nodeAllocations.nodeAllocatableResourceClaimStatuses) > 0 {
+			if status := pl.patchNodeAllocatableResourceClaimStatus(ctx, pod, nodeAllocations.nodeAllocatableResourceClaimStatuses); status != nil {
+				return status
+			}
 		}
 	}
 
