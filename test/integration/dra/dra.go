@@ -30,6 +30,7 @@ import (
 	resourcealphaapi "k8s.io/api/resource/v1alpha3"
 	resourcev1beta1 "k8s.io/api/resource/v1beta1"
 	resourcev1beta2 "k8s.io/api/resource/v1beta2"
+	schedulingapi "k8s.io/api/scheduling/v1alpha2"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -209,6 +210,7 @@ func run(tCtx ktesting.TContext, whatRE string) {
 				resourcev1beta1.SchemeGroupVersion:  true,
 				resourcev1beta2.SchemeGroupVersion:  true,
 				resourcealphaapi.SchemeGroupVersion: true,
+				schedulingapi.SchemeGroupVersion:    true,
 			},
 			features: map[featuregate.Feature]bool{
 				// Additional DRA feature gates go here,
@@ -223,6 +225,8 @@ func run(tCtx ktesting.TContext, whatRE string) {
 				features.DRAResourceClaimDeviceStatus: true,
 				features.DRAExtendedResource:          true,
 				features.DRANodeAllocatableResources:  true,
+				features.GangScheduling:               true,
+				features.GenericWorkload:              true,
 			},
 			f: func(tCtx ktesting.TContext) {
 				// These tests must run in parallel as much as possible to keep overall runtime low!
@@ -250,6 +254,7 @@ func run(tCtx ktesting.TContext, whatRE string) {
 				runSubTest(tCtx, "ShareResourceClaimSequentially", testShareResourceClaimSequentially)
 				runSubTest(tCtx, "UsesAllResources", testUsesAllResources)
 				runSubTest(tCtx, "DRANodeAllocatableResources", func(tCtx ktesting.TContext) { testNodeAllocatableResources(tCtx, true) })
+				runSubTest(tCtx, "PodGroup", testPodGroup)
 			},
 		},
 	} {

@@ -448,9 +448,22 @@ func (pl *DynamicResources) PreFilter(ctx context.Context, state fwk.CycleState,
 			return nil, statusUnschedulable(logger, "resourceclaim in use", "pod", klog.KObj(pod), "resourceclaim", klog.KObj(claim))
 		}
 
-		if claim.Status.Allocation != nil {
-			if claim.Status.Allocation.NodeSelector != nil {
-				nodeSelector, err := nodeaffinity.NewNodeSelector(claim.Status.Allocation.NodeSelector)
+		allocation := claim.Status.Allocation
+		// Gang scheduling works by waiting for all Pods in a gang to succeed
+		// through the Reserve phase, then binding all of the Pods. Since a
+		// claim's allocation is not recorded in [stateData.claims] until
+		// PreBind, we look for a pending allocation made in Reserve here to
+		// avoid blocking this Pod on waiting for the allocation to complete.
+		if pl.isSchedulingPodGroup(pod) && allocation == nil {
+			if pendingAllocation, found := pl.draManager.ResourceClaims().GetPendingAllocation(claim.UID); found {
+				allocation = pendingAllocation
+				logger.V(5).Info("reusing pending allocation", "pod", klog.KObj(pod), "resourceclaim", klog.KObj(claim), "uid", claim.UID, "allocation", klog.Format(allocation))
+			}
+		}
+
+		if allocation != nil {
+			if allocation.NodeSelector != nil {
+				nodeSelector, err := nodeaffinity.NewNodeSelector(allocation.NodeSelector)
 				if err != nil {
 					return nil, statusError(logger, err)
 				}
@@ -462,7 +475,7 @@ func (pl *DynamicResources) PreFilter(ctx context.Context, state fwk.CycleState,
 			// Allocation in flight? Better wait for that
 			// to finish, see inFlightAllocations
 			// documentation for details.
-			if pl.draManager.ResourceClaims().ClaimHasPendingAllocation(claim.UID) {
+			if _, pending := pl.draManager.ResourceClaims().GetPendingAllocation(claim.UID); pending {
 				return nil, statusUnschedulable(logger, fmt.Sprintf("resource claim %s is in the process of being allocated", klog.KObj(claim)))
 			}
 
@@ -961,6 +974,19 @@ func (pl *DynamicResources) Reserve(ctx context.Context, cs fwk.CycleState, pod 
 			// updating the ResourceClaim status, we assume that reserving
 			// will work and only do it for real during binding. If it fails at
 			// that time, some other pod was faster and we have to try again.
+
+			if pl.isSchedulingPodGroup(pod) && claim.UID != state.claims.getInitialExtendedResourceClaimUID() {
+				// Inform the tracker that this pod still needs the pending
+				// allocation. Then PreBind or Unreserve can know whether or not
+				// it's safe to remove the pending allocation.
+				//
+				// Extended resources claims cannot be shared, so we never
+				// signal sharing for it.
+				if err := pl.draManager.ResourceClaims().AddSharedClaimPendingAllocation(claim.UID, claim); err != nil {
+					return statusError(logger, err)
+				}
+			}
+
 			continue
 		}
 
@@ -1054,9 +1080,21 @@ func (pl *DynamicResources) Unreserve(ctx context.Context, cs fwk.CycleState, po
 
 	// we process user claims here first, extendedResourceClaim if any is handled below.
 	for _, claim := range state.claims.allUserClaims() {
-		// If allocation was in-flight, then it's not anymore and we need to revert the
-		// claim object in the assume cache to what it was before.
-		if deleted := pl.draManager.ResourceClaims().RemoveClaimPendingAllocation(claim.UID); deleted {
+		// Since several Pods may be sharing a claim with a pending allocation,
+		// make sure that we don't remove the pending allocation until the last
+		// Pod sharing it is Bound or Unreserved.
+		if pl.isSchedulingPodGroup(pod) {
+			if err := pl.draManager.ResourceClaims().RemoveSharedClaimPendingAllocation(claim.UID, claim); err != nil {
+				logger.Error(err, "unreserve", "resourceclaim", klog.KObj(claim))
+				continue
+			}
+		}
+
+		// If allocation was in-flight, then it might not be anymore if no pods
+		// still need the pending allocation. If the allocation was removed from
+		// in-flight, we need to revert the claim object in the assume cache to
+		// what it was before.
+		if deleted := pl.draManager.ResourceClaims().MaybeRemoveClaimPendingAllocation(claim.UID, pl.isSchedulingPodGroup(pod)); deleted {
 			logger.V(5).Info("Released resource in allocation result", "claim", klog.KObj(claim), "uid", claim.UID, "resourceVersion", claim.ResourceVersion, "allocation", klog.Format(claim.Status.Allocation))
 			pl.draManager.ResourceClaims().AssumedClaimRestore(claim.Namespace, claim.Name)
 		}
@@ -1268,7 +1306,17 @@ func (pl *DynamicResources) bindClaim(ctx context.Context, state *stateData, ind
 		}
 		if allocation != nil {
 			for _, claimUID := range claimUIDs {
-				if deleted := pl.draManager.ResourceClaims().RemoveClaimPendingAllocation(claimUID); deleted {
+				// Since several Pods may be sharing a claim with a pending
+				// allocation, make sure that we don't remove the pending
+				// allocation until the last Pod sharing it is Bound or Unreserved.
+				if pl.isSchedulingPodGroup(pod) {
+					if err := pl.draManager.ResourceClaims().RemoveSharedClaimPendingAllocation(claim.UID, claim); err != nil {
+						logger.Error(err, "unreserve", "resourceclaim", klog.KObj(claim))
+						continue
+					}
+				}
+
+				if deleted := pl.draManager.ResourceClaims().MaybeRemoveClaimPendingAllocation(claimUID, pl.isSchedulingPodGroup(pod)); deleted {
 					logger.V(5).Info("Removed claim from in-flight claims", "claim", klog.KObj(claim), "uid", claimUID, "resourceVersion", resourceVersion, "allocation", klog.Format(allocation))
 				}
 			}
@@ -1464,6 +1512,10 @@ func (pl *DynamicResources) isPodReadyForBinding(state *stateData) (bool, error)
 		}
 	}
 	return true, nil
+}
+
+func (pl *DynamicResources) isSchedulingPodGroup(pod *v1.Pod) bool {
+	return pl.fts.EnableGenericWorkload && pod.Spec.SchedulingGroup != nil
 }
 
 // hasBindingConditions checks whether any of the claims in the state

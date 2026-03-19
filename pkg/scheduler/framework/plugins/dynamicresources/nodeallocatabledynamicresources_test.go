@@ -83,8 +83,20 @@ func (m *mockDRAManager) SignalClaimPendingAllocation(uid types.UID, claim *reso
 	return nil
 }
 
-func (m *mockDRAManager) RemoveClaimPendingAllocation(uid types.UID) bool {
+func (m *mockDRAManager) GetPendingAllocation(claimUID types.UID) (*resourceapi.AllocationResult, bool) {
+	return nil, false
+}
+
+func (m *mockDRAManager) MaybeRemoveClaimPendingAllocation(claimUID types.UID, shareable bool) (deleted bool) {
 	return false
+}
+
+func (m *mockDRAManager) AddSharedClaimPendingAllocation(claimUID types.UID, allocatedClaim *resourceapi.ResourceClaim) error {
+	return nil
+}
+
+func (m *mockDRAManager) RemoveSharedClaimPendingAllocation(claimUID types.UID, allocatedClaim *resourceapi.ResourceClaim) error {
+	return nil
 }
 
 func (m *mockDRAManager) List() ([]*resourceapi.ResourceClaim, error) {
