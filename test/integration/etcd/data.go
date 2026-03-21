@@ -608,6 +608,12 @@ func GetEtcdStorageDataForNamespaceServedAt(namespace string, v string, isEmulat
 			IntroducedVersion: "1.33",
 			RemovedVersion:    "1.39",
 		},
+		gvr("resource.k8s.io", "v1alpha3", "resourcepoolstatusrequests"): {
+			Stub:              `{"metadata": {"name": "rpsr1name"}, "spec": {"driver": "test-driver.example.com"}}`,
+			ExpectedEtcdPath:  "/registry/resourcepoolstatusrequests/rpsr1name",
+			IntroducedVersion: "1.36",
+			RemovedVersion:    "1.42",
+		},
 		// --
 
 		// k8s.io/kubernetes/pkg/apis/resource/v1beta1

@@ -2059,3 +2059,135 @@ type DeviceTaintRuleList struct {
 	// Items is the list of DeviceTaintRules.
 	Items []DeviceTaintRule
 }
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// ResourcePoolStatusRequest triggers a one-time calculation of resource pool status
+// based on the provided filters. Once status is set, the request is considered complete and will not be reprocessed.
+// Users should delete and recreate requests to get updated information.
+type ResourcePoolStatusRequest struct {
+	metav1.TypeMeta
+	// Standard object metadata
+	// +required
+	metav1.ObjectMeta
+
+	// Spec defines the filters for which pools to include in the status.
+	// +required
+	Spec ResourcePoolStatusRequestSpec
+
+	// Status is populated by the controller with the calculated pool status.
+	// +optional
+	Status *ResourcePoolStatusRequestStatus
+}
+
+// ResourcePoolStatusRequestSpec defines the filters for the pool status request.
+type ResourcePoolStatusRequestSpec struct {
+	// Driver specifies the DRA driver name to filter pools.
+	// Only pools from ResourceSlices with this driver will be included.
+	// This field is required to bound the scope of the request.
+	Driver string
+
+	// PoolName optionally filters to a specific pool name.
+	// If not specified, all pools from the specified driver are included.
+	// When specified, must be a valid resource pool name (DNS subdomains separated by "/").
+	// +optional
+	PoolName *string
+
+	// Limit optionally specifies the maximum number of pools to return in the status.
+	// If more pools match the filter criteria, the response will be truncated.
+	//
+	// Default: 100
+	// Maximum: 1000
+	//
+	// +optional
+	Limit *int32
+}
+
+// ResourcePoolStatusRequestLimitDefault is the default value for spec.limit.
+const ResourcePoolStatusRequestLimitDefault int32 = 100
+
+// ResourcePoolStatusRequestLimitMax is the maximum allowed value for spec.limit.
+const ResourcePoolStatusRequestLimitMax int32 = 1000
+
+// ResourcePoolStatusRequestStatus contains the calculated pool status information.
+type ResourcePoolStatusRequestStatus struct {
+	// PoolCount is the total number of pools that matched the filter criteria,
+	// regardless of truncation.
+	// +optional
+	PoolCount *int32
+
+	// Pools contains the first `spec.limit` matching pools, sorted by driver
+	// then pool name. If len(pools) < poolCount, the list was truncated.
+	// +optional
+	Pools []PoolStatus
+
+	// Conditions provide information about the state of the request.
+	// A condition with type=Complete or type=Failed will always be set
+	// when the status is populated.
+	// +optional
+	Conditions []metav1.Condition
+}
+
+// PoolStatus contains status information for a single resource pool.
+type PoolStatus struct {
+	// Driver is the DRA driver name for this pool.
+	Driver string
+
+	// PoolName is the name of the pool.
+	PoolName string
+
+	// Generation is the pool generation observed across all ResourceSlices
+	// in this pool.
+	Generation int64
+
+	// ResourceSliceCount is the number of ResourceSlices that make up this pool.
+	// +optional
+	ResourceSliceCount *int32
+
+	// TotalDevices is the total number of devices in the pool across all slices.
+	// +optional
+	TotalDevices *int32
+
+	// AllocatedDevices is the number of devices currently allocated to claims.
+	// +optional
+	AllocatedDevices *int32
+
+	// AvailableDevices is the number of devices available for allocation.
+	// This equals TotalDevices - AllocatedDevices - UnavailableDevices.
+	// +optional
+	AvailableDevices *int32
+
+	// UnavailableDevices is the number of devices that are not available
+	// due to taints or other conditions, but are not allocated.
+	// +optional
+	UnavailableDevices *int32
+
+	// NodeName is the node this pool is associated with.
+	// When omitted, the pool is not associated with a specific node.
+	// +optional
+	NodeName *string
+
+	// ValidationError is set when the pool's data could not be fully validated.
+	// When set, device count fields and ResourceSliceCount may be unset.
+	// +optional
+	ValidationError *string
+}
+
+// ResourcePoolStatusRequestConditionComplete is the condition type for completed requests.
+const ResourcePoolStatusRequestConditionComplete = "Complete"
+
+// ResourcePoolStatusRequestConditionFailed is the condition type for failed requests.
+const ResourcePoolStatusRequestConditionFailed = "Failed"
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// ResourcePoolStatusRequestList is a collection of ResourcePoolStatusRequests.
+type ResourcePoolStatusRequestList struct {
+	metav1.TypeMeta
+	// Standard list metadata
+	// +optional
+	metav1.ListMeta
+
+	// Items is the list of ResourcePoolStatusRequests.
+	Items []ResourcePoolStatusRequest
+}
