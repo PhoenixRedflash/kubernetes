@@ -85,8 +85,8 @@ func ExecCommand(name string, c execCommand) []string {
 		fmt.Fprint(&cmd, sleepCommand(c.StartDelay))
 	}
 	// You can check started file to see if the container has started
-	fmt.Fprintf(&cmd, "touch started; ")
 	fmt.Fprintf(&cmd, "echo %s '%s Started' | tee -a %s >> /proc/1/fd/1; ", timeCmd, name, containerLog)
+	fmt.Fprintf(&cmd, "touch started; ")
 	fmt.Fprintf(&cmd, "echo %s '%s Delaying %d' | tee -a %s >> /proc/1/fd/1; ", timeCmd, name, c.Delay, containerLog)
 	if c.Delay != 0 {
 		fmt.Fprint(&cmd, sleepCommand(c.Delay))
@@ -406,6 +406,16 @@ func preparePod(pod *v1.Pod) {
 			VolumeSource: v1.VolumeSource{
 				EmptyDir: &v1.EmptyDirVolumeSource{},
 			},
+		},
+	}
+}
+
+// startedPostStartGate generates a LifecycleHandler for a PostStart hook that waits for the main
+// container process to reach the `Started` point.
+func startedPostStartGate() *v1.LifecycleHandler {
+	return &v1.LifecycleHandler{
+		Exec: &v1.ExecAction{
+			Command: []string{"sh", "-c", "until [ -f started ]; do sleep 0.1; done"},
 		},
 	}
 }
