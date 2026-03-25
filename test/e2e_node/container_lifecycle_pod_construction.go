@@ -329,11 +329,15 @@ func parseOutput(ctx context.Context, f *framework.Framework, pod *v1.Pod) conta
 	var buf bytes.Buffer
 	for _, cs := range statuses {
 		log, err := e2epod.GetPodLogs(ctx, f.ClientSet, f.Namespace.Name, pod.Name, cs.Name)
-		if err != nil {
-			framework.Logf("error getting logs for %s: %v", cs.Name, err)
-			log, err = e2epod.GetPreviousPodLogs(ctx, f.ClientSet, f.Namespace.Name, pod.Name, cs.Name)
+		if err != nil || log == "" {
 			if err != nil {
-				framework.Logf("error getting previous logs for %s: %v", cs.Name, err)
+				framework.Logf("error getting logs for %s: %v", cs.Name, err)
+			}
+			prevLog, prevErr := e2epod.GetPreviousPodLogs(ctx, f.ClientSet, f.Namespace.Name, pod.Name, cs.Name)
+			if prevErr != nil {
+				framework.Logf("error getting previous logs for %s: %v", cs.Name, prevErr)
+			} else {
+				log = prevLog
 			}
 		}
 		buf.WriteString(log)
