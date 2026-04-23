@@ -127,7 +127,7 @@ func (pl *TaintToleration) Filter(ctx context.Context, state fwk.CycleState, pod
 		return nil
 	}
 
-	klog.FromContext(ctx).V(4).Info("node had untolerated taints", "node", klog.KObj(node), "pod", klog.KObj(pod), "untoleratedTaint", taint)
+	logger.V(4).Info("node had untolerated taints", "node", klog.KObj(node), "pod", klog.KObj(pod), "untoleratedTaint", taint)
 	return fwk.NewStatus(fwk.UnschedulableAndUnresolvable, "node(s) had untolerated taint(s)")
 }
 

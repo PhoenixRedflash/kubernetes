@@ -912,42 +912,28 @@ func testRestartableInitContainers(tCtx ktesting.TContext) {
 	}
 
 	testCases := []struct {
-		name                    string
-		pod                     *v1.Pod
-		enableSidecarContainers bool
-		wantPreFilterStatus     *fwk.Status
-		wantFilterStatus        *fwk.Status
+		name                string
+		pod                 *v1.Pod
+		wantPreFilterStatus *fwk.Status
+		wantFilterStatus    *fwk.Status
 	}{
 		{
-			name: "allow pod without restartable init containers if sidecar containers is disabled",
+			name: "allow pod without restartable init containers",
 			pod:  newPod(),
 		},
 		{
-			name:                "not allow pod with restartable init containers if sidecar containers is disabled",
-			pod:                 newPodWithRestartableInitContainers(nil, nil),
-			wantPreFilterStatus: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, "Pod has a restartable init container and the SidecarContainers feature is disabled"),
+			name: "allow pod with restartable init containers",
+			pod:  newPodWithRestartableInitContainers(nil, nil),
 		},
 		{
-			name:                    "allow pod without restartable init containers if sidecar containers is enabled",
-			enableSidecarContainers: true,
-			pod:                     newPod(),
-		},
-		{
-			name:                    "allow pod with restartable init containers if sidecar containers is enabled",
-			enableSidecarContainers: true,
-			pod:                     newPodWithRestartableInitContainers(nil, nil),
-		},
-		{
-			name:                    "allow pod if the total requested resources do not exceed the node's allocatable resources",
-			enableSidecarContainers: true,
+			name: "allow pod if the total requested resources do not exceed the node's allocatable resources",
 			pod: newPodWithRestartableInitContainers(
 				&v1.ResourceList{v1.ResourceCPU: *resource.NewMilliQuantity(1, resource.DecimalSI)},
 				&v1.ResourceList{v1.ResourceCPU: *resource.NewMilliQuantity(1, resource.DecimalSI)},
 			),
 		},
 		{
-			name:                    "not allow pod if the total requested resources do exceed the node's allocatable resources",
-			enableSidecarContainers: true,
+			name: "not allow pod if the total requested resources do exceed the node's allocatable resources",
 			pod: newPodWithRestartableInitContainers(
 				&v1.ResourceList{v1.ResourceCPU: *resource.NewMilliQuantity(1, resource.DecimalSI)},
 				&v1.ResourceList{v1.ResourceCPU: *resource.NewMilliQuantity(2, resource.DecimalSI)},
@@ -962,7 +948,7 @@ func testRestartableInitContainers(tCtx ktesting.TContext) {
 			nodeInfo := framework.NewNodeInfo()
 			nodeInfo.SetNode(&node)
 
-			p, err := NewFit(tCtx, &config.NodeResourcesFitArgs{ScoringStrategy: defaultScoringStrategy}, nil, plfeature.Features{EnableSidecarContainers: test.enableSidecarContainers})
+			p, err := NewFit(tCtx, &config.NodeResourcesFitArgs{ScoringStrategy: defaultScoringStrategy}, nil, plfeature.Features{})
 			tCtx.ExpectNoError(err, "create fit plugin")
 			cycleState := framework.NewCycleState()
 			_, preFilterStatus := p.(fwk.PreFilterPlugin).PreFilter(tCtx, cycleState, test.pod, nil)

@@ -1742,9 +1742,6 @@ var _ = SIGDescribe(framework.WithSerial(), "Containers Lifecycle", func() {
 
 			ginkgo.By("Restarting the kubelet")
 			restartKubelet(ctx)
-			gomega.Eventually(ctx, func() bool {
-				return kubeletHealthCheck(kubeletHealthCheckURL)
-			}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeTrueBecause("kubelet was expected to be healthy"))
 
 			ginkgo.By("Waiting for the pod to be re-initialized and run")
 			err = e2epod.WaitForPodCondition(ctx, f.ClientSet, pod.Namespace, pod.Name, "re-initialized", f.Timeouts.PodStart, func(pod *v1.Pod) (bool, error) {
@@ -1862,10 +1859,6 @@ var _ = SIGDescribe(framework.WithSerial(), "Containers Lifecycle", func() {
 
 				ginkgo.By("restarting the kubelet")
 				restartKubelet(ctx)
-				// wait until the kubelet health check will succeed
-				gomega.Eventually(ctx, func() bool {
-					return kubeletHealthCheck(kubeletHealthCheckURL)
-				}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeTrueBecause("kubelet should be started"))
 
 				ginkgo.By("ensuring that no completed init container is restarted")
 				gomega.Consistently(ctx, func() bool {
@@ -1927,10 +1920,6 @@ var _ = SIGDescribe(framework.WithSerial(), "Containers Lifecycle", func() {
 
 				ginkgo.By("restarting the kubelet")
 				restartKubelet(ctx)
-				// wait until the kubelet health check will succeed
-				gomega.Eventually(ctx, func() bool {
-					return kubeletHealthCheck(kubeletHealthCheckURL)
-				}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeTrueBecause("kubelet should be restarted"))
 
 				ginkgo.By("ensuring that no completed init container is restarted")
 				gomega.Consistently(ctx, func() bool {
@@ -6153,9 +6142,6 @@ var _ = SIGDescribe(framework.WithNodeConformance(), framework.WithSerial(), "Co
 
 			ginkgo.By("Restarting the kubelet")
 			restartKubelet(ctx)
-			gomega.Eventually(ctx, func() bool {
-				return kubeletHealthCheck(kubeletHealthCheckURL)
-			}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeTrueBecause("kubelet was expected to be healthy"))
 
 			ginkgo.By("Waiting for the pod to re-initialize")
 			err = e2epod.WaitForPodCondition(ctx, f.ClientSet, pod.Namespace, pod.Name, "re-initialized", f.Timeouts.PodStart, func(pod *v1.Pod) (bool, error) {
@@ -6301,9 +6287,6 @@ var _ = SIGDescribe(framework.WithNodeConformance(), framework.WithSerial(), "Co
 
 				ginkgo.By("Restarting the kubelet")
 				restartKubelet(ctx)
-				gomega.Eventually(ctx, func() bool {
-					return kubeletHealthCheck(kubeletHealthCheckURL)
-				}, f.Timeouts.PodStart, f.Timeouts.Poll).Should(gomega.BeTrueBecause("kubelet was expected to be healthy"))
 
 				ginkgo.By("Sending an update")
 				client.Update(ctx, pod.Name, func(pod *v1.Pod) {

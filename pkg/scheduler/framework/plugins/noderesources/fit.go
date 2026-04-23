@@ -94,7 +94,6 @@ type Fit struct {
 	ignoredResources                              sets.Set[string]
 	ignoredResourceGroups                         sets.Set[string]
 	enableInPlacePodVerticalScaling               bool
-	enableSidecarContainers                       bool
 	enableSchedulingQueueHint                     bool
 	enablePodLevelResources                       bool
 	enableDRAExtendedResource                     bool
@@ -237,7 +236,6 @@ func NewFit(_ context.Context, plArgs runtime.Object, h fwk.Handle, fts feature.
 		ignoredResources:                              sets.New(args.IgnoredResources...),
 		ignoredResourceGroups:                         sets.New(args.IgnoredResourceGroups...),
 		enableInPlacePodVerticalScaling:               fts.EnableInPlacePodVerticalScaling,
-		enableSidecarContainers:                       fts.EnableSidecarContainers,
 		enableSchedulingQueueHint:                     fts.EnableSchedulingQueueHint,
 		handle:                                        h,
 		enablePodLevelResources:                       fts.EnablePodLevelResources,
@@ -332,14 +330,6 @@ func computePodResourceRequest(pod *v1.Pod, opts ResourceRequestsOptions) *preFi
 
 // PreFilter invoked at the prefilter extension point.
 func (f *Fit) PreFilter(ctx context.Context, cycleState fwk.CycleState, pod *v1.Pod, nodes []fwk.NodeInfo) (*fwk.PreFilterResult, *fwk.Status) {
-	if !f.enableSidecarContainers && hasRestartableInitContainer(pod) {
-		// Scheduler will calculate resources usage for a Pod containing
-		// restartable init containers that will be equal or more than kubelet will
-		// require to run the Pod. So there will be no overbooking. However, to
-		// avoid the inconsistency in resource calculation between the scheduler
-		// and the older (before v1.28) kubelet, make the Pod unschedulable.
-		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, "Pod has a restartable init container and the SidecarContainers feature is disabled")
-	}
 	result := computePodResourceRequest(pod, ResourceRequestsOptions{EnablePodLevelResources: f.enablePodLevelResources})
 
 	cycleState.Write(preFilterStateKey, result)
@@ -645,15 +635,6 @@ func (f *Fit) Filter(ctx context.Context, cycleState fwk.CycleState, pod *v1.Pod
 		return fwk.NewStatus(statusCode, failureReasons...)
 	}
 	return nil
-}
-
-func hasRestartableInitContainer(pod *v1.Pod) bool {
-	for _, c := range pod.Spec.InitContainers {
-		if c.RestartPolicy != nil && *c.RestartPolicy == v1.ContainerRestartPolicyAlways {
-			return true
-		}
-	}
-	return false
 }
 
 // InsufficientResource describes what kind of resource limit is hit and caused the pod to not fit the node.
