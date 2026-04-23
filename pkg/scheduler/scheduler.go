@@ -498,7 +498,7 @@ func buildQueueingHintMap(ctx context.Context, es []fwk.EnqueueExtensions) (inte
 		registerNodeTaintUpdated := false
 		for _, event := range events {
 			fn := event.QueueingHintFn
-			if fn == nil || !feature.DefaultFeatureGate.Enabled(features.SchedulerQueueingHints) {
+			if fn == nil {
 				fn = defaultQueueingHintFn
 			}
 

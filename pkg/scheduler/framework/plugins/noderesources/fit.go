@@ -94,7 +94,6 @@ type Fit struct {
 	ignoredResources                              sets.Set[string]
 	ignoredResourceGroups                         sets.Set[string]
 	enableInPlacePodVerticalScaling               bool
-	enableSchedulingQueueHint                     bool
 	enablePodLevelResources                       bool
 	enableDRAExtendedResource                     bool
 	enableInPlacePodLevelResourcesVerticalScaling bool
@@ -236,7 +235,6 @@ func NewFit(_ context.Context, plArgs runtime.Object, h fwk.Handle, fts feature.
 		ignoredResources:                              sets.New(args.IgnoredResources...),
 		ignoredResourceGroups:                         sets.New(args.IgnoredResourceGroups...),
 		enableInPlacePodVerticalScaling:               fts.EnableInPlacePodVerticalScaling,
-		enableSchedulingQueueHint:                     fts.EnableSchedulingQueueHint,
 		handle:                                        h,
 		enablePodLevelResources:                       fts.EnablePodLevelResources,
 		enableDRAExtendedResource:                     fts.EnableDRAExtendedResource,
@@ -358,19 +356,9 @@ func getPreFilterState(cycleState fwk.CycleState) (*preFilterState, error) {
 // EventsToRegister returns the possible events that may make a Pod
 // failed by this plugin schedulable.
 func (f *Fit) EventsToRegister(_ context.Context) ([]fwk.ClusterEventWithHint, error) {
-	// A note about UpdateNodeTaint/UpdateNodeLabel event:
-	// Ideally, it's supposed to register only Add | UpdateNodeAllocatable because the only resource update could change the node resource fit plugin's result.
-	// But, we may miss Node/Add event due to preCheck, and we decided to register UpdateNodeTaint | UpdateNodeLabel for all plugins registering Node/Add.
-	// See: https://github.com/kubernetes/kubernetes/issues/109437
-	nodeActionType := fwk.Add | fwk.UpdateNodeAllocatable | fwk.UpdateNodeTaint | fwk.UpdateNodeLabel
-	if f.enableSchedulingQueueHint {
-		// preCheck is not used when QHint is enabled, and hence Update event isn't necessary.
-		nodeActionType = fwk.Add | fwk.UpdateNodeAllocatable
-	}
-
 	events := []fwk.ClusterEventWithHint{
 		{Event: fwk.ClusterEvent{Resource: fwk.AssignedPod, ActionType: fwk.Delete}, QueueingHintFn: f.isSchedulableAfterAssignedPodDelete},
-		{Event: fwk.ClusterEvent{Resource: fwk.Node, ActionType: nodeActionType}, QueueingHintFn: f.isSchedulableAfterNodeChange},
+		{Event: fwk.ClusterEvent{Resource: fwk.Node, ActionType: fwk.Add | fwk.UpdateNodeAllocatable}, QueueingHintFn: f.isSchedulableAfterNodeChange},
 	}
 	if f.enableDRAExtendedResource {
 		events = append(events,

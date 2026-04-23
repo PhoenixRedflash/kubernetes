@@ -246,21 +246,11 @@ func (pl *DynamicResources) EventsToRegister(_ context.Context) ([]fwk.ClusterEv
 	if !pl.enabled {
 		return nil, nil
 	}
-	// A resource might depend on node labels for topology filtering.
-	// A new or updated node may make pods schedulable.
-	//
-	// A note about UpdateNodeTaint event:
-	// Ideally, it's supposed to register only Add | UpdateNodeLabel because UpdateNodeTaint will never change the result from this plugin.
-	// But, we may miss Node/Add event due to preCheck, and we decided to register UpdateNodeTaint | UpdateNodeLabel for all plugins registering Node/Add.
-	// See: https://github.com/kubernetes/kubernetes/issues/109437
-	nodeActionType := fwk.Add | fwk.UpdateNodeLabel | fwk.UpdateNodeTaint | fwk.UpdateNodeAllocatable
-	if pl.fts.EnableSchedulingQueueHint {
-		// When QHint is enabled, the problematic preCheck is already removed, and we can remove UpdateNodeTaint.
-		nodeActionType = fwk.Add | fwk.UpdateNodeLabel | fwk.UpdateNodeAllocatable
-	}
 
 	events := []fwk.ClusterEventWithHint{
-		{Event: fwk.ClusterEvent{Resource: fwk.Node, ActionType: nodeActionType}},
+		// A resource might depend on node labels for topology filtering.
+		// A new or updated node may make pods schedulable.
+		{Event: fwk.ClusterEvent{Resource: fwk.Node, ActionType: fwk.Add | fwk.UpdateNodeLabel | fwk.UpdateNodeAllocatable}},
 		// Allocation is tracked in ResourceClaims, so any changes may make the pods schedulable.
 		{Event: fwk.ClusterEvent{Resource: fwk.ResourceClaim, ActionType: fwk.Add | fwk.Update}, QueueingHintFn: pl.isSchedulableAfterClaimChange},
 		// Adding the ResourceClaim name to the pod status makes pods waiting for their ResourceClaim schedulable.

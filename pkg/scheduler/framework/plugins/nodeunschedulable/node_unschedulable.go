@@ -33,9 +33,7 @@ import (
 
 // NodeUnschedulable plugin filters nodes that set node.Spec.Unschedulable=true unless
 // the pod tolerates {key=node.kubernetes.io/unschedulable, effect:NoSchedule} taint.
-type NodeUnschedulable struct {
-	enableSchedulingQueueHint bool
-}
+type NodeUnschedulable struct{}
 
 var _ fwk.FilterPlugin = &NodeUnschedulable{}
 var _ fwk.EnqueueExtensions = &NodeUnschedulable{}
@@ -54,16 +52,6 @@ const (
 // EventsToRegister returns the possible events that may make a Pod
 // failed by this plugin schedulable.
 func (pl *NodeUnschedulable) EventsToRegister(_ context.Context) ([]fwk.ClusterEventWithHint, error) {
-	if !pl.enableSchedulingQueueHint {
-		return []fwk.ClusterEventWithHint{
-			// A note about UpdateNodeLabel event:
-			// Ideally, it's supposed to register only Add | UpdateNodeTaint because UpdateNodeLabel will never change the result from this plugin.
-			// But, we may miss Node/Add event due to preCheck, and we decided to register UpdateNodeTaint | UpdateNodeLabel for all plugins registering Node/Add.
-			// See: https://github.com/kubernetes/kubernetes/issues/109437
-			{Event: fwk.ClusterEvent{Resource: fwk.Node, ActionType: fwk.Add | fwk.UpdateNodeTaint | fwk.UpdateNodeLabel}, QueueingHintFn: pl.isSchedulableAfterNodeChange},
-		}, nil
-	}
-
 	return []fwk.ClusterEventWithHint{
 		// When QueueingHint is enabled, we don't use preCheck and we don't need to register UpdateNodeLabel event.
 		{Event: fwk.ClusterEvent{Resource: fwk.Node, ActionType: fwk.Add | fwk.UpdateNodeTaint}, QueueingHintFn: pl.isSchedulableAfterNodeChange},
@@ -155,6 +143,6 @@ func (pl *NodeUnschedulable) Filter(ctx context.Context, _ fwk.CycleState, pod *
 }
 
 // New initializes a new plugin and returns it.
-func New(_ context.Context, _ runtime.Object, _ fwk.Handle, fts feature.Features) (fwk.Plugin, error) {
-	return &NodeUnschedulable{enableSchedulingQueueHint: fts.EnableSchedulingQueueHint}, nil
+func New(_ context.Context, _ runtime.Object, _ fwk.Handle, _ feature.Features) (fwk.Plugin, error) {
+	return &NodeUnschedulable{}, nil
 }

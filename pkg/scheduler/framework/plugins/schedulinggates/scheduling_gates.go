@@ -33,9 +33,7 @@ import (
 const Name = names.SchedulingGates
 
 // SchedulingGates checks if a Pod carries .spec.schedulingGates.
-type SchedulingGates struct {
-	enableSchedulingQueueHint bool
-}
+type SchedulingGates struct{}
 
 var _ fwk.PreEnqueuePlugin = &SchedulingGates{}
 var _ fwk.EnqueueExtensions = &SchedulingGates{}
@@ -58,13 +56,6 @@ func (pl *SchedulingGates) PreEnqueue(ctx context.Context, p *v1.Pod) *fwk.Statu
 // EventsToRegister returns the possible events that may make a Pod
 // failed by this plugin schedulable.
 func (pl *SchedulingGates) EventsToRegister(_ context.Context) ([]fwk.ClusterEventWithHint, error) {
-	if !pl.enableSchedulingQueueHint {
-		return nil, nil
-	}
-	// When the QueueingHint feature is enabled,
-	// the scheduling queue uses Pod/Update Queueing Hint
-	// to determine whether a Pod's update makes the Pod schedulable or not.
-	// https://github.com/kubernetes/kubernetes/pull/122234
 	return []fwk.ClusterEventWithHint{
 		// Pods can be more schedulable once it's gates are removed
 		{Event: fwk.ClusterEvent{Resource: fwk.TargetPod, ActionType: fwk.UpdatePodSchedulingGatesEliminated}, QueueingHintFn: pl.isSchedulableAfterUpdateTargetPodSchedulingGatesEliminated},
@@ -72,10 +63,8 @@ func (pl *SchedulingGates) EventsToRegister(_ context.Context) ([]fwk.ClusterEve
 }
 
 // New initializes a new plugin and returns it.
-func New(_ context.Context, _ runtime.Object, _ fwk.Handle, fts feature.Features) (fwk.Plugin, error) {
-	return &SchedulingGates{
-		enableSchedulingQueueHint: fts.EnableSchedulingQueueHint,
-	}, nil
+func New(_ context.Context, _ runtime.Object, _ fwk.Handle, _ feature.Features) (fwk.Plugin, error) {
+	return &SchedulingGates{}, nil
 }
 
 func (pl *SchedulingGates) isSchedulableAfterUpdateTargetPodSchedulingGatesEliminated(logger klog.Logger, pod *v1.Pod, oldObj, newObj interface{}) (fwk.QueueingHint, error) {

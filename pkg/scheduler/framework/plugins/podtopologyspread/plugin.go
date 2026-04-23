@@ -68,7 +68,6 @@ type PodTopologySpread struct {
 	statefulSets                                 appslisters.StatefulSetLister
 	enableNodeInclusionPolicyInPodTopologySpread bool
 	enableMatchLabelKeysInPodTopologySpread      bool
-	enableSchedulingQueueHint                    bool
 	enableTaintTolerationComparisonOperators     bool
 }
 
@@ -120,7 +119,6 @@ func New(_ context.Context, plArgs runtime.Object, h fwk.Handle, fts feature.Fea
 		defaultConstraints: args.DefaultConstraints,
 		enableNodeInclusionPolicyInPodTopologySpread: fts.EnableNodeInclusionPolicyInPodTopologySpread,
 		enableMatchLabelKeysInPodTopologySpread:      fts.EnableMatchLabelKeysInPodTopologySpread,
-		enableSchedulingQueueHint:                    fts.EnableSchedulingQueueHint,
 		enableTaintTolerationComparisonOperators:     fts.EnableTaintTolerationComparisonOperators,
 	}
 	if args.DefaultingType == config.SystemDefaulting {
@@ -154,8 +152,8 @@ func (pl *PodTopologySpread) setListers(factory informers.SharedInformerFactory)
 // EventsToRegister returns the possible events that may make a Pod
 // failed by this plugin schedulable.
 func (pl *PodTopologySpread) EventsToRegister(_ context.Context) ([]fwk.ClusterEventWithHint, error) {
-	events := []fwk.ClusterEventWithHint{
-		// All ActionType includes the following events:
+	return []fwk.ClusterEventWithHint{
+		// AssignedPod includes the following events:
 		// - Add. An unschedulable Pod may fail due to violating topology spread constraints,
 		// adding an assigned Pod may make it schedulable.
 		// - UpdatePodLabel. Updating on an existing Pod's labels (e.g., removal) may make
@@ -163,27 +161,16 @@ func (pl *PodTopologySpread) EventsToRegister(_ context.Context) ([]fwk.ClusterE
 		// - Delete. An unschedulable Pod may fail due to violating an existing Pod's topology spread constraints,
 		// deleting an existing Pod may make it schedulable.
 		{Event: fwk.ClusterEvent{Resource: fwk.AssignedPod, ActionType: fwk.Add | fwk.UpdatePodLabel | fwk.Delete}, QueueingHintFn: pl.isSchedulableAfterAssignedPodChange},
+		// TargetPod includes the following events:
+		// - UpdatePodLabel. Updating on an existing Pod's labels (e.g., removal) may make
+		// an unschedulable Pod schedulable.
+		// - UpdatePodToleration. The Pod rejected by this plugin can be schedulable when the Pod has a spread constraint with NodeTaintsPolicy:Honor
+		// and has got a new toleration.
+		{Event: fwk.ClusterEvent{Resource: fwk.TargetPod, ActionType: fwk.UpdatePodToleration | fwk.UpdatePodLabel}, QueueingHintFn: pl.isSchedulableAfterTargetPodChange},
 		// Node add|delete|update maybe lead an topology key changed,
 		// and make these pod in scheduling schedulable or unschedulable.
 		{Event: fwk.ClusterEvent{Resource: fwk.Node, ActionType: fwk.Add | fwk.Delete | fwk.UpdateNodeLabel | fwk.UpdateNodeTaint}, QueueingHintFn: pl.isSchedulableAfterNodeChange},
-	}
-
-	if pl.enableSchedulingQueueHint {
-		// When the QueueingHint feature is enabled, the scheduling queue uses Pod/Update Queueing Hint
-		// to determine whether a Pod's update makes the Pod schedulable or not.
-		// https://github.com/kubernetes/kubernetes/pull/122234
-		// (If not, the scheduling queue always retries the unschedulable Pods when they're updated.)
-		//
-		// The Pod rejected by this plugin can be schedulable when the Pod has a spread constraint with NodeTaintsPolicy:Honor
-		// and has got a new toleration.
-		// So, we add UpdatePodToleration here only when QHint is enabled.
-		events = append(events, fwk.ClusterEventWithHint{
-			Event:          fwk.ClusterEvent{Resource: fwk.TargetPod, ActionType: fwk.UpdatePodToleration | fwk.UpdatePodLabel},
-			QueueingHintFn: pl.isSchedulableAfterTargetPodChange,
-		})
-	}
-
-	return events, nil
+	}, nil
 }
 
 // involvedInTopologySpreading returns true if the incomingPod is involved in the topology spreading of podWithSpreading.

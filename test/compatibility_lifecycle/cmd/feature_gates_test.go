@@ -46,7 +46,7 @@ func TestVerifyAlphabeticOrder(t *testing.T) {
 		{
 			name: "ordered versioned specs",
 			keys: []string{
-				"SchedulerQueueingHints", "SELinuxMount", "ServiceAccountTokenJTI",
+				"SELinuxMount", "ServiceAccountTokenJTI",
 				"genericfeatures.AdmissionWebhookMatchConditions",
 				"genericfeatures.AggregatedDiscoveryEndpoint",
 			},
@@ -54,7 +54,7 @@ func TestVerifyAlphabeticOrder(t *testing.T) {
 		{
 			name: "unordered versioned specs",
 			keys: []string{
-				"SELinuxMount", "SchedulerQueueingHints", "ServiceAccountTokenJTI",
+				"ServiceAccountTokenJTI", "SELinuxMount",
 				"genericfeatures.AdmissionWebhookMatchConditions",
 				"genericfeatures.AggregatedDiscoveryEndpoint",
 			},
@@ -64,7 +64,7 @@ func TestVerifyAlphabeticOrder(t *testing.T) {
 			name: "unordered versioned specs with mixed pkg prefix",
 			keys: []string{
 				"genericfeatures.AdmissionWebhookMatchConditions",
-				"SchedulerQueueingHints", "SELinuxMount", "ServiceAccountTokenJTI",
+				"SELinuxMount", "ServiceAccountTokenJTI",
 				"genericfeatures.AggregatedDiscoveryEndpoint",
 			},
 			expectErr: true,
@@ -72,7 +72,7 @@ func TestVerifyAlphabeticOrder(t *testing.T) {
 		{
 			name: "unordered versioned specs with pkg prefix",
 			keys: []string{
-				"SchedulerQueueingHints", "SELinuxMount", "ServiceAccountTokenJTI",
+				"SELinuxMount", "ServiceAccountTokenJTI",
 				"genericfeatures.AggregatedDiscoveryEndpoint",
 				"genericfeatures.AdmissionWebhookMatchConditions",
 			},
