@@ -624,7 +624,7 @@ func initTestOutput(tb testing.TB) io.Writer {
 
 var specialFilenameChars = regexp.MustCompile(`[^a-zA-Z0-9-_]`)
 
-func setupTestCase(t testing.TB, tc *testCase, featureGates map[featuregate.Feature]bool, workload *Workload, opts *schedulerPerfOptions) (*scheduler.Scheduler, informers.SharedInformerFactory, ktesting.TContext) {
+func setupTestCase(t testing.TB, tc *testCase, featureGates map[featuregate.Feature]bool, workload *Workload, opts *schedulerPerfOptions) (*scheduler.Scheduler, informers.SharedInformerFactory, <-chan struct{}, ktesting.TContext) {
 	tCtx := ktesting.Init(t, initoption.PerTestOutput(UseTestingLog))
 	artifacts, doArtifacts := os.LookupEnv("ARTIFACTS")
 	if !UseTestingLog && doArtifacts {
@@ -820,7 +820,7 @@ func RunBenchmarkPerfScheduling(b *testing.B, configFile string, topicName strin
 					fixJSONOutput(b)
 
 					featureGates := featureGatesMerge(tc.FeatureGates, w.FeatureGates)
-					scheduler, informerFactory, tCtx := setupTestCase(b, tc, featureGates, w, opts)
+					scheduler, informerFactory, schedulerDone, tCtx := setupTestCase(b, tc, featureGates, w, opts)
 
 					err := w.isValid(tc.MetricsCollectorConfig)
 					if err != nil {
@@ -869,6 +869,10 @@ func RunBenchmarkPerfScheduling(b *testing.B, configFile string, topicName strin
 							tCtx.Errorf("%s: %s", w.Name, err)
 						}
 					}
+
+					tCtx.Cancel("workload is done")
+					// Wait for the scheduler to stop to avoid data races when resetting metrics.
+					<-schedulerDone
 
 					// Reset metrics to prevent metrics generated in current workload gets
 					// carried over to the next workload.
@@ -942,7 +946,7 @@ func RunIntegrationPerfScheduling(t *testing.T, configFile string, options ...Sc
 						t.Skipf("disabled by label filter %q", TestSchedulingLabelFilter)
 					}
 					featureGates := featureGatesMerge(tc.FeatureGates, w.FeatureGates)
-					scheduler, informerFactory, tCtx := setupTestCase(t, tc, featureGates, w, opts)
+					scheduler, informerFactory, schedulerDone, tCtx := setupTestCase(t, tc, featureGates, w, opts)
 					err := w.isValid(tc.MetricsCollectorConfig)
 					if err != nil {
 						t.Fatalf("workload %s is not valid: %v", w.Name, err)
@@ -959,6 +963,10 @@ func RunIntegrationPerfScheduling(t *testing.T, configFile string, options ...Sc
 							tCtx.Errorf("%s: %s", w.Name, err)
 						}
 					}
+
+					tCtx.Cancel("workload is done")
+					// Wait for the scheduler to stop to avoid data races when resetting metrics.
+					<-schedulerDone
 
 					// Reset metrics to prevent metrics generated in current workload gets
 					// carried over to the next workload.
@@ -1008,7 +1016,7 @@ func unrollWorkloadTemplate(tb ktesting.TB, wt []op, w *Workload) []op {
 	return unrolled
 }
 
-func setupClusterForWorkload(tCtx ktesting.TContext, configPath string, featureGates map[featuregate.Feature]bool, opts *schedulerPerfOptions) (*scheduler.Scheduler, informers.SharedInformerFactory, ktesting.TContext) {
+func setupClusterForWorkload(tCtx ktesting.TContext, configPath string, featureGates map[featuregate.Feature]bool, opts *schedulerPerfOptions) (*scheduler.Scheduler, informers.SharedInformerFactory, <-chan struct{}, ktesting.TContext) {
 	var cfg *config.KubeSchedulerConfiguration
 	var err error
 	if configPath != "" {
