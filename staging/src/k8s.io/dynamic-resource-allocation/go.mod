@@ -13,7 +13,7 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/onsi/gomega v1.39.1
 	github.com/stretchr/testify v1.11.1
-	go.etcd.io/etcd/client/pkg/v3 v3.6.8
+	go.etcd.io/etcd/client/pkg/v3 v3.6.10
 	google.golang.org/grpc v1.80.0
 	k8s.io/api v0.0.0
 	k8s.io/apimachinery v0.0.0
@@ -53,7 +53,7 @@ require (
 	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/procfs v0.19.2 // indirect
 	github.com/spf13/cobra v1.10.2 // indirect
-	github.com/spf13/pflag v1.0.9 // indirect
+	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.opentelemetry.io/otel v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect

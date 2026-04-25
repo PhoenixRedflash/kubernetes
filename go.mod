@@ -49,13 +49,13 @@ require (
 	github.com/prometheus/common v0.67.5
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.2
-	github.com/spf13/pflag v1.0.9
+	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
 	github.com/vishvananda/netlink v1.3.1
 	github.com/vishvananda/netns v0.0.5
-	go.etcd.io/etcd/api/v3 v3.6.8
-	go.etcd.io/etcd/client/pkg/v3 v3.6.8
-	go.etcd.io/etcd/client/v3 v3.6.8
+	go.etcd.io/etcd/api/v3 v3.6.10
+	go.etcd.io/etcd/client/pkg/v3 v3.6.10
+	go.etcd.io/etcd/client/v3 v3.6.10
 	go.opentelemetry.io/contrib/instrumentation/github.com/emicklei/go-restful/otelrestful v0.68.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0
 	go.opentelemetry.io/otel v1.43.0
@@ -196,8 +196,8 @@ require (
 	github.com/xiang90/probing v0.0.0-20221125231312-a49e3df8f510 // indirect
 	github.com/xlab/treeprint v1.2.0 // indirect
 	go.etcd.io/bbolt v1.4.3 // indirect
-	go.etcd.io/etcd/pkg/v3 v3.6.8 // indirect
-	go.etcd.io/etcd/server/v3 v3.6.8 // indirect
+	go.etcd.io/etcd/pkg/v3 v3.6.10 // indirect
+	go.etcd.io/etcd/server/v3 v3.6.10 // indirect
 	go.etcd.io/raft/v3 v3.6.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0 // indirect
