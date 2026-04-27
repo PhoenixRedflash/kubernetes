@@ -22,12 +22,6 @@ import (
 	"testing"
 
 	"github.com/onsi/gomega/format"
-	"github.com/stretchr/testify/assert"
-
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-
-	_ "k8s.io/kubernetes/test/utils/ktesting/format" // Register YAML formatting.
 )
 
 func TestGomegaFormatObject(t *testing.T) {
@@ -40,38 +34,46 @@ func TestGomegaFormatObject(t *testing.T) {
 		"string":         {value: "hello world", expected: `<string>: hello world`},
 		"struct":         {value: myStruct{a: 1, b: 2}, expected: `<format_test.myStruct>: {a: 1, b: 2}`},
 		"gomegastringer": {value: typeWithGomegaStringer(2), expected: `<format_test.typeWithGomegaStringer>: my stringer 2`},
-		"pod": {value: v1.Pod{}, expected: `<v1.Pod>: 
-    metadata: {}
-    spec:
-      containers: null
-    status: {}`},
-		"pod-indented": {value: v1.Pod{}, indentation: 1, expected: `    <v1.Pod>: 
-        metadata: {}
-        spec:
-          containers: null
-        status: {}`},
-		"pod-ptr": {value: &v1.Pod{}, expected: `<*v1.Pod | <hex>>: 
-    metadata: {}
-    spec:
-      containers: null
-    status: {}`},
-		"pod-hash": {value: map[string]v1.Pod{}, expected: `<map[string]v1.Pod | len:0>: 
-    {}`},
-		"podlist": {value: v1.PodList{}, expected: `<v1.PodList>: 
-    items: null
-    metadata: {}`},
-		"unstructured": {value: func() any {
-			var obj unstructured.Unstructured
-			obj.SetName("some-name")
-			return &obj
-		}(), expected: `<*unstructured.Unstructured | <hex>>: 
-    metadata:
-      name: some-name`},
+
+		// v1.Pod is tested in test/utils/format.
+
+		// For unstructured.Unstructured, the corresponding testuses the real type.
+		// The expected result is a bit different because "our" myUnstructured has no
+		// special JSON encoding methods, but for testing that YAML is used at all that's
+		// sufficient.
+		"unstructured-pointer": {
+			value: &myUnstructured{
+				Object: map[string]any{
+					"metadata": map[string]any{
+						"name": "some-name",
+					},
+				},
+			},
+			expected: `<*format_test.myUnstructured | <hex>>: 
+    Object:
+      metadata:
+        name: some-name`,
+		},
+		"unstructured-value": {
+			value: myUnstructured{
+				Object: map[string]any{
+					"metadata": map[string]any{
+						"name": "some-name",
+					},
+				},
+			},
+			expected: `<format_test.myUnstructured>: 
+    Object:
+      metadata:
+        name: some-name`,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			actual := format.Object(test.value, test.indentation)
 			actual = regexp.MustCompile(`\| 0x[a-z0-9]+`).ReplaceAllString(actual, `| <hex>`)
-			assert.Equal(t, test.expected, actual)
+			if test.expected != actual {
+				t.Errorf("Expected:\n%s\nActual:\n%s\n", test.expected, actual)
+			}
 		})
 	}
 
@@ -85,4 +87,8 @@ func (v typeWithGomegaStringer) GomegaString() string {
 
 type myStruct struct {
 	a, b int
+}
+
+type myUnstructured struct {
+	Object map[string]any
 }

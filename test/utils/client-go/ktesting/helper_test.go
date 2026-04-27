@@ -24,7 +24,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
 )
 
 // testcase wraps a callback which is called with a TContext that intercepts
@@ -52,8 +52,8 @@ func (tc testcase) run(t *testing.T) {
 
 		trace := buffer.log.String()
 		t.Logf("Trace:\n%s\n", trace)
-		tCtx.Assert(duration).To(gomega.Equal(tc.expectDuration), "callback invocation duration %s")
-		tCtx.Assert(normalize(trace)).To(gomega.Equal(tc.expectTrace))
+		assert.Equal(t, tc.expectDuration, duration, "callback invocation duration %s")
+		assert.Equal(t, tc.expectTrace, normalize(trace))
 	})
 }
 
