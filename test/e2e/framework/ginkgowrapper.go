@@ -293,13 +293,16 @@ func expandGinkgoArgs(leafNode bool, offset ginkgo.Offset, text string, args []a
 	if text != "" {
 		texts = append(texts, text)
 	}
+	previousText := ""
 
 	// All labels for a leaf node, from parent and added in this call.
 	allLabels := sets.New[string]()
 	if leafNode {
 		// May only be called during tree construction, i.e. not for the top-level node,
 		// so we have to be a bit careful.
-		allLabels = sets.New[string](ginkgo.CurrentTreeConstructionNodeReport().Labels()...)
+		report := ginkgo.CurrentTreeConstructionNodeReport()
+		previousText = report.FullText()
+		allLabels = sets.New[string](report.Labels()...)
 	}
 	addLabel := func(label string) {
 		ginkgoArgs = append(ginkgoArgs, ginkgo.Label(label))
@@ -404,7 +407,15 @@ func expandGinkgoArgs(leafNode bool, offset ginkgo.Offset, text string, args []a
 
 		slices.Sort(delayedLabels)
 		for _, label := range delayedLabels {
-			texts = append(texts, fmt.Sprintf("[%s]", label))
+			text := fmt.Sprintf("[%s]", label)
+			if strings.Contains(previousText, text) ||
+				slices.Contains(texts, text) {
+				// Never repeat text at the end which was already included earlier.
+				// In practice, this can happen for a FeatureGate when it was both
+				// explicitly mentioned and a dependency.
+				continue
+			}
+			texts = append(texts, text)
 			// This keeps validateText happy.
 			ginkgoArgs = append(ginkgoArgs, ginkgo.Label(label))
 		}
