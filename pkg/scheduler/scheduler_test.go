@@ -911,7 +911,7 @@ func Test_UnionedGVKs(t *testing.T) {
 				Disabled: []schedulerapi.Plugin{{Name: "*"}}, // disable default plugins
 			},
 			want: map[fwk.EventResource]fwk.ActionType{
-				fwk.Node: fwk.Add | fwk.UpdateNodeTaint, // When Node/Add is registered, Node/UpdateNodeTaint is automatically registered.
+				fwk.Node: fwk.Add,
 			},
 		},
 		{
@@ -945,7 +945,7 @@ func Test_UnionedGVKs(t *testing.T) {
 				fwk.AssignedPod:    fwk.Add,
 				fwk.UnscheduledPod: fwk.Add,
 				fwk.TargetPod:      fwk.Add,
-				fwk.Node:           fwk.Add | fwk.UpdateNodeTaint, // When Node/Add is registered, Node/UpdateNodeTaint is automatically registered.
+				fwk.Node:           fwk.Add,
 			},
 		},
 		{
