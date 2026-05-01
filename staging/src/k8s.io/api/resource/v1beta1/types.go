@@ -746,6 +746,7 @@ type DeviceAttribute struct {
 	// +listType=atomic
 	// +k8s:alpha(since: "1.36")=+k8s:optional
 	// +k8s:alpha(since: "1.36")=+k8s:unionMember
+	// +k8s:alpha(since: "1.37")=+k8s:eachVal=+k8s:maxBytes=64
 	// +featureGate=DRAListTypeAttributes
 	StringValues []string `json:"strings,omitempty" protobuf:"bytes,8,opt,name=strings"`
 

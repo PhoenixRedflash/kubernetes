@@ -1017,7 +1017,7 @@ func validateDeviceAttribute(attribute resource.DeviceAttribute, fldPath *field.
 			allErrs = append(allErrs, field.Invalid(fldPath.Child("strings"), attribute.StringValues, "must not be empty if specified"))
 		}
 		for i, item := range attribute.StringValues {
-			allErrs = append(allErrs, validateDeviceAttributeStringValue(&item, fldPath.Child("strings").Index(i))...)
+			allErrs = append(allErrs, validateDeviceAttributeStringValue(&item, fldPath.Child("strings").Index(i)).WithOrigin("maxBytes").MarkCoveredByDeclarative()...)
 		}
 	}
 	if attribute.VersionValues != nil {
