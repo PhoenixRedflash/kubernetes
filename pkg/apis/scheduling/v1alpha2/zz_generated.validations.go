@@ -107,7 +107,7 @@ func Validate_GangSchedulingPolicy(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
@@ -222,7 +222,7 @@ func Validate_PodGroupResourceClaim(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
@@ -254,7 +254,7 @@ func Validate_PodGroupResourceClaim(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.OptionalPointer(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.OptionalPointer(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
 			if earlyReturn {
@@ -285,7 +285,7 @@ func Validate_PodGroupResourceClaim(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.OptionalPointer(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.OptionalPointer(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
 			if earlyReturn {
@@ -327,7 +327,7 @@ func Validate_PodGroupResourceClaimStatus(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.OptionalPointer(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.OptionalPointer(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
 			if earlyReturn {
@@ -367,11 +367,11 @@ func Validate_PodGroupSchedulingConstraints(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.MaxItems(ctx, op, fldPath, obj, oldObj, 1); len(e) != 0 {
+			if e := validate.MaxItems(ctx, op, fldPath, obj, oldObj, 1).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.OptionalSlice(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.OptionalSlice(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
 			if earlyReturn {
@@ -430,7 +430,7 @@ func Validate_PodGroupSchedulingPolicy(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.OptionalPointer(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.OptionalPointer(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
 			if earlyReturn {
@@ -458,7 +458,7 @@ func Validate_PodGroupSchedulingPolicy(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.OptionalPointer(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.OptionalPointer(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
 			if earlyReturn {
@@ -497,11 +497,11 @@ func Validate_PodGroupSpec(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.Immutable(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.Immutable(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.OptionalPointer(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.OptionalPointer(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
 			if earlyReturn {
@@ -531,7 +531,7 @@ func Validate_PodGroupSpec(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.Immutable(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.Immutable(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
@@ -562,17 +562,17 @@ func Validate_PodGroupSpec(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "TopologyAwareWorkloadScheduling", false, validate.ForbiddenPointer); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "TopologyAwareWorkloadScheduling", false, validate.ForbiddenPointer).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "TopologyAwareWorkloadScheduling", false, validate.OptionalPointer); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "TopologyAwareWorkloadScheduling", false, validate.OptionalPointer).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "TopologyAwareWorkloadScheduling", true, validate.OptionalPointer); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "TopologyAwareWorkloadScheduling", true, validate.OptionalPointer).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "TopologyAwareWorkloadScheduling", true, validate.Immutable); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "TopologyAwareWorkloadScheduling", true, validate.Immutable).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
@@ -603,15 +603,15 @@ func Validate_PodGroupSpec(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.Immutable(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.Immutable(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.MaxItems(ctx, op, fldPath, obj, oldObj, 4); len(e) != 0 {
+			if e := validate.MaxItems(ctx, op, fldPath, obj, oldObj, 4).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.OptionalSlice(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.OptionalSlice(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
 			if earlyReturn {
@@ -653,19 +653,19 @@ func Validate_PodGroupSpec(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.ForbiddenPointer); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.ForbiddenPointer).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.OptionalPointer); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.OptionalPointer).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
 			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", true, // optional fields with default values are effectively required
-				validate.RequiredPointer); len(e) != 0 {
+				validate.RequiredPointer).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", true, validate.Immutable); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", true, validate.Immutable).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
@@ -696,17 +696,17 @@ func Validate_PodGroupSpec(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.ForbiddenValue); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.ForbiddenValue).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.OptionalValue); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.OptionalValue).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", true, validate.OptionalValue); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", true, validate.OptionalValue).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", true, validate.Immutable); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", true, validate.Immutable).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
@@ -738,17 +738,17 @@ func Validate_PodGroupSpec(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.ForbiddenPointer); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.ForbiddenPointer).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.OptionalPointer); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.OptionalPointer).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", true, validate.OptionalPointer); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", true, validate.OptionalPointer).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", true, validate.Immutable); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", true, validate.Immutable).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
@@ -800,11 +800,11 @@ func Validate_PodGroupStatus(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.MaxItems(ctx, op, fldPath, obj, oldObj, 4); len(e) != 0 {
+			if e := validate.MaxItems(ctx, op, fldPath, obj, oldObj, 4).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.OptionalSlice(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.OptionalSlice(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
 			if earlyReturn {
@@ -855,7 +855,7 @@ func Validate_PodGroupTemplate(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
@@ -909,14 +909,14 @@ func Validate_PodGroupTemplate(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "TopologyAwareWorkloadScheduling", false, validate.ForbiddenPointer); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "TopologyAwareWorkloadScheduling", false, validate.ForbiddenPointer).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "TopologyAwareWorkloadScheduling", false, validate.OptionalPointer); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "TopologyAwareWorkloadScheduling", false, validate.OptionalPointer).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "TopologyAwareWorkloadScheduling", true, validate.OptionalPointer); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "TopologyAwareWorkloadScheduling", true, validate.OptionalPointer).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
 			if earlyReturn {
@@ -946,15 +946,15 @@ func Validate_PodGroupTemplate(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.Immutable(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.Immutable(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.MaxItems(ctx, op, fldPath, obj, oldObj, 4); len(e) != 0 {
+			if e := validate.MaxItems(ctx, op, fldPath, obj, oldObj, 4).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.OptionalSlice(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.OptionalSlice(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
 			if earlyReturn {
@@ -996,14 +996,14 @@ func Validate_PodGroupTemplate(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.ForbiddenPointer); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.ForbiddenPointer).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.OptionalPointer); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.OptionalPointer).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", true, validate.OptionalPointer); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", true, validate.OptionalPointer).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
 			if earlyReturn {
@@ -1033,14 +1033,14 @@ func Validate_PodGroupTemplate(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.ForbiddenValue); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.ForbiddenValue).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.OptionalValue); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.OptionalValue).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", true, validate.OptionalValue); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", true, validate.OptionalValue).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
 			if earlyReturn {
@@ -1071,14 +1071,14 @@ func Validate_PodGroupTemplate(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.ForbiddenPointer); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.ForbiddenPointer).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.OptionalPointer); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", false, validate.OptionalPointer).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
-			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", true, validate.OptionalPointer); len(e) != 0 {
+			if e := validate.IfOption(ctx, op, fldPath, obj, oldObj, "WorkloadAwarePreemption", true, validate.OptionalPointer).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
 			if earlyReturn {
@@ -1139,7 +1139,7 @@ func Validate_PodGroupTemplateReference(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.OptionalPointer(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.OptionalPointer(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
 			if earlyReturn {
@@ -1178,7 +1178,7 @@ func Validate_TopologyConstraint(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
@@ -1219,7 +1219,7 @@ func Validate_TypedLocalObjectReference(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.OptionalValue(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.OptionalValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
 			if earlyReturn {
@@ -1250,7 +1250,7 @@ func Validate_TypedLocalObjectReference(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
@@ -1282,7 +1282,7 @@ func Validate_TypedLocalObjectReference(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
@@ -1357,7 +1357,7 @@ func Validate_WorkloadPodGroupTemplateReference(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
@@ -1389,7 +1389,7 @@ func Validate_WorkloadPodGroupTemplateReference(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
@@ -1430,11 +1430,11 @@ func Validate_WorkloadSpec(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.Immutable(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.Immutable(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.OptionalPointer(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.OptionalPointer(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				earlyReturn = true
 			}
 			if earlyReturn {
@@ -1464,15 +1464,15 @@ func Validate_WorkloadSpec(
 			}
 			// call field-attached validations
 			earlyReturn := false
-			if e := validate.Immutable(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.Immutable(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.MaxItems(ctx, op, fldPath, obj, oldObj, 8); len(e) != 0 {
+			if e := validate.MaxItems(ctx, op, fldPath, obj, oldObj, 8).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}
-			if e := validate.RequiredSlice(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+			if e := validate.RequiredSlice(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}

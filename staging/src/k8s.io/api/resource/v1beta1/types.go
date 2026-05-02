@@ -1823,7 +1823,6 @@ type DeviceRequestAllocationResult struct {
 	// +listType=atomic
 	// +featureGate=DRADeviceTaints
 	// +k8s:alpha(since: "1.36")=+k8s:optional
-	// +k8s:alpha(since: "1.36")=+k8s:maxItems=16
 	Tolerations []DeviceToleration `json:"tolerations,omitempty" protobuf:"bytes,6,opt,name=tolerations"`
 
 	// BindingConditions contains a copy of the BindingConditions

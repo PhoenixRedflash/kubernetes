@@ -81,7 +81,7 @@ func Validate_ReplicationController(
 			func() { // cohort = "name"
 				earlyReturn := false
 				if e := validate.Subfield(ctx, op, fldPath, obj, oldObj, "name",
-					func(o *metav1.ObjectMeta) *string { return &o.Name }, validate.DirectEqualPtr, validate.OptionalValue).MarkAlpha(); len(e) != 0 {
+					func(o *metav1.ObjectMeta) *string { return &o.Name }, validate.DirectEqualPtr, validate.OptionalValue).MarkAlpha().MarkShortCircuit(); len(e) != 0 {
 					earlyReturn = true
 				}
 				if earlyReturn {
@@ -147,7 +147,7 @@ func Validate_ReplicationControllerSpec(
 			// call field-attached validations
 			earlyReturn := false
 			// optional fields with default values are effectively required
-			if e := validate.RequiredPointer(ctx, op, fldPath, obj, oldObj).MarkAlpha(); len(e) != 0 {
+			if e := validate.RequiredPointer(ctx, op, fldPath, obj, oldObj).MarkAlpha().MarkShortCircuit(); len(e) != 0 {
 				errs = append(errs, e...)
 				earlyReturn = true
 			}

@@ -242,6 +242,12 @@ func TestDeclarativeValidate(t *testing.T) {
 				"valid: shared counter key": {
 					input: mkResourceSliceWithSharedCounters(tweakSharedCounter(counters("valid-key"))),
 				},
+				"invalid: shared counters empty": {
+					input: mkResourceSliceWithSharedCounters(tweakSharedCounter(nil)),
+					expectedErrs: field.ErrorList{
+						field.Required(field.NewPath("spec", "sharedCounters").Index(0).Child("counters"), "").MarkAlpha(),
+					},
+				},
 				// spec.devices.consumesCounters.counters
 				"invalid: device counter key with uppercase": {
 					input: mkResourceSliceWithDevices(tweakDeviceCounter(counters("InvalidKey"))),
@@ -251,6 +257,12 @@ func TestDeclarativeValidate(t *testing.T) {
 				},
 				"valid: device counter key": {
 					input: mkResourceSliceWithDevices(tweakDeviceCounter(counters("valid-key"))),
+				},
+				"invalid: device counters empty": {
+					input: mkResourceSliceWithDevices(tweakDeviceCounter(nil)),
+					expectedErrs: field.ErrorList{
+						field.Required(field.NewPath("spec", "devices").Index(0).Child("consumesCounters").Index(0).Child("counters"), "").MarkAlpha(),
+					},
 				},
 				// TODO: Add more test cases
 			}

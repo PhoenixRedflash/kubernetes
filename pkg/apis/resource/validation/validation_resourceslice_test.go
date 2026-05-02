@@ -1041,7 +1041,7 @@ func TestValidateResourceSlice(t *testing.T) {
 		},
 		"missing-counter-shared-counters": {
 			wantFailures: field.ErrorList{
-				field.Required(field.NewPath("spec", "sharedCounters").Index(0).Child("counters"), ""),
+				field.Required(field.NewPath("spec", "sharedCounters").Index(0).Child("counters"), "").MarkCoveredByDeclarative(),
 			},
 			slice: func() *resourceapi.ResourceSlice {
 				slice := testResourceSliceWithSharedCounters(goodName, goodName, driverName, 0)
@@ -1172,7 +1172,7 @@ func TestValidateResourceSlice(t *testing.T) {
 		},
 		"missing-counter-consumes-counter": {
 			wantFailures: field.ErrorList{
-				field.Required(field.NewPath("spec", "devices").Index(0).Child("consumesCounters").Index(0).Child("counters"), ""),
+				field.Required(field.NewPath("spec", "devices").Index(0).Child("consumesCounters").Index(0).Child("counters"), "").MarkCoveredByDeclarative(),
 			},
 			slice: func() *resourceapi.ResourceSlice {
 				slice := testResourceSlice(goodName, goodName, driverName, 1)

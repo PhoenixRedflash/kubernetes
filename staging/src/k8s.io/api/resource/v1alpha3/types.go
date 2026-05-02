@@ -463,9 +463,7 @@ type ResourcePoolStatusRequestStatus struct {
 	// +optional
 	// +k8s:optional
 	// +listType=map
-	// +k8s:listType=map
 	// +listMapKey=type
-	// +k8s:listMapKey=type
 	// +patchStrategy=merge
 	// +patchMergeKey=type
 	// +k8s:maxItems=10
