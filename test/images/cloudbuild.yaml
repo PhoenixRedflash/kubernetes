@@ -31,5 +31,3 @@ substitutions:
   _REGISTRY: 'gcr.io/k8s-staging-e2e-test-images'
   # _WHAT will contain the image name to be built and published to the staging registry.
   _WHAT: 'all-conformance'
-tags:
-  - $_WHAT

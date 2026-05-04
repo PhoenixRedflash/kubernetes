@@ -176,9 +176,11 @@ push() {
   kube::util::ensure-gnu-sed
 
   # reset manifest list; needed in case multiple images are being built / pushed.
-  manifest=()
+  local -a manifest=()
   # Make os_archs list into image manifest. Eg: 'linux/amd64 linux/ppc64le' to '${REGISTRY}/${image}:${TAG}-linux-amd64 ${REGISTRY}/${image}:${TAG}-linux-ppc64le'
-  while IFS='' read -r line; do manifest+=("$line"); done < <(echo "${os_archs[@]}" | "${SED}" "s~\/~-~g" | "${SED}" -e "s~[^ ]*~$REGISTRY\/$image:$TAG\-&~g")
+  for os_arch in "${os_archs[@]}"; do
+    manifest+=("${REGISTRY}/${image}:${TAG}-${os_arch//\//-}")
+  done
   docker manifest create --amend "${REGISTRY}/${image}:${TAG}" "${manifest[@]}"
 
   for os_arch in "${os_archs[@]}"; do
