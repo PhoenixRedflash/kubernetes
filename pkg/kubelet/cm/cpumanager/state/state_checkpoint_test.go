@@ -322,7 +322,7 @@ func TestCheckpointStateRestore(t *testing.T) {
 						"cpuSet":"7-9"
 					}
 				},
-				"checksum": 2284712151
+				"checksum": 766259872
 			}`,
 			"static",
 			containermap.ContainerMap{},
@@ -354,7 +354,7 @@ func TestCheckpointStateRestore(t *testing.T) {
 						"cpuSet":"7-9"
 					}
 				},
-				"checksum": 2284712151
+				"checksum": 766259872
 			}`,
 			"static",
 			containermap.ContainerMap{},
@@ -771,6 +771,105 @@ func TestCPUManagerCheckpoint_MarshalCheckpoint_HashCompatibility(t *testing.T) 
 			if writtenChecksum != expectedLegacyChecksum {
 				t.Errorf("Written Checksum %d does not match legacy calculation %d. Forward compatibility broken.", writtenChecksum, expectedLegacyChecksum)
 			}
+		})
+	}
+}
+
+func TestCPUManagerCheckpointV3_VerifyChecksum_Compatibility(t *testing.T) {
+	testCases := []struct {
+		name     string
+		checksum checksum.Checksum
+	}{
+		{
+			name:     "accepts legacy v3 checksum",
+			checksum: 766259872,
+		},
+		{
+			name:     "accepts current v3 checksum",
+			checksum: 2284712151,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cp := &CPUManagerCheckpointV3{
+				PolicyName:    "static",
+				DefaultCPUSet: "1-2",
+				Entries: map[string]map[string]string{
+					"pod1": {
+						"container1": "5-6",
+						"container2": "3-4",
+					},
+				},
+				PodEntries: PodCPUAssignments{
+					"pod2": {CPUSet: cpuset.New(7, 8, 9)},
+				},
+				Checksum: tc.checksum,
+			}
+
+			require.NoError(t, cp.VerifyChecksum())
+		})
+	}
+}
+
+func TestCPUManagerCheckpoint_RoundTrip(t *testing.T) {
+	testCases := []struct {
+		name     string
+		original checkpointmanager.Checkpoint
+		restored checkpointmanager.Checkpoint
+		verify   func(t *testing.T, original, restored checkpointmanager.Checkpoint)
+	}{
+		{
+			name: "V2 checkpoint",
+			original: &CPUManagerCheckpointV2{
+				PolicyName:    "static",
+				DefaultCPUSet: "0-3",
+				Entries: map[string]map[string]string{
+					"pod1": {"container1": "4-5"},
+				},
+			},
+			restored: newCPUManagerCheckpointV2(),
+			verify: func(t *testing.T, original, restored checkpointmanager.Checkpoint) {
+				o := original.(*CPUManagerCheckpointV2)
+				r := restored.(*CPUManagerCheckpointV2)
+				require.Equal(t, o.PolicyName, r.PolicyName)
+				require.Equal(t, o.DefaultCPUSet, r.DefaultCPUSet)
+				require.Equal(t, o.Entries, r.Entries)
+			},
+		},
+		{
+			name: "V3 checkpoint",
+			original: &CPUManagerCheckpointV3{
+				PolicyName:    "static",
+				DefaultCPUSet: "0-3",
+				Entries: map[string]map[string]string{
+					"pod1": {"container1": "4-5"},
+				},
+				PodEntries: PodCPUAssignments{
+					"pod2": {CPUSet: cpuset.New(6, 7)},
+				},
+			},
+			restored: newCPUManagerCheckpointV3(),
+			verify: func(t *testing.T, original, restored checkpointmanager.Checkpoint) {
+				o := original.(*CPUManagerCheckpointV3)
+				r := restored.(*CPUManagerCheckpointV3)
+				require.Equal(t, o.PolicyName, r.PolicyName)
+				require.Equal(t, o.DefaultCPUSet, r.DefaultCPUSet)
+				require.Equal(t, o.Entries, r.Entries)
+				require.Equal(t, o.PodEntries, r.PodEntries)
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := tc.original.MarshalCheckpoint()
+			require.NoError(t, err)
+
+			require.NoError(t, tc.restored.UnmarshalCheckpoint(data))
+			require.NoError(t, tc.restored.VerifyChecksum())
+
+			tc.verify(t, tc.original, tc.restored)
 		})
 	}
 }
