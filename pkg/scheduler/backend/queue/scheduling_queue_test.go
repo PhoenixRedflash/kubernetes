@@ -172,6 +172,37 @@ func TestPriorityQueue_Add(t *testing.T) {
 	}
 }
 
+func TestPriorityQueue_AddNominatedGatedPod(t *testing.T) {
+	gatedPod := st.MakePod().Name("pod-gated").Namespace("ns1").UID("pod-gated").NominatedNodeName("node1").Obj()
+	objs := []runtime.Object{gatedPod}
+	_, ctx := ktesting.NewTestContext(t)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	plugin := &preEnqueuePlugin{allowlists: []string{"allow"}}
+	m := map[string]map[string]fwk.PreEnqueuePlugin{
+		"": {
+			"preEnqueuePlugin": plugin,
+		},
+	}
+	q := NewTestQueueWithObjects(ctx, newDefaultQueueSort(), objs, WithPreEnqueuePluginMap(m))
+	q.Add(ctx, gatedPod)
+
+	// Verify the pod is gated
+	pInfo := q.unschedulablePods.get(gatedPod)
+	if pInfo == nil || !pInfo.Gated() {
+		t.Fatalf("Expected pod to be gated in unschedulablePods")
+	}
+
+	// Verify the pod is added to nominator
+	if len(q.nominator.nominatedPods["node1"]) != 1 {
+		t.Errorf("Expected pod-gated in nominatedPods")
+	}
+	if q.nominator.nominatedPodToNode[gatedPod.UID] != "node1" {
+		t.Errorf("Expected pod-gated in nominatedPodToNode")
+	}
+}
+
 func newDefaultQueueSort() fwk.LessFunc {
 	sort := &queuesort.PrioritySort{}
 	return sort.Less
@@ -1199,6 +1230,12 @@ func TestPriorityQueue_Update(t *testing.T) {
 		},
 	}
 
+	withGate := func(p *v1.Pod) *v1.Pod {
+		newPod := p.DeepCopy()
+		newPod.Labels = map[string]string{"deny": "true"}
+		return newPod
+	}
+
 	notInAnyQueue := "NotInAnyQueue"
 	tests := []struct {
 		name  string
@@ -1220,11 +1257,28 @@ func TestPriorityQueue_Update(t *testing.T) {
 			},
 		},
 		{
-			name:                 "Update highPriorityPodInfo and add a nominatedNodeName to it",
+			name:  "Update gated pod that didn't exist in the queue",
+			wantQ: unschedulableQ,
+			prepareFunc: func(tCtx ktesting.TContext, q *PriorityQueue) (oldPod, newPod *v1.Pod) {
+				updatedPod := withGate(medPriorityPodInfo.Pod)
+				updatedPod.Annotations["foo"] = "test"
+				return withGate(medPriorityPodInfo.Pod), updatedPod
+			},
+		},
+		{
+			name:                 "Update non-existent highPriorityPodInfo and add a nominatedNodeName to it",
 			wantQ:                activeQ,
 			wantAddedToNominated: true,
 			prepareFunc: func(tCtx ktesting.TContext, q *PriorityQueue) (oldPod, newPod *v1.Pod) {
 				return highPriorityPodInfo.Pod, highPriNominatedPodInfo.Pod
+			},
+		},
+		{
+			name:                 "Update non-existent gated highPriorityPodInfo and add a nominatedNodeName to it",
+			wantQ:                unschedulableQ,
+			wantAddedToNominated: true,
+			prepareFunc: func(tCtx ktesting.TContext, q *PriorityQueue) (oldPod, newPod *v1.Pod) {
+				return withGate(highPriorityPodInfo.Pod), withGate(highPriNominatedPodInfo.Pod)
 			},
 		},
 		{
@@ -1305,7 +1359,13 @@ func TestPriorityQueue_Update(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tCtx := ktesting.Init(t)
 			objs := []runtime.Object{highPriorityPodInfo.Pod, unschedulablePodInfo.Pod, medPriorityPodInfo.Pod}
-			q := NewTestQueueWithObjects(tCtx, newDefaultQueueSort(), objs, WithClock(c), WithQueueingHintMapPerProfile(queueingHintMap))
+			plugin := &denyingPreEnqueuePlugin{denylists: []string{"deny"}}
+			m := map[string]map[string]fwk.PreEnqueuePlugin{
+				"": {
+					"denyingPreEnqueuePlugin": plugin,
+				},
+			}
+			q := NewTestQueueWithObjects(tCtx, newDefaultQueueSort(), objs, WithClock(c), WithQueueingHintMapPerProfile(queueingHintMap), WithPreEnqueuePluginMap(m))
 
 			oldPod, newPod := tt.prepareFunc(tCtx, q)
 
@@ -1347,7 +1407,7 @@ func TestPriorityQueue_Update(t *testing.T) {
 			}
 
 			if tt.wantAddedToNominated && len(q.nominator.nominatedPods) != 1 {
-				t.Errorf("Expected one item in nominatedPods map: %v", q.nominator)
+				t.Errorf("Expected one item in nominatedPods map: %v", q.nominator.nominatedPods)
 			}
 
 		})
@@ -1709,7 +1769,26 @@ func (pl *preEnqueuePlugin) PreEnqueue(ctx context.Context, p *v1.Pod) *fwk.Stat
 			}
 		}
 	}
-	return fwk.NewStatus(fwk.UnschedulableAndUnresolvable, "pod name not in allowlists")
+	return fwk.NewStatus(fwk.UnschedulableAndUnresolvable, "pod label not in allowlists")
+}
+
+type denyingPreEnqueuePlugin struct {
+	denylists []string
+}
+
+func (pl *denyingPreEnqueuePlugin) Name() string {
+	return "denyingPreEnqueuePlugin"
+}
+
+func (pl *denyingPreEnqueuePlugin) PreEnqueue(ctx context.Context, p *v1.Pod) *fwk.Status {
+	for _, denied := range pl.denylists {
+		for label := range p.Labels {
+			if label == denied {
+				return fwk.NewStatus(fwk.UnschedulableAndUnresolvable, "pod label in denylists")
+			}
+		}
+	}
+	return nil
 }
 
 func TestPriorityQueue_moveToActiveQ(t *testing.T) {

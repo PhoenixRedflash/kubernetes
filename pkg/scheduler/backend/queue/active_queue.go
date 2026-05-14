@@ -44,6 +44,9 @@ type activeQueuer interface {
 	list() []*v1.Pod
 	len() int
 	has(pInfo *framework.QueuedPodInfo) bool
+	// add adds pInfo to the activeQ.
+	// Note: it does not signal the pop() method to wake up,
+	// so the caller is responsible for calling broadcast() after executing this method.
 	add(logger klog.Logger, pInfo *framework.QueuedPodInfo, event string)
 
 	movePodToInFlight(pInfo *framework.QueuedPodInfo) error
@@ -350,6 +353,9 @@ func (aq *activeQueue) has(pInfo *framework.QueuedPodInfo) bool {
 	return aq.queue.Has(pInfo)
 }
 
+// add adds pInfo to the activeQ.
+// Note: it does not signal the pop() method to wake up,
+// so the caller is responsible for calling broadcast() after executing this method.
 func (aq *activeQueue) add(logger klog.Logger, pInfo *framework.QueuedPodInfo, event string) {
 	aq.lock.Lock()
 	defer aq.lock.Unlock()
@@ -357,7 +363,6 @@ func (aq *activeQueue) add(logger klog.Logger, pInfo *framework.QueuedPodInfo, e
 	aq.queue.AddOrUpdate(pInfo)
 	metrics.SchedulerQueueIncomingPods.WithLabelValues("active", event).Inc()
 	logger.V(5).Info("Pod moved to an internal scheduling queue", "pod", klog.KObj(pInfo.Pod), "event", event, "queue", activeQ)
-	aq.cond.Signal()
 }
 
 // listInFlightEvents returns all inFlightEvents.

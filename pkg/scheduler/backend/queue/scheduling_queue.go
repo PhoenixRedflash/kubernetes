@@ -657,6 +657,8 @@ func (p *PriorityQueue) AddNominatedPod(logger klog.Logger, pi fwk.PodInfo, nomi
 // movesFromBackoffQ should be set to true, if the pod directly moves from the backoffQ, so the PreEnqueue call can be skipped.
 // It returns a boolean flag to indicate whether the pod is added successfully.
 // Pod should be removed from the backoffQ before calling moveToActiveQ
+// Note: it does not signal the Pop() method to wake up,
+// so the caller is responsible for calling activeQ.broadcast() after executing this method.
 func (p *PriorityQueue) moveToActiveQ(logger klog.Logger, pInfo *framework.QueuedPodInfo, event string, movesFromBackoffQ bool) bool {
 	gatedBefore := pInfo.Gated()
 	// If SchedulerPopFromBackoffQ feature gate is enabled,
@@ -683,9 +685,6 @@ func (p *PriorityQueue) moveToActiveQ(logger klog.Logger, pInfo *framework.Queue
 	p.unschedulablePods.delete(pInfo.Pod, gatedBefore)
 
 	p.activeQ.add(logger, pInfo, event)
-	if event == framework.EventUnscheduledPodAdd.Label() || event == framework.EventUnscheduledPodUpdate.Label() {
-		p.nominator.addNominatedPod(logger, pInfo.PodInfo, nil)
-	}
 	// Pod successfully moved to activeQ.
 	return true
 }
@@ -722,6 +721,11 @@ func (p *PriorityQueue) Add(ctx context.Context, pod *v1.Pod) {
 
 	pInfo := p.newQueuedPodInfo(ctx, pod)
 	logger := klog.FromContext(ctx)
+	// addNominatedPod is called here unconditionally to ensure that the nomination of the added pod
+	// (even if gated, and thus not entering activeQ) is properly recorded in the nominator.
+	// Furthermore, this must be called before moveToActiveQ to prevent a potential data race,
+	// where an active scheduler loop could pop and process the pod before its nomination is recorded.
+	p.nominator.addNominatedPod(logger, pInfo.PodInfo, nil)
 	if added := p.moveToActiveQ(logger, pInfo, framework.EventUnscheduledPodAdd.Label(), false); added {
 		p.activeQ.broadcast()
 	}
@@ -1052,6 +1056,8 @@ func (p *PriorityQueue) Update(ctx context.Context, oldPod, newPod *v1.Pod) {
 	}
 	// If pod is not in any of the queues, we put it in the active queue.
 	pInfo := p.newQueuedPodInfo(ctx, newPod)
+	// addNominatedPod must be called before moveToActiveQ for the same reason as in the Add() method.
+	p.nominator.addNominatedPod(logger, pInfo.PodInfo, nil)
 	if added := p.moveToActiveQ(logger, pInfo, framework.EventUnscheduledPodUpdate.Label(), false); added {
 		p.activeQ.broadcast()
 	}
