@@ -610,9 +610,7 @@ var _ = SIGDescribe("MemoryQoS", framework.WithSerial(), func() {
 			}
 			newCfg.FeatureGates["MemoryQoS"] = false
 			newCfg.MemoryReservationPolicy = kubeletconfig.NoneMemoryReservationPolicy
-			framework.ExpectNoError(e2enodekubelet.WriteKubeletConfigFile(newCfg))
-			restartKubelet(ctx, true)
-			waitForKubeletToStart(ctx, f)
+			updateKubeletConfig(ctx, f, newCfg, true)
 
 			// Stale QoS-class cgroup memory.low is cleared at kubelet startup.
 			var burstableCgroupPath string
@@ -675,9 +673,7 @@ var _ = SIGDescribe("MemoryQoS", framework.WithSerial(), func() {
 			}
 			newCfg.FeatureGates["MemoryQoS"] = false
 			newCfg.MemoryReservationPolicy = kubeletconfig.NoneMemoryReservationPolicy
-			framework.ExpectNoError(e2enodekubelet.WriteKubeletConfigFile(newCfg))
-			restartKubelet(ctx, true)
-			waitForKubeletToStart(ctx, f)
+			updateKubeletConfig(ctx, f, newCfg, true)
 
 			ginkgo.By("Verifying memory.low was cleared to 0 at startup")
 			gomega.Eventually(ctx, func() int64 {
