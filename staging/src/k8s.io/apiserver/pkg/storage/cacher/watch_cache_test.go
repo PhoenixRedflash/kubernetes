@@ -133,6 +133,8 @@ func newTestWatchCache(capacity int, eventFreshDuration time.Duration, indexers 
 	pr := progress.NewConditionalProgressRequester(wc.RequestWatchProgress, &immediateTickerFactory{}, nil)
 	go pr.Run(wc.stopCh)
 	getCurrentRV := func(context.Context) (uint64, error) {
+		wc.RLock()
+		defer wc.RUnlock()
 		return wc.resourceVersion, nil
 	}
 	wc.watchCache = newWatchCache(keyFunc, mockHandler, getAttrsFunc, versioner, indexers, testingclock.NewFakeClock(time.Now()), eventFreshDuration, schema.GroupResource{Resource: "pods"}, pr, getCurrentRV)
@@ -610,7 +612,7 @@ func TestWaitUntilFreshAndListTimeout(t *testing.T) {
 	ctx := context.Background()
 	store := newTestWatchCache(3, DefaultEventFreshDuration, &cache.Indexers{})
 	defer store.Stop()
-	fc := store.clock.(*testingclock.FakeClock)
+	fc := store.config.clock.(*testingclock.FakeClock)
 
 	// In background, step clock after the below call starts the timer.
 	go func() {
@@ -922,8 +924,8 @@ func TestDynamicCache(t *testing.T) {
 			store.history.lowerBoundCapacity = test.lowerBoundCapacity
 			store.history.upperBoundCapacity = test.upperBoundCapacity
 			loadEventWithDuration(store, test.eventCount, test.interval)
-			nextInterval := store.clock.Now().Add(time.Duration(test.interval.Nanoseconds() * int64(test.eventCount)))
-			store.history.resizeCacheLocked(nextInterval, store.groupResource)
+			nextInterval := store.config.clock.Now().Add(time.Duration(test.interval.Nanoseconds() * int64(test.eventCount)))
+			store.history.resizeCacheLocked(nextInterval)
 			if store.history.capacity != test.expectCapacity {
 				t.Errorf("expect capacity %d, but get %d", test.expectCapacity, store.history.capacity)
 			}
@@ -946,7 +948,7 @@ func loadEventWithDuration(cache *testWatchCache, count int, interval time.Durat
 	for i := 0; i < count; i++ {
 		event := &watchCacheEvent{
 			Key:        fmt.Sprintf("event-%d", i+cache.history.startIndex),
-			RecordTime: cache.clock.Now().Add(time.Duration(interval.Nanoseconds() * int64(i))),
+			RecordTime: cache.config.clock.Now().Add(time.Duration(interval.Nanoseconds() * int64(i))),
 		}
 		cache.history.cache[(i+cache.history.startIndex)%cache.history.capacity] = event
 	}
@@ -967,14 +969,14 @@ func TestCacheIncreaseDoesNotBreakWatch(t *testing.T) {
 	store := newTestWatchCache(2, DefaultEventFreshDuration, &cache.Indexers{})
 	defer store.Stop()
 
-	now := store.clock.Now()
+	now := store.config.clock.Now()
 	addEvent := func(key string, rv uint64, t time.Time) {
 		event := &watchCacheEvent{
 			Key:             key,
 			ResourceVersion: rv,
 			RecordTime:      t,
 		}
-		store.history.updateCache(event, store.groupResource)
+		store.history.updateCache(event)
 	}
 
 	// Initial LIST comes from the moment of RV=10.
@@ -1214,11 +1216,11 @@ func BenchmarkWatchCache_updateCache(b *testing.B) {
 	loadEventWithDuration(store, defaultUpperBoundCapacity, 0)
 	add := &watchCacheEvent{
 		Key:        fmt.Sprintf("event-%d", defaultUpperBoundCapacity),
-		RecordTime: store.clock.Now(),
+		RecordTime: store.config.clock.Now(),
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		store.history.updateCache(add, store.groupResource)
+		store.history.updateCache(add)
 	}
 }
 
@@ -1231,7 +1233,7 @@ func TestHistogramCacheReadWait(t *testing.T) {
 	testedMetrics := "apiserver_watch_cache_read_wait_seconds"
 	store := newTestWatchCache(2, DefaultEventFreshDuration, &cache.Indexers{})
 	defer store.Stop()
-	fakeClock := store.clock.(*testingclock.FakeClock)
+	fakeClock := store.config.clock.(*testingclock.FakeClock)
 
 	testCases := []struct {
 		desc            string
@@ -1316,7 +1318,7 @@ func TestCacheSnapshots(t *testing.T) {
 	defer s.Stop()
 	s.history.upperBoundCapacity = 3
 	s.history.lowerBoundCapacity = 1
-	clock := s.clock.(*testingclock.FakeClock)
+	clock := s.config.clock.(*testingclock.FakeClock)
 
 	_, found := s.storage.snapshots.GetLessOrEqual(100)
 	assert.False(t, found, "Expected empty cache to not include any snapshots")
@@ -1412,4 +1414,111 @@ func TestCacheSnapshots(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, elements, 1)
 	assert.Equal(t, makeTestPod("foo", 600), elements[0].(*store.Element).Object)
+}
+
+func TestWatchCacheSnapshotConcurrency(t *testing.T) {
+	testCases := []struct {
+		name                          string
+		listFromSnapshot              bool
+		resourceVersionMatch          metav1.ResourceVersionMatch
+		expectItemRVLessOrEqualListRV bool
+		expectExactResourceVersion    bool
+	}{
+		{
+			name:                          "latest list with snapshotting disabled",
+			listFromSnapshot:              false,
+			resourceVersionMatch:          "",
+			expectItemRVLessOrEqualListRV: true,
+		},
+		{
+			name:                          "latest list with snapshotting enabled",
+			listFromSnapshot:              true,
+			resourceVersionMatch:          "",
+			expectItemRVLessOrEqualListRV: true,
+		},
+		{
+			name:                          "exact match with snapshotting enabled",
+			listFromSnapshot:              true,
+			resourceVersionMatch:          metav1.ResourceVersionMatchExact,
+			expectItemRVLessOrEqualListRV: true,
+			expectExactResourceVersion:    true,
+		},
+	}
+
+	for i := range testCases {
+		tc := &testCases[i]
+		t.Run(tc.name, func(t *testing.T) {
+			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.ListFromCacheSnapshot, tc.listFromSnapshot)
+
+			s := newTestWatchCache(50000, DefaultEventFreshDuration, &cache.Indexers{})
+			defer s.Stop()
+
+			require.NoError(t, s.Add(makeTestPod("initial", 1)))
+
+			testWatchCacheSnapshotConcurrency(t, s, tc.resourceVersionMatch, tc.expectItemRVLessOrEqualListRV, tc.expectExactResourceVersion)
+		})
+	}
+}
+
+func testWatchCacheSnapshotConcurrency(t *testing.T, s *testWatchCache, resourceVersionMatch metav1.ResourceVersionMatch, expectItemRVLessOrEqualListRV, expectExactResourceVersion bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	stopUpdates := make(chan struct{})
+	var wg wait.Group
+	wg.Start(func() {
+		var rv uint64 = 2
+		for {
+			select {
+			case <-stopUpdates:
+				return
+			default:
+				err := s.Update(makeTestPod("pod-test", rv))
+				if err != nil {
+					t.Errorf("failed to update: %v", err)
+					return
+				}
+				rv++
+			}
+		}
+	})
+
+	for j := range 1000 {
+		opts := storage.ListOptions{
+			Recursive:            true,
+			ResourceVersionMatch: resourceVersionMatch,
+		}
+		var targetRV uint64
+		if resourceVersionMatch == metav1.ResourceVersionMatchExact {
+			targetRV = uint64(j + 2)
+			opts.ResourceVersion = strconv.FormatUint(targetRV, 10)
+		}
+
+		resp, _, err := s.WaitUntilFreshAndGetList(ctx, "/prefix/", opts)
+		require.NoError(t, err)
+
+		if expectExactResourceVersion && resp.ResourceVersion != targetRV {
+			t.Errorf("Expected list ResourceVersion %d, got %d", targetRV, resp.ResourceVersion)
+		}
+		if expectItemRVLessOrEqualListRV {
+			maxItemRV := getMaxItemRV(t, s.config.versioner, resp.Items)
+			if maxItemRV > resp.ResourceVersion {
+				t.Errorf("Violated consistency: max item resource version %d is greater than list resource version %d", maxItemRV, resp.ResourceVersion)
+			}
+		}
+	}
+
+	close(stopUpdates)
+	wg.Wait()
+}
+
+func getMaxItemRV(t *testing.T, versioner storage.Versioner, items []interface{}) uint64 {
+	var maxRV uint64
+	for _, item := range items {
+		elem := item.(*store.Element)
+		itemRV, err := versioner.ObjectResourceVersion(elem.Object)
+		require.NoError(t, err)
+		maxRV = max(maxRV, itemRV)
+	}
+	return maxRV
 }
