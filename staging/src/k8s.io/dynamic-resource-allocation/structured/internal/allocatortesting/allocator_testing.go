@@ -2146,7 +2146,7 @@ func TestAllocator(t *testing.T,
 					[]resourceapi.DeviceAllocationConfiguration{
 						{
 							Source:              resourceapi.AllocationConfigSourceClass,
-							Requests:            []string{req0},
+							Requests:            nil,
 							DeviceConfiguration: deviceConfiguration(driverA, "classAttribute"),
 						},
 					},
@@ -2183,6 +2183,43 @@ func TestAllocator(t *testing.T,
 							Source:              resourceapi.AllocationConfigSourceClass,
 							Requests:            []string{req2},
 							DeviceConfiguration: deviceConfiguration(driverB, "classAttribute-B"),
+						},
+					},
+				),
+			},
+		},
+		"with-claim-config-for-two-requests": {
+			claimsToAllocate: func() []wrapResourceClaim {
+				c := claimWithRequests(claim0, nil, request(req0, classA, 1), request(req1, classA, 1), request(req2, classA, 1))
+				c.Spec.Devices.Config = []resourceapi.DeviceClaimConfiguration{
+					{
+						Requests:            []string{req0, req1},
+						DeviceConfiguration: deviceConfiguration(driverA, "deviceAttribute"),
+					},
+				}
+				return []wrapResourceClaim{c}
+			}(),
+			classes: objects(
+				class(classA, driverA),
+			),
+			slices: unwrap(
+				sliceWithMultipleDevices(slice1, node1, pool1, driverA, 3),
+			),
+			node: node(node1, region1),
+
+			expectResults: []any{
+				allocationResultWithConfigs(
+					localNodeSelector(node1),
+					objects(
+						deviceAllocationResult(req0, driverA, pool1, device0, false),
+						deviceAllocationResult(req1, driverA, pool1, device1, false),
+						deviceAllocationResult(req2, driverA, pool1, device2, false),
+					),
+					[]resourceapi.DeviceAllocationConfiguration{
+						{
+							Source:              resourceapi.AllocationConfigSourceClaim,
+							Requests:            []string{req0, req1},
+							DeviceConfiguration: deviceConfiguration(driverA, "deviceAttribute"),
 						},
 					},
 				),
@@ -2396,10 +2433,8 @@ func TestAllocator(t *testing.T,
 				),
 				[]resourceapi.DeviceAllocationConfiguration{
 					{
-						Source: resourceapi.AllocationConfigSourceClaim,
-						Requests: []string{
-							req0SubReq1,
-						},
+						Source:              resourceapi.AllocationConfigSourceClaim,
+						Requests:            nil,
 						DeviceConfiguration: deviceConfiguration(driverB, "bar"),
 					},
 				},
@@ -2439,7 +2474,7 @@ func TestAllocator(t *testing.T,
 				[]resourceapi.DeviceAllocationConfiguration{
 					{
 						Source:              resourceapi.AllocationConfigSourceClass,
-						Requests:            []string{req0SubReq1},
+						Requests:            nil,
 						DeviceConfiguration: deviceConfiguration(driverB, "bar"),
 					},
 				},
