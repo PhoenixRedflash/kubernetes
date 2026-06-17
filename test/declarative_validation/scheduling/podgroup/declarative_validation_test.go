@@ -334,6 +334,10 @@ func testDeclarativeValidateUpdate(t *testing.T, apiVersion string) {
 			oldObj:    mkValidPodGroup(setResourceVersion("1")),
 			updateObj: mkValidPodGroup(setResourceVersion("1")),
 		},
+		"valid update minCount": {
+			oldObj:    mkValidPodGroup(setResourceVersion("1")),
+			updateObj: mkValidPodGroup(setResourceVersion("1"), setPodGroupMinCount(10)),
+		},
 		"invalid update empty podGroupTemplateRef": {
 			oldObj:    mkValidPodGroup(setResourceVersion("1")),
 			updateObj: mkValidPodGroup(setResourceVersion("1"), setEmptyPodGroupTemplateRef()),
@@ -366,27 +370,32 @@ func testDeclarativeValidateUpdate(t *testing.T, apiVersion string) {
 			oldObj:    mkValidPodGroup(setResourceVersion("1")),
 			updateObj: mkValidPodGroup(setResourceVersion("1"), clearPodGroupPolicy()),
 			expectedErrs: field.ErrorList{
-				field.Invalid(field.NewPath("spec", "schedulingPolicy"), nil, "").WithOrigin("immutable"),
+				field.Invalid(field.NewPath("spec", "schedulingPolicy"), nil, "").WithOrigin("union"),
+				field.Invalid(field.NewPath("spec", "schedulingPolicy", "gang"), nil, "").WithOrigin("update"),
 			},
 		},
 		"invalid update with both basic and gang": {
 			oldObj:    mkValidPodGroup(setResourceVersion("1")),
 			updateObj: mkValidPodGroup(setResourceVersion("1"), setBothPolicies()),
 			expectedErrs: field.ErrorList{
-				field.Invalid(field.NewPath("spec", "schedulingPolicy"), nil, "").WithOrigin("immutable"),
+				field.Invalid(field.NewPath("spec", "schedulingPolicy"), nil, "").WithOrigin("union"),
+				field.Invalid(field.NewPath("spec", "schedulingPolicy", "basic"), nil, "").WithOrigin("immutable"),
 			},
 		},
 		"invalid update of gang minCount": {
 			oldObj:    mkValidPodGroup(setResourceVersion("1")),
-			updateObj: mkValidPodGroup(setResourceVersion("1"), setPodGroupMinCount(10)),
+			updateObj: mkValidPodGroup(setResourceVersion("1"), setPodGroupMinCount(-1)),
 			expectedErrs: field.ErrorList{
-				field.Invalid(field.NewPath("spec", "schedulingPolicy"), nil, "").WithOrigin("immutable"),
+				field.Invalid(field.NewPath("spec", "schedulingPolicy", "gang", "minCount"), nil, "").WithOrigin("minimum"),
 			},
 		},
 		"invalid update from gang to basic policy": {
-			oldObj:       mkValidPodGroup(setResourceVersion("1")),
-			updateObj:    mkValidPodGroup(setResourceVersion("1"), setBasicPolicy()),
-			expectedErrs: field.ErrorList{field.Invalid(field.NewPath("spec", "schedulingPolicy"), nil, "").WithOrigin("immutable")},
+			oldObj:    mkValidPodGroup(setResourceVersion("1")),
+			updateObj: mkValidPodGroup(setResourceVersion("1"), setBasicPolicy()),
+			expectedErrs: field.ErrorList{
+				field.Invalid(field.NewPath("spec", "schedulingPolicy", "basic"), nil, "").WithOrigin("immutable"),
+				field.Invalid(field.NewPath("spec", "schedulingPolicy", "gang"), nil, "").WithOrigin("update"),
+			},
 		},
 		"valid update with unchanged scheduling constraints and TAS disabled": {
 			oldObj:    mkValidPodGroup(setResourceVersion("1"), addTopologyConstraint("foo")),
@@ -537,7 +546,7 @@ func testDeclarativeValidateStatusUpdate(t *testing.T, apiVersion string) {
 		},
 		"valid status update": {
 			oldObj:    mkValidPodGroup(setResourceVersion("1")),
-			updateObj: mkValidPodGroup(setResourceVersion("1"), addCondition(scheduling.PodGroupScheduled)),
+			updateObj: mkValidPodGroup(setResourceVersion("1"), addCondition(scheduling.PodGroupInitiallyScheduled)),
 		},
 		"valid resource claim status update": {
 			oldObj: mkValidPodGroup(
@@ -764,7 +773,7 @@ func addCondition(conditionType string) func(obj *scheduling.PodGroup) {
 		obj.Status.Conditions = append(obj.Status.Conditions, metav1.Condition{
 			Type:               conditionType,
 			Status:             metav1.ConditionFalse,
-			Reason:             scheduling.PodGroupScheduled,
+			Reason:             scheduling.PodGroupInitiallyScheduled,
 			Message:            "Test status condition message",
 			LastTransitionTime: metav1.Now(),
 		})
