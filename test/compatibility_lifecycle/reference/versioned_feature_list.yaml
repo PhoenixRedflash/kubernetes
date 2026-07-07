@@ -499,6 +499,10 @@
     lockToDefault: false
     preRelease: Beta
     version: "1.36"
+  - default: true
+    lockToDefault: false
+    preRelease: GA
+    version: "1.37"
 - name: DRADeviceTaints
   versionedSpecs:
   - default: false
@@ -509,6 +513,10 @@
     lockToDefault: false
     preRelease: Beta
     version: "1.36"
+  - default: true
+    lockToDefault: false
+    preRelease: GA
+    version: "1.37"
 - name: DRAExtendedResource
   versionedSpecs:
   - default: false
@@ -1439,12 +1447,6 @@
     lockToDefault: true
     preRelease: GA
     version: "1.35"
-- name: PreventStaticPodAPIReferences
-  versionedSpecs:
-  - default: true
-    lockToDefault: false
-    preRelease: Beta
-    version: "1.34"
 - name: ProcMountType
   versionedSpecs:
   - default: false

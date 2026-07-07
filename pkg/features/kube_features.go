@@ -817,11 +817,6 @@ const (
 	// Enables PreferSameZone and PreferSameNode values for trafficDistribution
 	PreferSameTrafficDistribution featuregate.Feature = "PreferSameTrafficDistribution"
 
-	// owner: @sreeram-venkitesh
-	//
-	// Denies pod admission if static pods reference other API objects.
-	PreventStaticPodAPIReferences featuregate.Feature = "PreventStaticPodAPIReferences"
-
 	// owner: @jessfraz
 	//
 	// Enables control over ProcMountType for containers.
@@ -1307,12 +1302,14 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 
 	DRADeviceTaintRules: {
 		{Version: version.MustParse("1.35"), Default: false, PreRelease: featuregate.Alpha},
-		{Version: version.MustParse("1.36"), Default: false, PreRelease: featuregate.Beta}, // Depends on an off-by-default beta API.
+		{Version: version.MustParse("1.36"), Default: false, PreRelease: featuregate.Beta},                    // Depends on an off-by-default beta API.
+		{Version: version.MustParse("1.37"), Default: true, PreRelease: featuregate.GA, LockToDefault: false}, // LockToDefault: true in 1.38; remove in 1.41
 	},
 
 	DRADeviceTaints: {
 		{Version: version.MustParse("1.33"), Default: false, PreRelease: featuregate.Alpha},
 		{Version: version.MustParse("1.36"), Default: true, PreRelease: featuregate.Beta},
+		{Version: version.MustParse("1.37"), Default: true, PreRelease: featuregate.GA, LockToDefault: false}, // LockToDefault: true in 1.38; remove in 1.41
 	},
 
 	DRAExtendedResource: {
@@ -1761,10 +1758,6 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 		{Version: version.MustParse("1.33"), Default: false, PreRelease: featuregate.Alpha},
 		{Version: version.MustParse("1.34"), Default: true, PreRelease: featuregate.Beta},
 		{Version: version.MustParse("1.35"), Default: true, PreRelease: featuregate.GA, LockToDefault: true},
-	},
-
-	PreventStaticPodAPIReferences: {
-		{Version: version.MustParse("1.34"), Default: true, PreRelease: featuregate.Beta},
 	},
 
 	ProcMountType: {
@@ -2488,8 +2481,6 @@ var defaultKubernetesFeatureGateDependencies = map[featuregate.Feature][]feature
 	PortForwardWebsockets: {},
 
 	PreferSameTrafficDistribution: {},
-
-	PreventStaticPodAPIReferences: {},
 
 	ProcMountType: {UserNamespacesSupport},
 
