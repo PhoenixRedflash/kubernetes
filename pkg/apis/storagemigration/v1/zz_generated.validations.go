@@ -66,7 +66,29 @@ func Validate_StorageVersionMigration(
 	obj, oldObj *storagemigrationv1.StorageVersionMigration) (errs field.ErrorList) {
 
 	// field storagemigrationv1.StorageVersionMigration.TypeMeta has no validation
-	// field storagemigrationv1.StorageVersionMigration.ObjectMeta has no validation
+
+	{ // field storagemigrationv1.StorageVersionMigration.ObjectMeta
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *metav1.ObjectMeta,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if equality.Semantic.DeepEqual(obj, oldObj) {
+					return nil
+				}
+			}
+			// call the type's validation function
+			errs = append(errs, validation.Validate_ObjectMeta(ctx, op, fldPath, obj, oldObj)...)
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *storagemigrationv1.StorageVersionMigration) *metav1.ObjectMeta {
+				return &oldObj.ObjectMeta
+			})
+		errs = append(errs, fn(fldPath.Child("metadata"), &obj.ObjectMeta, oldVal, oldObj != nil)...)
+	}
+
 	// field storagemigrationv1.StorageVersionMigration.Spec has no validation
 
 	{ // field storagemigrationv1.StorageVersionMigration.Status
@@ -120,13 +142,13 @@ func Validate_StorageVersionMigrationStatus(
 				return // do not proceed
 			}
 			// lists with map semantics require unique keys
-			if e := validate.Unique(ctx, op, fldPath, obj, oldObj,
-				func(a metav1.Condition, b metav1.Condition) bool { return a.Type == b.Type }).MarkAlpha(); len(e) != 0 {
+			if e := validate.ValSliceUnique(ctx, op, fldPath, obj, oldObj,
+				func(a *metav1.Condition, b *metav1.Condition) bool { return a.Type == b.Type }).MarkAlpha(); len(e) != 0 {
 				errs = append(errs, e...)
 			}
 			// iterate the list and call the type's validation function
-			if e := validate.EachSliceVal(ctx, op, fldPath, obj, oldObj,
-				func(a metav1.Condition, b metav1.Condition) bool { return a.Type == b.Type }, validate.SemanticDeepEqual, validation.Validate_Condition); len(e) != 0 {
+			if e := validate.EachValSliceVal(ctx, op, fldPath, obj, oldObj,
+				func(a *metav1.Condition, b *metav1.Condition) bool { return a.Type == b.Type }, validate.SemanticDeepEqual, validation.Validate_Condition); len(e) != 0 {
 				errs = append(errs, e...)
 			}
 			return

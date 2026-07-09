@@ -53,9 +53,9 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/vishvananda/netlink v1.3.1
 	github.com/vishvananda/netns v0.0.5
-	go.etcd.io/etcd/api/v3 v3.7.0-rc.0
-	go.etcd.io/etcd/client/pkg/v3 v3.7.0-rc.0
-	go.etcd.io/etcd/client/v3 v3.7.0-rc.0
+	go.etcd.io/etcd/api/v3 v3.7.0
+	go.etcd.io/etcd/client/pkg/v3 v3.7.0
+	go.etcd.io/etcd/client/v3 v3.7.0
 	go.opentelemetry.io/contrib/instrumentation/github.com/emicklei/go-restful/otelrestful v0.69.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0
 	go.opentelemetry.io/otel v1.44.0
@@ -71,7 +71,7 @@ require (
 	golang.org/x/net v0.55.1-0.20260602153038-42abb857022c
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.20.0
-	golang.org/x/sys v0.45.0
+	golang.org/x/sys v0.46.0
 	golang.org/x/term v0.43.0
 	golang.org/x/text v0.37.0
 	golang.org/x/time v0.15.0
@@ -137,7 +137,7 @@ require (
 	github.com/chai2010/gettext-go v1.0.2 // indirect
 	github.com/containerd/containerd/api v1.11.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
-	github.com/containerd/ttrpc v1.2.8 // indirect
+	github.com/containerd/ttrpc v1.2.9 // indirect
 	github.com/coredns/caddy v1.1.1 // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
@@ -199,10 +199,10 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xiang90/probing v0.0.0-20221125231312-a49e3df8f510 // indirect
 	github.com/xlab/treeprint v1.2.0 // indirect
-	go.etcd.io/bbolt v1.5.0-rc.0 // indirect
-	go.etcd.io/etcd/pkg/v3 v3.7.0-rc.0 // indirect
-	go.etcd.io/etcd/server/v3 v3.7.0-rc.0 // indirect
-	go.etcd.io/raft/v3 v3.7.0-rc.1 // indirect
+	go.etcd.io/bbolt v1.5.0 // indirect
+	go.etcd.io/etcd/pkg/v3 v3.7.0 // indirect
+	go.etcd.io/etcd/server/v3 v3.7.0 // indirect
+	go.etcd.io/raft/v3 v3.7.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.44.0 // indirect
