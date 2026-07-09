@@ -31,6 +31,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
@@ -71,7 +72,7 @@ type fakePodGroupPlugin struct {
 
 var _ fwk.FilterPlugin = &fakePodGroupPlugin{}
 var _ fwk.PostFilterPlugin = &fakePodGroupPlugin{}
-var _ framework.PodGroupPostFilterPlugin = &fakePodGroupPlugin{}
+var _ fwk.PodGroupPostFilterPlugin = &fakePodGroupPlugin{}
 
 func (mp *fakePodGroupPlugin) Name() string { return "FakePodGroupPlugin" }
 
@@ -94,7 +95,7 @@ func (mp *fakePodGroupPlugin) Permit(ctx context.Context, state fwk.CycleState, 
 	return fwk.NewStatus(fwk.Error, "unexpected call to permit"), 0
 }
 
-func (mp *fakePodGroupPlugin) PodGroupPostFilter(ctx context.Context, pgInfo fwk.PodGroupInfo, pgSchedulingFunc framework.PodGroupSchedulingFunc) (*framework.PodGroupPostFilterResult, *fwk.Status) {
+func (mp *fakePodGroupPlugin) PodGroupPostFilter(ctx context.Context, state fwk.PodGroupCycleState, pgInfo fwk.PodGroupInfo, pgSchedulingFunc fwk.PodGroupSchedulingFunc) (*fwk.PodGroupPostFilterResult, *fwk.Status) {
 	mp.podGroupPostFilterCalled = true
 	if mp.podGroupPostFilterStatus == nil {
 		return nil, fwk.NewStatus(fwk.Unschedulable, "default fake podgroup postfilter failure")
@@ -103,11 +104,12 @@ func (mp *fakePodGroupPlugin) PodGroupPostFilter(ctx context.Context, pgInfo fwk
 		return nil, mp.podGroupPostFilterStatus
 	}
 	pods := pgInfo.GetUnscheduledPods()
-	n := make(map[*v1.Pod]*fwk.NominatingInfo, len(pods))
+	n := make(map[types.NamespacedName]*fwk.NominatingInfo, len(pods))
 	for _, passedPod := range pods {
-		n[passedPod] = mp.podGroupPostFilterResult[passedPod.Name]
+		namespacedName := types.NamespacedName{Namespace: passedPod.Namespace, Name: passedPod.Name}
+		n[namespacedName] = mp.podGroupPostFilterResult[passedPod.Name]
 	}
-	return &framework.PodGroupPostFilterResult{NominatedNodeNames: n}, mp.podGroupPostFilterStatus
+	return &fwk.PodGroupPostFilterResult{NominatingInfos: n}, mp.podGroupPostFilterStatus
 }
 
 type fakePlacementFeasiblePlugin struct {
@@ -163,11 +165,12 @@ func (mp *fakePlacementFeasiblePlugin) Permit(ctx context.Context, state fwk.Cyc
 
 func TestValidatePodGroup(t *testing.T) {
 	tests := []struct {
-		name        string
-		podGroup    *schedulingv1alpha3.PodGroup
-		pods        []*v1.Pod
-		profiles    profile.Map
-		expectError bool
+		name          string
+		podGroup      *schedulingv1alpha3.PodGroup
+		scheduledPods []*v1.Pod
+		pods          []*v1.Pod
+		profiles      profile.Map
+		expectError   bool
 	}{
 		{
 			name:     "failure when no pods to evaluate",
@@ -251,6 +254,48 @@ func TestValidatePodGroup(t *testing.T) {
 			},
 			expectError: true,
 		},
+		{
+			name:     "success when new pods match scheduled pods scheduler name and priority",
+			podGroup: st.MakePodGroup().Name("pg").Priority(10).Obj(),
+			scheduledPods: []*v1.Pod{
+				st.MakePod().Name("p2").UID("p2").PodGroupName("pg").Priority(10).SchedulerName("sched1").Node("node1").Obj(),
+			},
+			pods: []*v1.Pod{
+				st.MakePod().Name("p1").UID("p1").PodGroupName("pg").Priority(10).SchedulerName("sched1").Obj(),
+			},
+			profiles: profile.Map{
+				"sched1": nil,
+			},
+			expectError: false,
+		},
+		{
+			name:     "failure when new pod has different scheduler name than scheduled pod",
+			podGroup: st.MakePodGroup().Name("pg").Priority(10).Obj(),
+			scheduledPods: []*v1.Pod{
+				st.MakePod().Name("p2").UID("p2").PodGroupName("pg").Priority(10).SchedulerName("sched2").Node("node1").Obj(),
+			},
+			pods: []*v1.Pod{
+				st.MakePod().Name("p1").UID("p1").PodGroupName("pg").Priority(10).SchedulerName("sched1").Obj(),
+			},
+			profiles: profile.Map{
+				"sched1": nil,
+			},
+			expectError: true,
+		},
+		{
+			name:     "failure when new pod has different priority than scheduled pod",
+			podGroup: st.MakePodGroup().Name("pg").Priority(10).Obj(),
+			scheduledPods: []*v1.Pod{
+				st.MakePod().Name("p2").UID("p2").PodGroupName("pg").Priority(9).SchedulerName("sched1").Node("node1").Obj(),
+			},
+			pods: []*v1.Pod{
+				st.MakePod().Name("p1").UID("p1").PodGroupName("pg").Priority(10).SchedulerName("sched1").Obj(),
+			},
+			profiles: profile.Map{
+				"sched1": nil,
+			},
+			expectError: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -258,7 +303,11 @@ func TestValidatePodGroup(t *testing.T) {
 			featuregatetesting.SetFeatureGatesDuringTest(t, utilfeature.DefaultFeatureGate, featuregatetesting.FeatureOverrides{
 				features.GenericWorkload: true,
 			})
-			sched := &Scheduler{Profiles: tt.profiles}
+			snapshot := internalcache.NewTestSnapshotWithPodGroups(tt.scheduledPods, nil, []*schedulingv1alpha3.PodGroup{tt.podGroup})
+			sched := &Scheduler{
+				Profiles:         tt.profiles,
+				nodeInfoSnapshot: snapshot,
+			}
 
 			podGroupInfo := &framework.QueuedPodGroupInfo{
 				PodGroupInfo: &framework.PodGroupInfo{
@@ -640,6 +689,11 @@ func TestPodGroupCycle_PodGroupPostFilter(t *testing.T) {
 				}
 			}
 
+			var pgPostFilterPlugins []config.Plugin
+			if tt.postFilterPlugin == "DefaultPreemption" {
+				pgPostFilterPlugins = []config.Plugin{{Name: "DefaultPreemption"}}
+			}
+
 			profileCfg := config.KubeSchedulerProfile{
 				SchedulerName: "test-scheduler",
 				Plugins: &config.Plugins{
@@ -654,6 +708,9 @@ func TestPodGroupCycle_PodGroupPostFilter(t *testing.T) {
 					},
 					PostFilter: config.PluginSet{
 						Enabled: []config.Plugin{{Name: tt.postFilterPlugin}},
+					},
+					PodGroupPostFilter: config.PluginSet{
+						Enabled: pgPostFilterPlugins,
 					},
 				},
 			}
@@ -2897,7 +2954,7 @@ func TestPodGroupCycle_NominatedNodes(t *testing.T) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Mock PodGroupPostFilter to return NominatedNodeNames
+	// Mock PodGroupPostFilter to return NominatingInfos
 	nominatedNodes := map[string]*fwk.NominatingInfo{
 		p1.Name: {NominatingMode: fwk.ModeOverride, NominatedNodeName: "node1"},
 	}
@@ -2924,6 +2981,9 @@ func TestPodGroupCycle_NominatedNodes(t *testing.T) {
 				Enabled: []config.Plugin{{Name: defaultbinder.Name}},
 			},
 			PostFilter: config.PluginSet{
+				Enabled: []config.Plugin{{Name: "DefaultPreemption"}},
+			},
+			PodGroupPostFilter: config.PluginSet{
 				Enabled: []config.Plugin{{Name: "DefaultPreemption"}},
 			},
 		},

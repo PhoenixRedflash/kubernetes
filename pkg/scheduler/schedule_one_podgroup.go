@@ -25,6 +25,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	corev1helpers "k8s.io/component-helpers/scheduling/corev1"
@@ -120,17 +121,33 @@ func (sched *Scheduler) validatePodGroup(podGroupInfo *framework.QueuedPodGroupI
 	if len(podGroupInfo.QueuedPodInfos) == 0 {
 		return fmt.Errorf("pod group has no pods to schedule")
 	}
+	podGroupState, err := sched.nodeInfoSnapshot.PodGroupStates().Get(podGroupInfo.Namespace, podGroupInfo.Name)
+	if err != nil {
+		return fmt.Errorf("failed to get pod group state: %w", err)
+	}
 
 	schedulerName := podGroupInfo.QueuedPodInfos[0].Pod.Spec.SchedulerName
 	podGroupPriority := util.PodGroupPriority(podGroupInfo.PodGroup)
 
-	for _, pInfo := range podGroupInfo.QueuedPodInfos {
-		if pInfo.Pod.Spec.SchedulerName != schedulerName {
-			return fmt.Errorf("all pods in a single pod group should have the same .spec.schedulerName set, got: %q and %q", pInfo.Pod.Spec.SchedulerName, schedulerName)
+	validatePod := func(pod *v1.Pod) error {
+		if pod.Spec.SchedulerName != schedulerName {
+			return fmt.Errorf("all pods in a single pod group should have the same .spec.schedulerName set, got: %q and %q", pod.Spec.SchedulerName, schedulerName)
 		}
-		podPriority := corev1helpers.PodPriority(pInfo.Pod)
+		podPriority := corev1helpers.PodPriority(pod)
 		if podPriority != podGroupPriority {
 			return fmt.Errorf("all pods in a single pod group should have the same priority as the pod group's priority, got %d and %d", podPriority, podGroupPriority)
+		}
+		return nil
+	}
+
+	for _, pInfo := range podGroupInfo.QueuedPodInfos {
+		if err := validatePod(pInfo.Pod); err != nil {
+			return err
+		}
+	}
+	for _, pod := range podGroupState.ScheduledPods() {
+		if err := validatePod(pod); err != nil {
+			return err
 		}
 	}
 
@@ -227,10 +244,10 @@ func (sched *Scheduler) podGroupCycle(ctx context.Context, schedFwk framework.Fr
 	result = completePodGroupAlgorithmResult(ctx, podGroupInfo, podGroupCycleState, runAllPostFilters, result)
 	metrics.PodGroupSchedulingAlgorithmLatency.Observe(metrics.SinceInSeconds(start))
 
-	// Run workload aware preemption if required. If the preemption is successful,
+	// Run pod group post filter plugins if scheduling failed. If any of the plugins is successful,
 	// we need to put the pods from pod group back into the scheduling queue.
 	if result.status.Code() == fwk.Unschedulable {
-		var pgSchedulingFunc framework.PodGroupSchedulingFunc = func(ctx context.Context) (*fwk.PodGroupAssignments, *fwk.Status) {
+		var pgSchedulingFunc fwk.PodGroupSchedulingFunc = func(ctx context.Context) (*fwk.PodGroupAssignments, *fwk.Status) {
 			res := sched.podGroupSchedulingAlgorithm(ctx, schedFwk, podGroupCycleState, podGroupInfo, runWithoutPostFilters)
 			return &fwk.PodGroupAssignments{
 				ProposedAssignments: makeProposedAssignments(&res),
@@ -238,16 +255,20 @@ func (sched *Scheduler) podGroupCycle(ctx context.Context, schedFwk framework.Fr
 		}
 		pgPostFilterResult, status := schedFwk.RunPodGroupPostFilterPlugins(ctx, podGroupCycleState, podGroupInfo.PodGroupInfo, pgSchedulingFunc)
 		if status.IsSuccess() {
-			result.waitingOnPreemption = true
 			for i := range result.podResults {
-				if nodeNameInfo, ok := pgPostFilterResult.NominatedNodeNames[result.podResults[i].pod]; ok {
+				pod := result.podResults[i].pod
+				namespacedName := types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
+				if nodeNameInfo, ok := pgPostFilterResult.NominatingInfos[namespacedName]; ok {
 					result.podResults[i].scheduleResult.nominatingInfo = nodeNameInfo
+					result.waitingOnPreemption = true
 				}
 			}
-		} else if status.IsError() {
+		}
+
+		if status.IsError() {
 			result.status = status
-		} else {
-			result.status.AppendReason(status.String())
+		} else if msg := status.Message(); msg != "" {
+			result.status.AppendReason(msg)
 		}
 	}
 
