@@ -61,6 +61,7 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/profile"
 	st "k8s.io/kubernetes/pkg/scheduler/testing"
 	tf "k8s.io/kubernetes/pkg/scheduler/testing/framework"
+	testingclock "k8s.io/utils/clock/testing"
 )
 
 // fakePodGroupPlugin simulates Filter, PostFilter, Permit and PodGroupPostFilter behaviors for PodGroup scheduling testing.
@@ -134,7 +135,7 @@ func (mp *fakePlacementFeasiblePlugin) Name() string {
 // The mock uses a 2D slice (placementFeasibleStatuses) where:
 // - The outer slice represents distinct placements (e.g., when evaluating multiple topology placements).
 // - The inner slice represents the pod-by-pod evaluation within a single placement.
-func (mp *fakePlacementFeasiblePlugin) PlacementFeasible(ctx context.Context, placementCycleState fwk.PlacementCycleState, podGroupInfo fwk.PodGroupInfo, args framework.PlacementFeasibleArgs) *fwk.Status {
+func (mp *fakePlacementFeasiblePlugin) PlacementFeasible(ctx context.Context, placementCycleState fwk.PlacementCycleState, podGroupInfo fwk.PodGroupInfo, args framework.PlacementProgress) *fwk.Status {
 	// If no mock statuses are configured, always succeed.
 	if len(mp.placementFeasibleStatuses) == 0 {
 		return nil
@@ -1986,7 +1987,8 @@ func TestSubmitPodGroupAlgorithmResult(t *testing.T) {
 			informerFactory.Start(ctx.Done())
 			informerFactory.WaitForCacheSync(ctx.Done())
 
-			schedulingQueue := internalqueue.NewTestQueue(ctx, schedFwk.QueueSortFunc())
+			fakeClock := testingclock.NewFakeClock(time.Now())
+			schedulingQueue := internalqueue.NewTestQueue(ctx, schedFwk.QueueSortFunc(), internalqueue.WithClock(fakeClock))
 			sched := &Scheduler{
 				client:          client,
 				Cache:           cache,
@@ -2008,8 +2010,11 @@ func TestSubmitPodGroupAlgorithmResult(t *testing.T) {
 
 			// Create the pod group and add the pods to queue and pop the group to set up internal queue state correctly.
 			schedulingQueue.AddPodGroup(logger, pg)
+			// Advance the clock between additions to keep pod ordering deterministic.
 			schedulingQueue.Add(ctx, p1)
+			fakeClock.Step(time.Second)
 			schedulingQueue.Add(ctx, p2)
+			fakeClock.Step(time.Second)
 			schedulingQueue.Add(ctx, p3)
 			entity, err := schedulingQueue.Pop(logger)
 			if err != nil {
