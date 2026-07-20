@@ -584,6 +584,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		corev1.NodeDaemonEndpoints{}.OpenAPIModelName():                                                                 schema_k8sio_api_core_v1_NodeDaemonEndpoints(ref),
 		corev1.NodeFeatures{}.OpenAPIModelName():                                                                        schema_k8sio_api_core_v1_NodeFeatures(ref),
 		corev1.NodeList{}.OpenAPIModelName():                                                                            schema_k8sio_api_core_v1_NodeList(ref),
+		corev1.NodePodPreemptionPolicy{}.OpenAPIModelName():                                                             schema_k8sio_api_core_v1_NodePodPreemptionPolicy(ref),
 		corev1.NodeProxyOptions{}.OpenAPIModelName():                                                                    schema_k8sio_api_core_v1_NodeProxyOptions(ref),
 		corev1.NodeRuntimeHandler{}.OpenAPIModelName():                                                                  schema_k8sio_api_core_v1_NodeRuntimeHandler(ref),
 		corev1.NodeRuntimeHandlerFeatures{}.OpenAPIModelName():                                                          schema_k8sio_api_core_v1_NodeRuntimeHandlerFeatures(ref),
@@ -1413,6 +1414,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		kubecontrollermanagerconfigv1alpha1.DeploymentControllerConfiguration{}.OpenAPIModelName():                      schema_k8sio_kube_controller_manager_config_v1alpha1_DeploymentControllerConfiguration(ref),
 		kubecontrollermanagerconfigv1alpha1.DeprecatedControllerConfiguration{}.OpenAPIModelName():                      schema_k8sio_kube_controller_manager_config_v1alpha1_DeprecatedControllerConfiguration(ref),
 		kubecontrollermanagerconfigv1alpha1.DeviceTaintEvictionControllerConfiguration{}.OpenAPIModelName():             schema_k8sio_kube_controller_manager_config_v1alpha1_DeviceTaintEvictionControllerConfiguration(ref),
+		kubecontrollermanagerconfigv1alpha1.DisruptionControllerConfiguration{}.OpenAPIModelName():                      schema_k8sio_kube_controller_manager_config_v1alpha1_DisruptionControllerConfiguration(ref),
 		kubecontrollermanagerconfigv1alpha1.EndpointControllerConfiguration{}.OpenAPIModelName():                        schema_k8sio_kube_controller_manager_config_v1alpha1_EndpointControllerConfiguration(ref),
 		kubecontrollermanagerconfigv1alpha1.EndpointSliceControllerConfiguration{}.OpenAPIModelName():                   schema_k8sio_kube_controller_manager_config_v1alpha1_EndpointSliceControllerConfiguration(ref),
 		kubecontrollermanagerconfigv1alpha1.EndpointSliceMirroringControllerConfiguration{}.OpenAPIModelName():          schema_k8sio_kube_controller_manager_config_v1alpha1_EndpointSliceMirroringControllerConfiguration(ref),
@@ -25259,6 +25261,38 @@ func schema_k8sio_api_core_v1_NodeList(ref common.ReferenceCallback) common.Open
 	}
 }
 
+func schema_k8sio_api_core_v1_NodePodPreemptionPolicy(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "NodePodPreemptionPolicy defines the node-level policies governing preemption for pods on this node.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"disableResizePreemption": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "set",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "DisableResizePreemption lists the owners (e.g., autoscalers, operators, administrators) that have requested to disable scheduler and Kubelet preemption for in-place pod resize on this node. If this list is non-empty, resize-induced preemption is disabled on this node. This is an alpha field and requires enabling the InPlacePodVerticalScalingSchedulerPreemption feature gate.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"string"},
+										Format: "",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func schema_k8sio_api_core_v1_NodeProxyOptions(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -25573,11 +25607,17 @@ func schema_k8sio_api_core_v1_NodeSpec(ref common.ReferenceCallback) common.Open
 							Format:      "",
 						},
 					},
+					"podPreemptionPolicy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PodPreemptionPolicy controls the node-level preemption behaviors for pods on this node. This is an alpha field and requires enabling the InPlacePodVerticalScalingSchedulerPreemption feature gate.",
+							Ref:         ref(corev1.NodePodPreemptionPolicy{}.OpenAPIModelName()),
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			corev1.NodeConfigSource{}.OpenAPIModelName(), corev1.Taint{}.OpenAPIModelName()},
+			corev1.NodeConfigSource{}.OpenAPIModelName(), corev1.NodePodPreemptionPolicy{}.OpenAPIModelName(), corev1.Taint{}.OpenAPIModelName()},
 	}
 }
 
@@ -40910,7 +40950,7 @@ func schema_k8sio_api_networking_v1_IPAddress(ref common.ReferenceCallback) comm
 					},
 					"metadata": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
+							Description: "metadata is the standard object metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
 							Default:     map[string]interface{}{},
 							Ref:         ref(metav1.ObjectMeta{}.OpenAPIModelName()),
 						},
@@ -40990,7 +41030,7 @@ func schema_k8sio_api_networking_v1_IPAddressSpec(ref common.ReferenceCallback) 
 				Properties: map[string]spec.Schema{
 					"parentRef": {
 						SchemaProps: spec.SchemaProps{
-							Description: "ParentRef references the resource that an IPAddress is attached to. An IPAddress must reference a parent object.",
+							Description: "parentRef references the resource that an IPAddress is attached to. An IPAddress must reference a parent object.",
 							Ref:         ref(networkingv1.ParentReference{}.OpenAPIModelName()),
 						},
 					},
@@ -41067,7 +41107,7 @@ func schema_k8sio_api_networking_v1_Ingress(ref common.ReferenceCallback) common
 					},
 					"metadata": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
+							Description: "metadata is the standard object metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
 							Default:     map[string]interface{}{},
 							Ref:         ref(metav1.ObjectMeta{}.OpenAPIModelName()),
 						},
@@ -41144,7 +41184,7 @@ func schema_k8sio_api_networking_v1_IngressClass(ref common.ReferenceCallback) c
 					},
 					"metadata": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
+							Description: "metadata is the standard object metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
 							Default:     map[string]interface{}{},
 							Ref:         ref(metav1.ObjectMeta{}.OpenAPIModelName()),
 						},
@@ -41477,7 +41517,8 @@ func schema_k8sio_api_networking_v1_IngressRule(ref common.ReferenceCallback) co
 					},
 					"http": {
 						SchemaProps: spec.SchemaProps{
-							Ref: ref(networkingv1.HTTPIngressRuleValue{}.OpenAPIModelName()),
+							Description: "http is a HTTP IngressRuleValue, which contains a list of http selectors",
+							Ref:         ref(networkingv1.HTTPIngressRuleValue{}.OpenAPIModelName()),
 						},
 					},
 				},
@@ -41497,7 +41538,8 @@ func schema_k8sio_api_networking_v1_IngressRuleValue(ref common.ReferenceCallbac
 				Properties: map[string]spec.Schema{
 					"http": {
 						SchemaProps: spec.SchemaProps{
-							Ref: ref(networkingv1.HTTPIngressRuleValue{}.OpenAPIModelName()),
+							Description: "http is a HTTP IngressRuleValue, which contains a list of http selectors",
+							Ref:         ref(networkingv1.HTTPIngressRuleValue{}.OpenAPIModelName()),
 						},
 					},
 				},
@@ -41687,7 +41729,7 @@ func schema_k8sio_api_networking_v1_NetworkPolicy(ref common.ReferenceCallback) 
 					},
 					"metadata": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
+							Description: "metadata is the standard object metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
 							Default:     map[string]interface{}{},
 							Ref:         ref(metav1.ObjectMeta{}.OpenAPIModelName()),
 						},
@@ -42015,28 +42057,28 @@ func schema_k8sio_api_networking_v1_ParentReference(ref common.ReferenceCallback
 				Properties: map[string]spec.Schema{
 					"group": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Group is the group of the object being referenced.",
+							Description: "group is the group of the object being referenced.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"resource": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Resource is the resource of the object being referenced.",
+							Description: "resource is the resource of the object being referenced.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"namespace": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Namespace is the namespace of the object being referenced.",
+							Description: "namespace is the namespace of the object being referenced.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"name": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Name is the name of the object being referenced.",
+							Description: "name is the name of the object being referenced.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -42103,7 +42145,7 @@ func schema_k8sio_api_networking_v1_ServiceCIDR(ref common.ReferenceCallback) co
 					},
 					"metadata": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
+							Description: "metadata is the standard object metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
 							Default:     map[string]interface{}{},
 							Ref:         ref(metav1.ObjectMeta{}.OpenAPIModelName()),
 						},
@@ -42194,7 +42236,7 @@ func schema_k8sio_api_networking_v1_ServiceCIDRSpec(ref common.ReferenceCallback
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "CIDRs defines the IP blocks in CIDR notation (e.g. \"192.168.0.0/24\" or \"2001:db8::/64\") from which to assign service cluster IPs. Max of two CIDRs is allowed, one of each IP family. This field is immutable.",
+							Description: "cidrs defines the IP blocks in CIDR notation (e.g. \"192.168.0.0/24\" or \"2001:db8::/64\") from which to assign service cluster IPs. Max of two CIDRs is allowed, one of each IP family. This field is immutable.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -42344,7 +42386,7 @@ func schema_k8sio_api_networking_v1beta1_IPAddress(ref common.ReferenceCallback)
 					},
 					"metadata": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
+							Description: "metadata is the standard object metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
 							Default:     map[string]interface{}{},
 							Ref:         ref(metav1.ObjectMeta{}.OpenAPIModelName()),
 						},
@@ -42424,7 +42466,7 @@ func schema_k8sio_api_networking_v1beta1_IPAddressSpec(ref common.ReferenceCallb
 				Properties: map[string]spec.Schema{
 					"parentRef": {
 						SchemaProps: spec.SchemaProps{
-							Description: "ParentRef references the resource that an IPAddress is attached to. An IPAddress must reference a parent object.",
+							Description: "parentRef references the resource that an IPAddress is attached to. An IPAddress must reference a parent object.",
 							Ref:         ref(networkingv1beta1.ParentReference{}.OpenAPIModelName()),
 						},
 					},
@@ -42460,7 +42502,7 @@ func schema_k8sio_api_networking_v1beta1_Ingress(ref common.ReferenceCallback) c
 					},
 					"metadata": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
+							Description: "metadata is the standard object metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
 							Default:     map[string]interface{}{},
 							Ref:         ref(metav1.ObjectMeta{}.OpenAPIModelName()),
 						},
@@ -42544,7 +42586,7 @@ func schema_k8sio_api_networking_v1beta1_IngressClass(ref common.ReferenceCallba
 					},
 					"metadata": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
+							Description: "metadata is the standard object metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
 							Default:     map[string]interface{}{},
 							Ref:         ref(metav1.ObjectMeta{}.OpenAPIModelName()),
 						},
@@ -42877,7 +42919,8 @@ func schema_k8sio_api_networking_v1beta1_IngressRule(ref common.ReferenceCallbac
 					},
 					"http": {
 						SchemaProps: spec.SchemaProps{
-							Ref: ref(networkingv1beta1.HTTPIngressRuleValue{}.OpenAPIModelName()),
+							Description: "http is a HTTP IngressRuleValue, which contains a list of http selectors",
+							Ref:         ref(networkingv1beta1.HTTPIngressRuleValue{}.OpenAPIModelName()),
 						},
 					},
 				},
@@ -42897,7 +42940,8 @@ func schema_k8sio_api_networking_v1beta1_IngressRuleValue(ref common.ReferenceCa
 				Properties: map[string]spec.Schema{
 					"http": {
 						SchemaProps: spec.SchemaProps{
-							Ref: ref(networkingv1beta1.HTTPIngressRuleValue{}.OpenAPIModelName()),
+							Description: "http is a HTTP IngressRuleValue, which contains a list of http selectors",
+							Ref:         ref(networkingv1beta1.HTTPIngressRuleValue{}.OpenAPIModelName()),
 						},
 					},
 				},
@@ -43042,28 +43086,28 @@ func schema_k8sio_api_networking_v1beta1_ParentReference(ref common.ReferenceCal
 				Properties: map[string]spec.Schema{
 					"group": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Group is the group of the object being referenced.",
+							Description: "group is the group of the object being referenced.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"resource": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Resource is the resource of the object being referenced.",
+							Description: "resource is the resource of the object being referenced.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"namespace": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Namespace is the namespace of the object being referenced.",
+							Description: "namespace is the namespace of the object being referenced.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"name": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Name is the name of the object being referenced.",
+							Description: "name is the name of the object being referenced.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -43098,7 +43142,7 @@ func schema_k8sio_api_networking_v1beta1_ServiceCIDR(ref common.ReferenceCallbac
 					},
 					"metadata": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
+							Description: "metadata is the standard object metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
 							Default:     map[string]interface{}{},
 							Ref:         ref(metav1.ObjectMeta{}.OpenAPIModelName()),
 						},
@@ -43189,7 +43233,7 @@ func schema_k8sio_api_networking_v1beta1_ServiceCIDRSpec(ref common.ReferenceCal
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "CIDRs defines the IP blocks in CIDR notation (e.g. \"192.168.0.0/24\" or \"2001:db8::/64\") from which to assign service cluster IPs. Max of two CIDRs is allowed, one of each IP family. This field is immutable.",
+							Description: "cidrs defines the IP blocks in CIDR notation (e.g. \"192.168.0.0/24\" or \"2001:db8::/64\") from which to assign service cluster IPs. Max of two CIDRs is allowed, one of each IP family. This field is immutable.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -67614,6 +67658,28 @@ func schema_k8sio_kube_controller_manager_config_v1alpha1_DeviceTaintEvictionCon
 	}
 }
 
+func schema_k8sio_kube_controller_manager_config_v1alpha1_DisruptionControllerConfiguration(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DisruptionControllerConfiguration contains elements describing DisruptionController.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"ConcurrentDisruptionSyncs": {
+						SchemaProps: spec.SchemaProps{
+							Description: "concurrentDisruptionSyncs is the number of PodDisruptionBudget objects that are allowed to sync concurrently. Larger number = more responsive PDB updates, but more CPU (and network) load.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"ConcurrentDisruptionSyncs"},
+			},
+		},
+	}
+}
+
 func schema_k8sio_kube_controller_manager_config_v1alpha1_EndpointControllerConfiguration(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -67957,6 +68023,13 @@ func schema_k8sio_kube_controller_manager_config_v1alpha1_KubeControllerManagerC
 							Ref:         ref(kubecontrollermanagerconfigv1alpha1.DeploymentControllerConfiguration{}.OpenAPIModelName()),
 						},
 					},
+					"DisruptionController": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DisruptionControllerConfiguration holds configuration for DisruptionController related features.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(kubecontrollermanagerconfigv1alpha1.DisruptionControllerConfiguration{}.OpenAPIModelName()),
+						},
+					},
 					"StatefulSetController": {
 						SchemaProps: spec.SchemaProps{
 							Description: "StatefulSetControllerConfiguration holds configuration for StatefulSetController related features.",
@@ -68133,11 +68206,11 @@ func schema_k8sio_kube_controller_manager_config_v1alpha1_KubeControllerManagerC
 						},
 					},
 				},
-				Required: []string{"Generic", "KubeCloudShared", "AttachDetachController", "CSRSigningController", "DaemonSetController", "DeploymentController", "StatefulSetController", "DeprecatedController", "EndpointController", "EndpointSliceController", "EndpointSliceMirroringController", "EphemeralVolumeController", "GarbageCollectorController", "HPAController", "JobController", "CronJobController", "LegacySATokenCleaner", "NamespaceController", "NodeIPAMController", "NodeLifecycleController", "PersistentVolumeBinderController", "PodGCController", "ReplicaSetController", "ReplicationController", "ResourceQuotaController", "SAController", "ServiceController", "TTLAfterFinishedController", "ValidatingAdmissionPolicyStatusController", "DeviceTaintEvictionController", "ResourceClaimController"},
+				Required: []string{"Generic", "KubeCloudShared", "AttachDetachController", "CSRSigningController", "DaemonSetController", "DeploymentController", "DisruptionController", "StatefulSetController", "DeprecatedController", "EndpointController", "EndpointSliceController", "EndpointSliceMirroringController", "EphemeralVolumeController", "GarbageCollectorController", "HPAController", "JobController", "CronJobController", "LegacySATokenCleaner", "NamespaceController", "NodeIPAMController", "NodeLifecycleController", "PersistentVolumeBinderController", "PodGCController", "ReplicaSetController", "ReplicationController", "ResourceQuotaController", "SAController", "ServiceController", "TTLAfterFinishedController", "ValidatingAdmissionPolicyStatusController", "DeviceTaintEvictionController", "ResourceClaimController"},
 			},
 		},
 		Dependencies: []string{
-			configv1alpha1.KubeCloudSharedConfiguration{}.OpenAPIModelName(), serviceconfigv1alpha1.ServiceControllerConfiguration{}.OpenAPIModelName(), controllermanagerconfigv1alpha1.GenericControllerManagerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.AttachDetachControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.CSRSigningControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.CronJobControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.DaemonSetControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.DeploymentControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.DeprecatedControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.DeviceTaintEvictionControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.EndpointControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.EndpointSliceControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.EndpointSliceMirroringControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.EphemeralVolumeControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.GarbageCollectorControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.HPAControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.JobControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.LegacySATokenCleanerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.NamespaceControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.NodeIPAMControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.NodeLifecycleControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.PersistentVolumeBinderControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.PodGCControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.ReplicaSetControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.ReplicationControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.ResourceClaimControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.ResourceQuotaControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.SAControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.StatefulSetControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.TTLAfterFinishedControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.ValidatingAdmissionPolicyStatusControllerConfiguration{}.OpenAPIModelName()},
+			configv1alpha1.KubeCloudSharedConfiguration{}.OpenAPIModelName(), serviceconfigv1alpha1.ServiceControllerConfiguration{}.OpenAPIModelName(), controllermanagerconfigv1alpha1.GenericControllerManagerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.AttachDetachControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.CSRSigningControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.CronJobControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.DaemonSetControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.DeploymentControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.DeprecatedControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.DeviceTaintEvictionControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.DisruptionControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.EndpointControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.EndpointSliceControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.EndpointSliceMirroringControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.EphemeralVolumeControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.GarbageCollectorControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.HPAControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.JobControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.LegacySATokenCleanerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.NamespaceControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.NodeIPAMControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.NodeLifecycleControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.PersistentVolumeBinderControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.PodGCControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.ReplicaSetControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.ReplicationControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.ResourceClaimControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.ResourceQuotaControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.SAControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.StatefulSetControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.TTLAfterFinishedControllerConfiguration{}.OpenAPIModelName(), kubecontrollermanagerconfigv1alpha1.ValidatingAdmissionPolicyStatusControllerConfiguration{}.OpenAPIModelName()},
 	}
 }
 
