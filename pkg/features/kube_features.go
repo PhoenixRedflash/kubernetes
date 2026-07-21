@@ -401,6 +401,12 @@ const (
 	// Make the kubelet use shutdown configuration based on pod priority values for graceful shutdown.
 	GracefulNodeShutdownBasedOnPodPriority featuregate.Feature = "GracefulNodeShutdownBasedOnPodPriority"
 
+	// owner @amritansh1502
+	// kep: https://kep.k8s.io/5999
+	//
+	// Enables the Protocol field on HTTPGetAction to select the wire protocol (HTTP/1.1 or HTTP/2).
+	H2CContainerProbe featuregate.Feature = "H2CContainerProbe"
+
 	// owner: @jm-franc
 	// kep: https://kep.k8s.io/4951
 	//
@@ -487,6 +493,12 @@ const (
 	InPlacePodVerticalScalingInitContainers featuregate.Feature = "InPlacePodVerticalScalingInitContainers"
 
 	// owner: @natasha41575
+	// kep: https://kep.k8s.io/6030
+	//
+	// Allow in-place pod update of memory-backed volume size limit.
+	InPlacePodVerticalScalingMemoryBackedVolumes featuregate.Feature = "InPlacePodVerticalScalingMemoryBackedVolumes"
+
+	// owner: @natasha41575
 	// kep: https://kep.k8s.io/5836
 	//
 	// Enables scheduler-triggered preemption for deferred in-place pod vertical scaling pods.
@@ -503,6 +515,13 @@ const (
 	//
 	// Allow use of IPVS mode in kube-proxy
 	KubeProxyIPVS featuregate.Feature = "KubeProxyIPVS"
+
+	// owner: @austinabro321
+	// kep: https://kep.k8s.io/6032
+	//
+	// Enables a userspace TCP proxy in the nftables kube-proxy backend that
+	// serves localhost NodePort services on IPv4 and IPv6.
+	KubeProxyNFTablesLocalhostNodePorts featuregate.Feature = "KubeProxyNFTablesLocalhostNodePorts"
 
 	// owner: @marquiz
 	// kep: http://kep.k8s.io/4033
@@ -1459,6 +1478,7 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 
 	GenericWorkload: {
 		{Version: version.MustParse("1.35"), Default: false, PreRelease: featuregate.Alpha},
+		{Version: version.MustParse("1.37"), Default: false, PreRelease: featuregate.Beta},
 	},
 
 	GitRepoVolumeDriver: {
@@ -1475,6 +1495,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 	GracefulNodeShutdownBasedOnPodPriority: {
 		{Version: version.MustParse("1.23"), Default: false, PreRelease: featuregate.Alpha},
 		{Version: version.MustParse("1.24"), Default: true, PreRelease: featuregate.Beta},
+	},
+
+	H2CContainerProbe: {
+		{Version: version.MustParse("1.37"), Default: false, PreRelease: featuregate.Alpha},
 	},
 
 	HPAConfigurableTolerance: {
@@ -1546,6 +1570,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 		{Version: version.MustParse("1.37"), Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.40
 	},
 
+	InPlacePodVerticalScalingMemoryBackedVolumes: {
+		{Version: version.MustParse("1.37"), Default: false, PreRelease: featuregate.Alpha},
+	},
+
 	InPlacePodVerticalScalingSchedulerPreemption: {
 		{Version: version.MustParse("1.37"), Default: false, PreRelease: featuregate.Alpha},
 	},
@@ -1559,6 +1587,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 	KubeProxyIPVS: {
 		{Version: version.MustParse("1.0"), Default: true, PreRelease: featuregate.GA},
 		{Version: version.MustParse("1.37"), Default: true, PreRelease: featuregate.Deprecated},
+	},
+
+	KubeProxyNFTablesLocalhostNodePorts: {
+		{Version: version.MustParse("1.37"), Default: false, PreRelease: featuregate.Alpha},
 	},
 
 	KubeletCgroupDriverFromCRI: {
@@ -2426,6 +2458,8 @@ var defaultKubernetesFeatureGateDependencies = map[featuregate.Feature][]feature
 
 	GracefulNodeShutdownBasedOnPodPriority: {GracefulNodeShutdown},
 
+	H2CContainerProbe: {NodeDeclaredFeatures},
+
 	HPAConfigurableTolerance: {},
 
 	HPAGeneration: {},
@@ -2454,11 +2488,15 @@ var defaultKubernetesFeatureGateDependencies = map[featuregate.Feature][]feature
 
 	InPlacePodVerticalScalingInitContainers: {InPlacePodVerticalScaling, NodeDeclaredFeatures},
 
+	InPlacePodVerticalScalingMemoryBackedVolumes: {InPlacePodVerticalScaling, NodeDeclaredFeatures},
+
 	InPlacePodVerticalScalingSchedulerPreemption: {InPlacePodVerticalScaling},
 
 	JobManagedBy: {},
 
 	KubeProxyIPVS: {},
+
+	KubeProxyNFTablesLocalhostNodePorts: {},
 
 	KubeletCgroupDriverFromCRI: {},
 
