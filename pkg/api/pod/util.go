@@ -21,13 +21,17 @@ import (
 	"iter"
 	"strings"
 
+	apiv1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	metavalidation "k8s.io/apimachinery/pkg/apis/meta/v1/validation"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	resourcehelper "k8s.io/component-helpers/resource"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/apis/core/helper"
+	corev1 "k8s.io/kubernetes/pkg/apis/core/v1"
 	apivalidation "k8s.io/kubernetes/pkg/apis/core/validation"
 	"k8s.io/kubernetes/pkg/features"
 )
@@ -433,6 +437,7 @@ func GetValidationOptionsFromPodSpecAndMeta(podSpec, oldPodSpec *api.PodSpec, po
 		AllowRestartAllContainers:                               utilfeature.DefaultFeatureGate.Enabled(features.RestartAllContainersOnContainerExits),
 		AllowImageVolumeWithDigest:                              utilfeature.DefaultFeatureGate.Enabled(features.ImageVolumeWithDigest),
 		AllowExistingRestartContainerForNonSidecarInitContainer: hasRestartContainerForNonSidecarInitContainer(oldPodSpec),
+		AllowSysAdminWhenPrivilegeEscalationFalse:               false,
 	}
 
 	// If old spec uses relaxed validation or enabled the RelaxedEnvironmentVariableValidation feature gate,
@@ -487,6 +492,8 @@ func GetValidationOptionsFromPodSpecAndMeta(podSpec, oldPodSpec *api.PodSpec, po
 
 		// If old spec already had an image volume with empty reference, allow it
 		opts.AllowEmptyImageVolumeReference = hasEmptyImageVolumeReference(oldPodSpec)
+
+		opts.AllowSysAdminWhenPrivilegeEscalationFalse = useAllowSysAdminWhenPrivilegeEscalationFalse(oldPodSpec)
 	}
 	if oldPodMeta != nil && !opts.AllowInvalidPodDeletionCost {
 		// This is an update, so validate only if the existing object was valid.
@@ -547,18 +554,8 @@ func useAllowEnvFilesValidation(oldPodSpec *api.PodSpec) bool {
 		return false
 	}
 
-	for _, container := range oldPodSpec.Containers {
-		if hasEnvFileKeyRef(container.Env) {
-			return true
-		}
-	}
-	for _, container := range oldPodSpec.InitContainers {
-		if hasEnvFileKeyRef(container.Env) {
-			return true
-		}
-	}
-	for _, container := range oldPodSpec.EphemeralContainers {
-		if hasEnvFileKeyRef(container.Env) {
+	for c := range ContainerIter(oldPodSpec, AllContainers) {
+		if hasEnvFileKeyRef(c.Env) {
 			return true
 		}
 	}
@@ -569,6 +566,38 @@ func useAllowEnvFilesValidation(oldPodSpec *api.PodSpec) bool {
 func hasEnvFileKeyRef(envs []api.EnvVar) bool {
 	for _, env := range envs {
 		if env.ValueFrom != nil && env.ValueFrom.FileKeyRef != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func useAllowSysAdminWhenPrivilegeEscalationFalse(oldPodSpec *api.PodSpec) bool {
+	if oldPodSpec == nil {
+		return false
+	}
+
+	for c := range ContainerIter(oldPodSpec, AllContainers) {
+		if hasSysAdminAndPrivilegeEscalationFalse(c.SecurityContext) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func hasSysAdminAndPrivilegeEscalationFalse(sc *api.SecurityContext) bool {
+	if sc == nil {
+		return false
+	}
+	if sc.AllowPrivilegeEscalation != nil && *sc.AllowPrivilegeEscalation {
+		return false
+	}
+	if sc.Capabilities == nil {
+		return false
+	}
+	for _, c := range sc.Capabilities.Add {
+		if string(c) == "CAP_SYS_ADMIN" {
 			return true
 		}
 	}
@@ -729,6 +758,7 @@ func dropDisabledFields(
 	dropDisabledDynamicResourceAllocationFields(podSpec, oldPodSpec)
 	dropDisabledClusterTrustBundleProjection(podSpec, oldPodSpec)
 	dropDisabledPodCertificateProjection(podSpec, oldPodSpec)
+	dropDisabledAtomicWriteVolumeUserFields(podSpec, oldPodSpec)
 	dropDisabledSchedulingGroup(podSpec, oldPodSpec)
 
 	if !utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) && !inPlacePodVerticalScalingInUse(oldPodSpec) {
@@ -1224,6 +1254,20 @@ func dropMatchLabelKeysFieldInPodAffnityTerm(terms []api.PodAffinityTerm) {
 	}
 }
 
+// dropUserFieldsInKeyToPaths removes User fields from each KeyToPath item
+func dropUserFieldsInKeyToPaths(items []api.KeyToPath) {
+	for j := range items {
+		items[j].User = nil
+	}
+}
+
+// dropUserFieldsInDownwardAPIVolumeFiles removes User fields from each DownwardAPIVolumeFile item
+func dropUserFieldsInDownwardAPIVolumeFiles(items []api.DownwardAPIVolumeFile) {
+	for j := range items {
+		items[j].User = nil
+	}
+}
+
 // matchLabelKeysFieldInPodAffinityInUse returns true if given affinityTerms have MatchLabelKeys field set.
 func matchLabelKeysFieldInPodAffinityInUse(podSpec *api.PodSpec) bool {
 	if podSpec == nil || podSpec.Affinity == nil {
@@ -1502,6 +1546,133 @@ func dropDisabledPodCertificateProjection(podSpec, oldPodSpec *api.PodSpec) {
 			podSpec.Volumes[i].Projected.Sources[j].PodCertificate = nil
 		}
 	}
+}
+
+func dropDisabledAtomicWriteVolumeUserFields(podSpec, oldPodSpec *api.PodSpec) {
+	if utilfeature.DefaultFeatureGate.Enabled(features.AtomicWriteVolumeUserFields) {
+		return
+	}
+	if podSpec == nil {
+		return
+	}
+
+	// If the pod was already using it, it can keep using it.
+	if atomicWriteVolumeUserFieldsInUse(oldPodSpec) {
+		return
+	}
+
+	for i := range podSpec.Volumes {
+		switch {
+		case podSpec.Volumes[i].Secret != nil:
+			podSpec.Volumes[i].Secret.DefaultUser = nil
+			dropUserFieldsInKeyToPaths(podSpec.Volumes[i].Secret.Items)
+		case podSpec.Volumes[i].ConfigMap != nil:
+			podSpec.Volumes[i].ConfigMap.DefaultUser = nil
+			dropUserFieldsInKeyToPaths(podSpec.Volumes[i].ConfigMap.Items)
+		case podSpec.Volumes[i].DownwardAPI != nil:
+			podSpec.Volumes[i].DownwardAPI.DefaultUser = nil
+			dropUserFieldsInDownwardAPIVolumeFiles(podSpec.Volumes[i].DownwardAPI.Items)
+		case podSpec.Volumes[i].Projected != nil:
+			podSpec.Volumes[i].Projected.DefaultUser = nil
+
+			for j := range podSpec.Volumes[i].Projected.Sources {
+				switch {
+				case podSpec.Volumes[i].Projected.Sources[j].Secret != nil:
+					dropUserFieldsInKeyToPaths(podSpec.Volumes[i].Projected.Sources[j].Secret.Items)
+				case podSpec.Volumes[i].Projected.Sources[j].DownwardAPI != nil:
+					dropUserFieldsInDownwardAPIVolumeFiles(podSpec.Volumes[i].Projected.Sources[j].DownwardAPI.Items)
+				case podSpec.Volumes[i].Projected.Sources[j].ConfigMap != nil:
+					dropUserFieldsInKeyToPaths(podSpec.Volumes[i].Projected.Sources[j].ConfigMap.Items)
+				case podSpec.Volumes[i].Projected.Sources[j].ServiceAccountToken != nil:
+					podSpec.Volumes[i].Projected.Sources[j].ServiceAccountToken.User = nil
+				case podSpec.Volumes[i].Projected.Sources[j].ClusterTrustBundle != nil:
+					podSpec.Volumes[i].Projected.Sources[j].ClusterTrustBundle.User = nil
+				case podSpec.Volumes[i].Projected.Sources[j].PodCertificate != nil:
+					podSpec.Volumes[i].Projected.Sources[j].PodCertificate.User = nil
+				}
+			}
+		}
+	}
+}
+
+func atomicWriteVolumeUserFieldsInUse(podSpec *api.PodSpec) bool {
+	if podSpec == nil {
+		return false
+	}
+
+	for i := range podSpec.Volumes {
+		if podSpec.Volumes[i].Secret != nil {
+			if podSpec.Volumes[i].Secret.DefaultUser != nil {
+				return true
+			}
+
+			for j := range podSpec.Volumes[i].Secret.Items {
+				if podSpec.Volumes[i].Secret.Items[j].User != nil {
+					return true
+				}
+			}
+		} else if podSpec.Volumes[i].ConfigMap != nil {
+			if podSpec.Volumes[i].ConfigMap.DefaultUser != nil {
+				return true
+			}
+
+			for j := range podSpec.Volumes[i].ConfigMap.Items {
+				if podSpec.Volumes[i].ConfigMap.Items[j].User != nil {
+					return true
+				}
+			}
+		} else if podSpec.Volumes[i].DownwardAPI != nil {
+			if podSpec.Volumes[i].DownwardAPI.DefaultUser != nil {
+				return true
+			}
+
+			for j := range podSpec.Volumes[i].DownwardAPI.Items {
+				if podSpec.Volumes[i].DownwardAPI.Items[j].User != nil {
+					return true
+				}
+			}
+		} else if podSpec.Volumes[i].Projected != nil {
+			if podSpec.Volumes[i].Projected.DefaultUser != nil {
+				return true
+			}
+
+			for j := range podSpec.Volumes[i].Projected.Sources {
+				if podSpec.Volumes[i].Projected.Sources[j].Secret != nil {
+					for k := range podSpec.Volumes[i].Projected.Sources[j].Secret.Items {
+						if podSpec.Volumes[i].Projected.Sources[j].Secret.Items[k].User != nil {
+							return true
+						}
+					}
+				} else if podSpec.Volumes[i].Projected.Sources[j].DownwardAPI != nil {
+					for k := range podSpec.Volumes[i].Projected.Sources[j].DownwardAPI.Items {
+						if podSpec.Volumes[i].Projected.Sources[j].DownwardAPI.Items[k].User != nil {
+							return true
+						}
+					}
+				} else if podSpec.Volumes[i].Projected.Sources[j].ConfigMap != nil {
+					for k := range podSpec.Volumes[i].Projected.Sources[j].ConfigMap.Items {
+						if podSpec.Volumes[i].Projected.Sources[j].ConfigMap.Items[k].User != nil {
+							return true
+						}
+					}
+				} else if podSpec.Volumes[i].Projected.Sources[j].ServiceAccountToken != nil {
+					if podSpec.Volumes[i].Projected.Sources[j].ServiceAccountToken.User != nil {
+						return true
+					}
+				} else if podSpec.Volumes[i].Projected.Sources[j].ClusterTrustBundle != nil {
+					if podSpec.Volumes[i].Projected.Sources[j].ClusterTrustBundle.User != nil {
+						return true
+					}
+				} else if podSpec.Volumes[i].Projected.Sources[j].PodCertificate != nil {
+					if podSpec.Volumes[i].Projected.Sources[j].PodCertificate.User != nil {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 func hasInvalidLabelValueInAffinitySelector(spec *api.PodSpec) bool {
@@ -1960,6 +2131,202 @@ func hasRestartContainerForNonSidecarInitContainer(spec *api.PodSpec) bool {
 		}
 	}
 	return false
+}
+
+// DefaultPodLevelResources runs all pod-level resource defaulting in dependency order,
+// converting container specs to v1.PodSpec once to avoid redundant conversions.
+//
+// Order matters:
+//  1. Set pod-level hugepage limits from aggregated container hugepage limits.
+//  2. Default pod-level requests from aggregated container requests (also fills requests
+//     for any resource that has a pod-level limit but no pod-level request, including
+//     hugepage limits set in step 1).
+//  3. Default pod-level limits to max(pod-level requests, aggregated container limits)
+//     for resources where all containers have limits. Step 2 must run first so that
+//     pod-level requests are complete before the max() comparison.
+func DefaultPodLevelResources(pod *api.Pod) {
+	if !utilfeature.DefaultFeatureGate.Enabled(features.PodLevelResources) ||
+		!utilfeature.DefaultFeatureGate.Enabled(features.PodLevelResourcesFixDefaulting) {
+		return
+	}
+	if pod.Spec.Resources == nil {
+		return
+	}
+	if len(pod.Spec.Resources.Requests) == 0 && len(pod.Spec.Resources.Limits) == 0 {
+		return
+	}
+
+	v1PodSpec := &apiv1.PodSpec{}
+	// Ephemeral containers are excluded here as they cannot specify resources and do not contribute
+	// to QoS or pod-level resource defaulting. If this changes, this location may need to be updated.
+	if err := corev1.Convert_core_PodSpec_To_v1_PodSpec(&api.PodSpec{
+		Containers:     pod.Spec.Containers,
+		InitContainers: pod.Spec.InitContainers,
+	}, v1PodSpec, nil); err != nil {
+		return
+	}
+	v1Pod := &apiv1.Pod{Spec: *v1PodSpec}
+
+	defaultHugePagePodLevelLimits(pod, v1Pod)
+	defaultPodLevelRequests(pod, v1Pod)
+	defaultPodLevelLimits(pod, v1Pod)
+}
+
+// defaultHugePagePodLevelLimits applies default values for pod-level hugepage limits,
+// setting pod-level hugepage limit equal to aggregated container limits if not specified.
+func defaultHugePagePodLevelLimits(pod *api.Pod, v1Pod *apiv1.Pod) {
+	if pod.Spec.Resources == nil {
+		return
+	}
+	if len(pod.Spec.Resources.Limits) == 0 && len(pod.Spec.Resources.Requests) == 0 {
+		return
+	}
+
+	podLims := pod.Spec.Resources.Limits
+	if podLims == nil {
+		podLims = make(api.ResourceList)
+	}
+
+	aggrCtrLims := resourcehelper.AggregateContainerLimits(v1Pod, resourcehelper.PodResourcesOptions{})
+	for key, aggrCtrLim := range aggrCtrLims {
+		coreKey := api.ResourceName(key)
+		// Only default hugepages here; non-hugepage resources (CPU/Memory) are overcommittable and defaulted in subsequent steps.
+		if !resourcehelper.IsSupportedPodLevelResource(key) || !helper.IsHugePageResourceName(coreKey) {
+			continue
+		}
+
+		if _, exists := pod.Spec.Resources.Requests[coreKey]; exists {
+			continue
+		}
+
+		if _, exists := podLims[coreKey]; !exists {
+			podLims[coreKey] = aggrCtrLim
+		}
+	}
+
+	if len(podLims) > 0 {
+		pod.Spec.Resources.Limits = podLims
+	}
+}
+
+// defaultPodLevelRequests applies default values for pod-level requests from aggregated container
+// requests (for overcommittable resources) and pod-level limits.
+func defaultPodLevelRequests(pod *api.Pod, v1Pod *apiv1.Pod) {
+	if pod.Spec.Resources == nil {
+		return
+	}
+	if len(pod.Spec.Resources.Requests) == 0 && len(pod.Spec.Resources.Limits) == 0 {
+		return
+	}
+
+	podReqs := pod.Spec.Resources.Requests
+	if podReqs == nil {
+		podReqs = make(api.ResourceList)
+	}
+
+	aggrCtrReqs := resourcehelper.AggregateContainerRequests(v1Pod, resourcehelper.PodResourcesOptions{})
+	for key, aggrCtrReq := range aggrCtrReqs {
+		coreKey := api.ResourceName(key)
+		if _, exists := podReqs[coreKey]; !exists && resourcehelper.IsSupportedPodLevelResource(key) && helper.IsOvercommitAllowed(coreKey) {
+			podReqs[coreKey] = aggrCtrReq
+		}
+	}
+
+	if pod.Spec.Resources.Limits != nil {
+		for key, podLim := range pod.Spec.Resources.Limits {
+			if _, exists := podReqs[key]; !exists && resourcehelper.IsSupportedPodLevelResource(apiv1.ResourceName(key)) {
+				podReqs[key] = podLim.DeepCopy()
+			}
+		}
+	}
+
+	if len(podReqs) > 0 {
+		pod.Spec.Resources.Requests = podReqs
+	}
+}
+
+// defaultPodLevelLimits sets pod-level limits equal to max(PLR request, aggregated container limits)
+// if all containers have limits set for candidate resources.
+func defaultPodLevelLimits(pod *api.Pod, v1Pod *apiv1.Pod) {
+	if pod.Spec.Resources == nil {
+		return
+	}
+	if len(pod.Spec.Resources.Requests) == 0 && len(pod.Spec.Resources.Limits) == 0 {
+		return
+	}
+
+	candidates := sets.New[api.ResourceName]()
+	// We iterate over pod-level requests because the presence of a pod-level request
+	// is the necessary signal for pod-level resource management. Due to existing
+	// defaulting logic, if a resource has container-level limits, they would be
+	// propagated to container-level requests, and then aggregated to pod-level
+	// requests (if not explicitly set). Thus, any resource that is a candidate
+	// for pod-level limit defaulting will already be present in the pod-level
+	// requests map. This makes iterating over Requests both efficient and
+	// sufficient for identifying defaulting candidates.
+	for resName := range pod.Spec.Resources.Requests {
+		if !resourcehelper.IsSupportedPodLevelResource(apiv1.ResourceName(resName)) {
+			continue
+		}
+		// If pod-level limits for that resource is already set, defaulting logic
+		// should not be applied.
+		if _, ok := pod.Spec.Resources.Limits[resName]; !ok {
+			candidates.Insert(resName)
+		}
+	}
+
+	if candidates.Len() == 0 {
+		return
+	}
+
+	aggrLimits := aggregateContainerLimits(&pod.Spec, candidates, v1Pod)
+	if aggrLimits == nil {
+		return
+	}
+
+	for resName := range candidates {
+		val, ok := aggrLimits[apiv1.ResourceName(resName)]
+		if !ok {
+			continue
+		}
+		var podReq resource.Quantity
+		if pod.Spec.Resources.Requests != nil {
+			podReq = pod.Spec.Resources.Requests[resName]
+		}
+
+		// If the pod-level request exceeds the aggregated container limits, raise the
+		// pod-level limit to match the pod-level request. This ensures the pod remains
+		// valid (requests <= limits) and prevents the apiserver from rejecting the
+		// update during subsequent validation.
+		if podReq.Cmp(val) > 0 {
+			val = podReq
+		}
+		if pod.Spec.Resources.Limits == nil {
+			pod.Spec.Resources.Limits = make(api.ResourceList)
+		}
+		pod.Spec.Resources.Limits[resName] = val
+	}
+}
+
+// aggregateContainerLimits returns the aggregated limits for candidate resources across all containers in the pod spec.
+// It also filters the candidates set, removing any resource for which not all containers have limits specified.
+func aggregateContainerLimits(spec *api.PodSpec, candidates sets.Set[api.ResourceName], v1Pod *apiv1.Pod) apiv1.ResourceList {
+	// For a resource limit to be defaulted at the pod level, all containers (including init containers
+	// and sidecars) must specify a limit for that resource.
+	VisitContainers(spec, AllContainers, func(ctr *api.Container, _ ContainerType) bool {
+		for resName := range candidates {
+			if _, ok := ctr.Resources.Limits[resName]; !ok {
+				candidates.Delete(resName)
+			}
+		}
+		return candidates.Len() > 0
+	})
+
+	if candidates.Len() == 0 {
+		return nil
+	}
+
+	return resourcehelper.AggregateContainerLimits(v1Pod, resourcehelper.PodResourcesOptions{})
 }
 
 var initContainerAnnotations = map[string]struct{}{

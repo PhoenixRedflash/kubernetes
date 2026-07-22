@@ -64,6 +64,12 @@ const (
 	// deprecated feature.
 	AllowServiceExternalIPs featuregate.Feature = "AllowServiceExternalIPs"
 
+	// owner: @gavinkflam
+	// kep: https://kep.k8s.io/5936
+	//
+	// Add user fields to control atomic write volumes file owner UID
+	AtomicWriteVolumeUserFields featuregate.Feature = "AtomicWriteVolumeUserFields"
+
 	// owner: @seans3
 	// kep: http://kep.k8s.io/4006
 	//
@@ -799,6 +805,11 @@ const (
 	// Enables specifying resources at pod-level.
 	PodLevelResources featuregate.Feature = "PodLevelResources"
 
+	// owner: @ndixita
+	//
+	// Enables PodLevelResourcesFixDefaulting.
+	PodLevelResourcesFixDefaulting featuregate.Feature = "PodLevelResourcesFixDefaulting"
+
 	// owner: @KevinTMtz
 	// key: https://kep.k8s.io/2837
 	//
@@ -1257,6 +1268,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 
 	AllowServiceExternalIPs: {
 		{Version: version.MustParse("1.0"), Default: true, PreRelease: featuregate.GA},
+	},
+
+	AtomicWriteVolumeUserFields: {
+		{Version: version.MustParse("1.37"), Default: false, PreRelease: featuregate.Alpha},
 	},
 
 	AuthorizePodWebsocketUpgradeCreatePermission: {
@@ -1773,6 +1788,7 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 
 	PLEGOnDemandRelist: {
 		{Version: version.MustParse("1.36"), Default: true, PreRelease: featuregate.Beta},
+		{Version: version.MustParse("1.37"), Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in v1.40
 	},
 
 	PersistentVolumeClaimUnusedSinceTime: {
@@ -1801,11 +1817,16 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 
 	PodLevelResourceManagers: {
 		{Version: version.MustParse("1.36"), Default: false, PreRelease: featuregate.Alpha},
+		{Version: version.MustParse("1.37"), Default: true, PreRelease: featuregate.Beta},
 	},
 
 	PodLevelResources: {
 		{Version: version.MustParse("1.32"), Default: false, PreRelease: featuregate.Alpha},
 		{Version: version.MustParse("1.34"), Default: true, PreRelease: featuregate.Beta},
+	},
+
+	PodLevelResourcesFixDefaulting: {
+		{Version: version.MustParse("1.37"), Default: true, PreRelease: featuregate.Beta},
 	},
 
 	PodLevelResourcesFixKubeletQOSClass: {
@@ -2365,6 +2386,8 @@ var defaultKubernetesFeatureGateDependencies = map[featuregate.Feature][]feature
 
 	AllowServiceExternalIPs: {},
 
+	AtomicWriteVolumeUserFields: {},
+
 	AuthorizePodWebsocketUpgradeCreatePermission: {},
 
 	CPUCFSQuotaPeriod: {},
@@ -2445,7 +2468,7 @@ var defaultKubernetesFeatureGateDependencies = map[featuregate.Feature][]feature
 
 	EnvFiles: {},
 
-	EventedPLEG: {},
+	EventedPLEG: {PLEGOnDemandRelist},
 
 	ExecProbeTimeout: {},
 
@@ -2582,6 +2605,8 @@ var defaultKubernetesFeatureGateDependencies = map[featuregate.Feature][]feature
 	PodLevelResourceManagers: {PodLevelResources},
 
 	PodLevelResources: {},
+
+	PodLevelResourcesFixDefaulting: {PodLevelResources},
 
 	PodLevelResourcesFixKubeletQOSClass: {PodLevelResources},
 
