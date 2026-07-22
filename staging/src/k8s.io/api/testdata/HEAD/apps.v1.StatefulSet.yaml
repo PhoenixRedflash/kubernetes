@@ -299,6 +299,7 @@ spec:
             - commandValue
           failureThreshold: 6
           grpc:
+            mode: modeValue
             port: 1
             service: serviceValue
           httpGet:
@@ -331,6 +332,7 @@ spec:
             - commandValue
           failureThreshold: 6
           grpc:
+            mode: modeValue
             port: 1
             service: serviceValue
           httpGet:
@@ -403,6 +405,7 @@ spec:
             - commandValue
           failureThreshold: 6
           grpc:
+            mode: modeValue
             port: 1
             service: serviceValue
           httpGet:
@@ -532,6 +535,7 @@ spec:
             - commandValue
           failureThreshold: 6
           grpc:
+            mode: modeValue
             port: 1
             service: serviceValue
           httpGet:
@@ -564,6 +568,7 @@ spec:
             - commandValue
           failureThreshold: 6
           grpc:
+            mode: modeValue
             port: 1
             service: serviceValue
           httpGet:
@@ -636,6 +641,7 @@ spec:
             - commandValue
           failureThreshold: 6
           grpc:
+            mode: modeValue
             port: 1
             service: serviceValue
           httpGet:
@@ -768,6 +774,7 @@ spec:
             - commandValue
           failureThreshold: 6
           grpc:
+            mode: modeValue
             port: 1
             service: serviceValue
           httpGet:
@@ -800,6 +807,7 @@ spec:
             - commandValue
           failureThreshold: 6
           grpc:
+            mode: modeValue
             port: 1
             service: serviceValue
           httpGet:
@@ -872,6 +880,7 @@ spec:
             - commandValue
           failureThreshold: 6
           grpc:
+            mode: modeValue
             port: 1
             service: serviceValue
           httpGet:
@@ -1391,6 +1400,12 @@ spec:
         status: statusValue
         type: typeValue
       currentVolumeAttributesClassName: currentVolumeAttributesClassNameValue
+      healthStatus:
+        healthConditions:
+        - message: messageValue
+          reason: reasonValue
+          status: statusValue
+        lastTransitionTime: "2002-01-01T01:01:01Z"
       modifyVolumeStatus:
         status: statusValue
         targetVolumeAttributesClassName: targetVolumeAttributesClassNameValue

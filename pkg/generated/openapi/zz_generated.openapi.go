@@ -644,6 +644,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		corev1.PodTemplate{}.OpenAPIModelName():                                                                         schema_k8sio_api_core_v1_PodTemplate(ref),
 		corev1.PodTemplateList{}.OpenAPIModelName():                                                                     schema_k8sio_api_core_v1_PodTemplateList(ref),
 		corev1.PodTemplateSpec{}.OpenAPIModelName():                                                                     schema_k8sio_api_core_v1_PodTemplateSpec(ref),
+		corev1.PodVolumeHealth{}.OpenAPIModelName():                                                                     schema_k8sio_api_core_v1_PodVolumeHealth(ref),
 		corev1.PortStatus{}.OpenAPIModelName():                                                                          schema_k8sio_api_core_v1_PortStatus(ref),
 		corev1.PortworxVolumeSource{}.OpenAPIModelName():                                                                schema_k8sio_api_core_v1_PortworxVolumeSource(ref),
 		corev1.PreferAvoidPodsEntry{}.OpenAPIModelName():                                                                schema_k8sio_api_core_v1_PreferAvoidPodsEntry(ref),
@@ -708,6 +709,8 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		corev1.TypedObjectReference{}.OpenAPIModelName():                                                                schema_k8sio_api_core_v1_TypedObjectReference(ref),
 		corev1.Volume{}.OpenAPIModelName():                                                                              schema_k8sio_api_core_v1_Volume(ref),
 		corev1.VolumeDevice{}.OpenAPIModelName():                                                                        schema_k8sio_api_core_v1_VolumeDevice(ref),
+		corev1.VolumeHealthCondition{}.OpenAPIModelName():                                                               schema_k8sio_api_core_v1_VolumeHealthCondition(ref),
+		corev1.VolumeHealthStatus{}.OpenAPIModelName():                                                                  schema_k8sio_api_core_v1_VolumeHealthStatus(ref),
 		corev1.VolumeMount{}.OpenAPIModelName():                                                                         schema_k8sio_api_core_v1_VolumeMount(ref),
 		corev1.VolumeMountStatus{}.OpenAPIModelName():                                                                   schema_k8sio_api_core_v1_VolumeMountStatus(ref),
 		corev1.VolumeNodeAffinity{}.OpenAPIModelName():                                                                  schema_k8sio_api_core_v1_VolumeNodeAffinity(ref),
@@ -1057,11 +1060,14 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha3.DeviceTaintRuleSpec{}.OpenAPIModelName():                                                               schema_k8sio_api_resource_v1alpha3_DeviceTaintRuleSpec(ref),
 		v1alpha3.DeviceTaintRuleStatus{}.OpenAPIModelName():                                                             schema_k8sio_api_resource_v1alpha3_DeviceTaintRuleStatus(ref),
 		v1alpha3.DeviceTaintSelector{}.OpenAPIModelName():                                                               schema_k8sio_api_resource_v1alpha3_DeviceTaintSelector(ref),
+		v1alpha3.PartitionTypeStatus{}.OpenAPIModelName():                                                               schema_k8sio_api_resource_v1alpha3_PartitionTypeStatus(ref),
 		v1alpha3.PoolStatus{}.OpenAPIModelName():                                                                        schema_k8sio_api_resource_v1alpha3_PoolStatus(ref),
 		v1alpha3.ResourcePoolStatusRequest{}.OpenAPIModelName():                                                         schema_k8sio_api_resource_v1alpha3_ResourcePoolStatusRequest(ref),
 		v1alpha3.ResourcePoolStatusRequestList{}.OpenAPIModelName():                                                     schema_k8sio_api_resource_v1alpha3_ResourcePoolStatusRequestList(ref),
 		v1alpha3.ResourcePoolStatusRequestSpec{}.OpenAPIModelName():                                                     schema_k8sio_api_resource_v1alpha3_ResourcePoolStatusRequestSpec(ref),
 		v1alpha3.ResourcePoolStatusRequestStatus{}.OpenAPIModelName():                                                   schema_k8sio_api_resource_v1alpha3_ResourcePoolStatusRequestStatus(ref),
+		v1alpha3.ShareableCapacityStatus{}.OpenAPIModelName():                                                           schema_k8sio_api_resource_v1alpha3_ShareableCapacityStatus(ref),
+		v1alpha3.ShareableSummaryStatus{}.OpenAPIModelName():                                                            schema_k8sio_api_resource_v1alpha3_ShareableSummaryStatus(ref),
 		resourcev1beta1.AllocatedDeviceStatus{}.OpenAPIModelName():                                                      schema_k8sio_api_resource_v1beta1_AllocatedDeviceStatus(ref),
 		resourcev1beta1.AllocationResult{}.OpenAPIModelName():                                                           schema_k8sio_api_resource_v1beta1_AllocationResult(ref),
 		resourcev1beta1.BasicDevice{}.OpenAPIModelName():                                                                schema_k8sio_api_resource_v1beta1_BasicDevice(ref),
@@ -1157,9 +1163,11 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		resourcev1beta2.ResourceSliceSpec{}.OpenAPIModelName():                                                          schema_k8sio_api_resource_v1beta2_ResourceSliceSpec(ref),
 		schedulingv1.PriorityClass{}.OpenAPIModelName():                                                                 schema_k8sio_api_scheduling_v1_PriorityClass(ref),
 		schedulingv1.PriorityClassList{}.OpenAPIModelName():                                                             schema_k8sio_api_scheduling_v1_PriorityClassList(ref),
+		schedulingv1alpha3.AllCompositeDisruptionMode{}.OpenAPIModelName():                                              schema_k8sio_api_scheduling_v1alpha3_AllCompositeDisruptionMode(ref),
 		schedulingv1alpha3.AllDisruptionMode{}.OpenAPIModelName():                                                       schema_k8sio_api_scheduling_v1alpha3_AllDisruptionMode(ref),
 		schedulingv1alpha3.BasicSchedulingPolicy{}.OpenAPIModelName():                                                   schema_k8sio_api_scheduling_v1alpha3_BasicSchedulingPolicy(ref),
 		schedulingv1alpha3.CompositeBasicSchedulingPolicy{}.OpenAPIModelName():                                          schema_k8sio_api_scheduling_v1alpha3_CompositeBasicSchedulingPolicy(ref),
+		schedulingv1alpha3.CompositeDisruptionMode{}.OpenAPIModelName():                                                 schema_k8sio_api_scheduling_v1alpha3_CompositeDisruptionMode(ref),
 		schedulingv1alpha3.CompositeGangSchedulingPolicy{}.OpenAPIModelName():                                           schema_k8sio_api_scheduling_v1alpha3_CompositeGangSchedulingPolicy(ref),
 		schedulingv1alpha3.CompositePodGroup{}.OpenAPIModelName():                                                       schema_k8sio_api_scheduling_v1alpha3_CompositePodGroup(ref),
 		schedulingv1alpha3.CompositePodGroupList{}.OpenAPIModelName():                                                   schema_k8sio_api_scheduling_v1alpha3_CompositePodGroupList(ref),
@@ -1179,6 +1187,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		schedulingv1alpha3.PodGroupSpec{}.OpenAPIModelName():                                                            schema_k8sio_api_scheduling_v1alpha3_PodGroupSpec(ref),
 		schedulingv1alpha3.PodGroupStatus{}.OpenAPIModelName():                                                          schema_k8sio_api_scheduling_v1alpha3_PodGroupStatus(ref),
 		schedulingv1alpha3.PodGroupTemplate{}.OpenAPIModelName():                                                        schema_k8sio_api_scheduling_v1alpha3_PodGroupTemplate(ref),
+		schedulingv1alpha3.SingleCompositeDisruptionMode{}.OpenAPIModelName():                                           schema_k8sio_api_scheduling_v1alpha3_SingleCompositeDisruptionMode(ref),
 		schedulingv1alpha3.SingleDisruptionMode{}.OpenAPIModelName():                                                    schema_k8sio_api_scheduling_v1alpha3_SingleDisruptionMode(ref),
 		schedulingv1alpha3.TopologyConstraint{}.OpenAPIModelName():                                                      schema_k8sio_api_scheduling_v1alpha3_TopologyConstraint(ref),
 		schedulingv1alpha3.TypedLocalObjectReference{}.OpenAPIModelName():                                               schema_k8sio_api_scheduling_v1alpha3_TypedLocalObjectReference(ref),
@@ -1194,9 +1203,11 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		schedulingv1alpha3.WorkloadPodGroupSingleDisruptionMode{}.OpenAPIModelName():                                    schema_k8sio_api_scheduling_v1alpha3_WorkloadPodGroupSingleDisruptionMode(ref),
 		schedulingv1alpha3.WorkloadReference{}.OpenAPIModelName():                                                       schema_k8sio_api_scheduling_v1alpha3_WorkloadReference(ref),
 		schedulingv1alpha3.WorkloadSpec{}.OpenAPIModelName():                                                            schema_k8sio_api_scheduling_v1alpha3_WorkloadSpec(ref),
+		schedulingv1beta1.AllCompositeDisruptionMode{}.OpenAPIModelName():                                               schema_k8sio_api_scheduling_v1beta1_AllCompositeDisruptionMode(ref),
 		schedulingv1beta1.AllDisruptionMode{}.OpenAPIModelName():                                                        schema_k8sio_api_scheduling_v1beta1_AllDisruptionMode(ref),
 		schedulingv1beta1.BasicSchedulingPolicy{}.OpenAPIModelName():                                                    schema_k8sio_api_scheduling_v1beta1_BasicSchedulingPolicy(ref),
 		schedulingv1beta1.CompositeBasicSchedulingPolicy{}.OpenAPIModelName():                                           schema_k8sio_api_scheduling_v1beta1_CompositeBasicSchedulingPolicy(ref),
+		schedulingv1beta1.CompositeDisruptionMode{}.OpenAPIModelName():                                                  schema_k8sio_api_scheduling_v1beta1_CompositeDisruptionMode(ref),
 		schedulingv1beta1.CompositeGangSchedulingPolicy{}.OpenAPIModelName():                                            schema_k8sio_api_scheduling_v1beta1_CompositeGangSchedulingPolicy(ref),
 		schedulingv1beta1.CompositePodGroupSchedulingConstraints{}.OpenAPIModelName():                                   schema_k8sio_api_scheduling_v1beta1_CompositePodGroupSchedulingConstraints(ref),
 		schedulingv1beta1.CompositePodGroupSchedulingPolicy{}.OpenAPIModelName():                                        schema_k8sio_api_scheduling_v1beta1_CompositePodGroupSchedulingPolicy(ref),
@@ -1214,6 +1225,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		schedulingv1beta1.PodGroupTemplate{}.OpenAPIModelName():                                                         schema_k8sio_api_scheduling_v1beta1_PodGroupTemplate(ref),
 		schedulingv1beta1.PriorityClass{}.OpenAPIModelName():                                                            schema_k8sio_api_scheduling_v1beta1_PriorityClass(ref),
 		schedulingv1beta1.PriorityClassList{}.OpenAPIModelName():                                                        schema_k8sio_api_scheduling_v1beta1_PriorityClassList(ref),
+		schedulingv1beta1.SingleCompositeDisruptionMode{}.OpenAPIModelName():                                            schema_k8sio_api_scheduling_v1beta1_SingleCompositeDisruptionMode(ref),
 		schedulingv1beta1.SingleDisruptionMode{}.OpenAPIModelName():                                                     schema_k8sio_api_scheduling_v1beta1_SingleDisruptionMode(ref),
 		schedulingv1beta1.TopologyConstraint{}.OpenAPIModelName():                                                       schema_k8sio_api_scheduling_v1beta1_TopologyConstraint(ref),
 		schedulingv1beta1.TypedLocalObjectReference{}.OpenAPIModelName():                                                schema_k8sio_api_scheduling_v1beta1_TypedLocalObjectReference(ref),
@@ -1228,10 +1240,13 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		storagev1.CSINodeDriver{}.OpenAPIModelName():                                                                    schema_k8sio_api_storage_v1_CSINodeDriver(ref),
 		storagev1.CSINodeList{}.OpenAPIModelName():                                                                      schema_k8sio_api_storage_v1_CSINodeList(ref),
 		storagev1.CSINodeSpec{}.OpenAPIModelName():                                                                      schema_k8sio_api_storage_v1_CSINodeSpec(ref),
+		storagev1.CSINodeStatus{}.OpenAPIModelName():                                                                    schema_k8sio_api_storage_v1_CSINodeStatus(ref),
 		storagev1.CSIStorageCapacity{}.OpenAPIModelName():                                                               schema_k8sio_api_storage_v1_CSIStorageCapacity(ref),
 		storagev1.CSIStorageCapacityList{}.OpenAPIModelName():                                                           schema_k8sio_api_storage_v1_CSIStorageCapacityList(ref),
 		storagev1.StorageClass{}.OpenAPIModelName():                                                                     schema_k8sio_api_storage_v1_StorageClass(ref),
 		storagev1.StorageClassList{}.OpenAPIModelName():                                                                 schema_k8sio_api_storage_v1_StorageClassList(ref),
+		storagev1.StorageHealth{}.OpenAPIModelName():                                                                    schema_k8sio_api_storage_v1_StorageHealth(ref),
+		storagev1.StorageHealthCondition{}.OpenAPIModelName():                                                           schema_k8sio_api_storage_v1_StorageHealthCondition(ref),
 		storagev1.TokenRequest{}.OpenAPIModelName():                                                                     schema_k8sio_api_storage_v1_TokenRequest(ref),
 		storagev1.VolumeAttachment{}.OpenAPIModelName():                                                                 schema_k8sio_api_storage_v1_VolumeAttachment(ref),
 		storagev1.VolumeAttachmentList{}.OpenAPIModelName():                                                             schema_k8sio_api_storage_v1_VolumeAttachmentList(ref),
@@ -1259,10 +1274,13 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		storagev1beta1.CSINodeDriver{}.OpenAPIModelName():                                                               schema_k8sio_api_storage_v1beta1_CSINodeDriver(ref),
 		storagev1beta1.CSINodeList{}.OpenAPIModelName():                                                                 schema_k8sio_api_storage_v1beta1_CSINodeList(ref),
 		storagev1beta1.CSINodeSpec{}.OpenAPIModelName():                                                                 schema_k8sio_api_storage_v1beta1_CSINodeSpec(ref),
+		storagev1beta1.CSINodeStatus{}.OpenAPIModelName():                                                               schema_k8sio_api_storage_v1beta1_CSINodeStatus(ref),
 		storagev1beta1.CSIStorageCapacity{}.OpenAPIModelName():                                                          schema_k8sio_api_storage_v1beta1_CSIStorageCapacity(ref),
 		storagev1beta1.CSIStorageCapacityList{}.OpenAPIModelName():                                                      schema_k8sio_api_storage_v1beta1_CSIStorageCapacityList(ref),
 		storagev1beta1.StorageClass{}.OpenAPIModelName():                                                                schema_k8sio_api_storage_v1beta1_StorageClass(ref),
 		storagev1beta1.StorageClassList{}.OpenAPIModelName():                                                            schema_k8sio_api_storage_v1beta1_StorageClassList(ref),
+		storagev1beta1.StorageHealth{}.OpenAPIModelName():                                                               schema_k8sio_api_storage_v1beta1_StorageHealth(ref),
+		storagev1beta1.StorageHealthCondition{}.OpenAPIModelName():                                                      schema_k8sio_api_storage_v1beta1_StorageHealthCondition(ref),
 		storagev1beta1.TokenRequest{}.OpenAPIModelName():                                                                schema_k8sio_api_storage_v1beta1_TokenRequest(ref),
 		storagev1beta1.VolumeAttachment{}.OpenAPIModelName():                                                            schema_k8sio_api_storage_v1beta1_VolumeAttachment(ref),
 		storagev1beta1.VolumeAttachmentList{}.OpenAPIModelName():                                                        schema_k8sio_api_storage_v1beta1_VolumeAttachmentList(ref),
@@ -23823,6 +23841,14 @@ func schema_k8sio_api_core_v1_GRPCAction(ref common.ReferenceCallback) common.Op
 							Format:      "",
 						},
 					},
+					"mode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "mode specifies the connection mode for the gRPC health probe. Set to \"TLS\" to use TLS without certificate verification. Set to \"Plaintext\" to use a plaintext (insecure) connection explicitly. If not specified, the probe uses a plaintext (insecure) connection.\n\nPossible enum values:\n - `\"Plaintext\"` indicates that the probe should use a plaintext (insecure) gRPC connection.\n - `\"TLS\"` indicates that the probe should connect using TLS without certificate verification.",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Plaintext", "TLS"},
+						},
+					},
 				},
 				Required: []string{"port"},
 			},
@@ -26884,11 +26910,17 @@ func schema_k8sio_api_core_v1_PersistentVolumeClaimStatus(ref common.ReferenceCa
 							Ref:         ref(corev1.ModifyVolumeStatus{}.OpenAPIModelName()),
 						},
 					},
+					"healthStatus": {
+						SchemaProps: spec.SchemaProps{
+							Description: "healthStatus contains the latest controller-reported health information for the volume bound to this claim.",
+							Ref:         ref(corev1.VolumeHealthStatus{}.OpenAPIModelName()),
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			corev1.ModifyVolumeStatus{}.OpenAPIModelName(), corev1.PersistentVolumeClaimCondition{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+			corev1.ModifyVolumeStatus{}.OpenAPIModelName(), corev1.PersistentVolumeClaimCondition{}.OpenAPIModelName(), corev1.VolumeHealthStatus{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
 	}
 }
 
@@ -29458,11 +29490,32 @@ func schema_k8sio_api_core_v1_PodStatus(ref common.ReferenceCallback) common.Ope
 							},
 						},
 					},
+					"volumeHealth": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "volumeHealth contains node-reported health for each volume the pod is using. Populated by the kubelet on the pod's node.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(corev1.PodVolumeHealth{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			corev1.ContainerStatus{}.OpenAPIModelName(), corev1.HostIP{}.OpenAPIModelName(), corev1.NodeAllocatableResourceClaimStatus{}.OpenAPIModelName(), corev1.PodCondition{}.OpenAPIModelName(), corev1.PodExtendedResourceClaimStatus{}.OpenAPIModelName(), corev1.PodIP{}.OpenAPIModelName(), corev1.PodResourceClaimStatus{}.OpenAPIModelName(), corev1.ResourceRequirements{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName(), metav1.Time{}.OpenAPIModelName()},
+			corev1.ContainerStatus{}.OpenAPIModelName(), corev1.HostIP{}.OpenAPIModelName(), corev1.NodeAllocatableResourceClaimStatus{}.OpenAPIModelName(), corev1.PodCondition{}.OpenAPIModelName(), corev1.PodExtendedResourceClaimStatus{}.OpenAPIModelName(), corev1.PodIP{}.OpenAPIModelName(), corev1.PodResourceClaimStatus{}.OpenAPIModelName(), corev1.PodVolumeHealth{}.OpenAPIModelName(), corev1.ResourceRequirements{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName(), metav1.Time{}.OpenAPIModelName()},
 	}
 }
 
@@ -29585,6 +29638,60 @@ func schema_k8sio_api_core_v1_PodTemplateSpec(ref common.ReferenceCallback) comm
 		},
 		Dependencies: []string{
 			corev1.PodSpec{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_k8sio_api_core_v1_PodVolumeHealth(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "PodVolumeHealth contains health information for a volume used by a pod, reported by the CSI node plugin via the kubelet.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "name matches an entry in pod.spec.volumes.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"healthConditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"status",
+									"reason",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "status",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "conditions is the set of adverse conditions reported by the CSI node plugin for this volume on this node. At most 16 conditions may be reported.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(corev1.VolumeHealthCondition{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"lastTransitionTime": {
+						SchemaProps: spec.SchemaProps{
+							Description: "lastTransitionTime is when the current set of conditions first appeared.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+		Dependencies: []string{
+			corev1.VolumeHealthCondition{}.OpenAPIModelName(), metav1.Time{}.OpenAPIModelName()},
 	}
 }
 
@@ -30849,7 +30956,7 @@ func schema_k8sio_api_core_v1_ResourceStatus(ref common.ReferenceCallback) commo
 				Properties: map[string]spec.Schema{
 					"name": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Name of the resource. Must be unique within the pod and in case of non-DRA resource, match one of the resources from the pod spec. For DRA resources, the value must be \"claim:<claim_name>/<request>\". When this status is reported about a container, the \"claim_name\" and \"request\" must match one of the claims of this container.",
+							Description: "Name of the resource. Must be unique within the pod and in case of non-DRA resource, match one of the resources from the pod spec. For DRA resources, the value must be \"claim:<claim_name>/<request>\" when container.resources.claims[*].request is set or \"claim:<claim_name>\" when container.resources.claims[*].request is empty. For DRA-backed extended resources, \"claim:<claim_name>/<request>\" is used when the claim name and request name are recorded in pod.status.extendedResourceClaimStatus. When this status is reported about a container, the \"claim_name\" and \"request\" must match one of the claims of this container.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -33142,6 +33249,89 @@ func schema_k8sio_api_core_v1_VolumeDevice(ref common.ReferenceCallback) common.
 				Required: []string{"name", "devicePath"},
 			},
 		},
+	}
+}
+
+func schema_k8sio_api_core_v1_VolumeHealthCondition(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "VolumeHealthCondition represents an adverse health condition reported for a volume.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Description: "status is the machine-parseable health category. Possible values: - \"Inaccessible\": the volume cannot be accessed. - \"DataLoss\": data loss has been detected on the volume. - \"Degraded\": the volume is functioning with reduced capability.\n\nPossible enum values:\n - `\"DataLoss\"` indicates data loss has been detected on the volume.\n - `\"Degraded\"` indicates the volume is functioning but with reduced capability.\n - `\"Inaccessible\"` indicates the volume cannot be accessed.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"DataLoss", "Degraded", "Inaccessible"},
+						},
+					},
+					"reason": {
+						SchemaProps: spec.SchemaProps{
+							Description: "reason is a brief CamelCase machine-parseable reason. Together with status it forms the unique identity of a condition entry. Maximum permitted length of a reason is 256 bytes.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"message": {
+						SchemaProps: spec.SchemaProps{
+							Description: "message is a human-readable description. Maximum permitted length of a message is 1024 bytes.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"status", "reason"},
+			},
+		},
+	}
+}
+
+func schema_k8sio_api_core_v1_VolumeHealthStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "VolumeHealthStatus contains health information for a volume reported by the CSI controller plugin.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"healthConditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"status",
+									"reason",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "status",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "conditions is the set of adverse conditions reported by the CSI controller plugin. An empty list means no adverse condition. At most 16 conditions may be reported.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(corev1.VolumeHealthCondition{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"lastTransitionTime": {
+						SchemaProps: spec.SchemaProps{
+							Description: "lastTransitionTime is when the current set of conditions first appeared.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			corev1.VolumeHealthCondition{}.OpenAPIModelName(), metav1.Time{}.OpenAPIModelName()},
 	}
 }
 
@@ -49329,6 +49519,13 @@ func schema_k8sio_api_resource_v1_ResourceSliceSpec(ref common.ReferenceCallback
 							},
 						},
 					},
+					"partitionTypeAttribute": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PartitionTypeAttribute names a string device attribute (by fully qualified name, e.g. \"gpu.example.com/profile\") whose value labels each device with its partition type, such as \"Full\" or \"Half\" for a MIG-style GPU.\n\nWhen set, every partitionable device in the slice must carry the attribute and devices sharing a value must share the same ConsumesCounters cost.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
 				Required: []string{"driver", "pool"},
 			},
@@ -49629,6 +49826,48 @@ func schema_k8sio_api_resource_v1alpha3_DeviceTaintSelector(ref common.Reference
 	}
 }
 
+func schema_k8sio_api_resource_v1alpha3_PartitionTypeStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "PartitionTypeStatus reports allocatability for a single partition type, identified by the value of a grouping attribute.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"attribute": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Attribute is the fully qualified name of the device attribute whose value groups this entry. It is the PartitionTypeAttribute declared by the devices' own slice, or the default named in the request when their slice declares none.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"type": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Type is the partition type value (e.g. \"Full\" or \"Half\").",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"total": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Total is the number of devices of this partition type in the pool.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"allocatable": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Allocatable is the number of additional devices of this partition type that could still be allocated given current shared-counter consumption.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"attribute", "type", "total", "allocatable"},
+			},
+		},
+	}
+}
+
 func schema_k8sio_api_resource_v1alpha3_PoolStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -49707,10 +49946,36 @@ func schema_k8sio_api_resource_v1alpha3_PoolStatus(ref common.ReferenceCallback)
 							Format:      "",
 						},
 					},
+					"partitionSummary": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "PartitionSummary reports allocatability per (attribute, partition type) for a partitionable pool that publishes SharedCounters. Each entry names the grouping attribute it was resolved from: the PartitionTypeAttribute declared by a device's own slice, or for devices whose slice declares none, the default named in the request. A pool that mixes partitions declared under different attributes reports each independently. When no slice declares an attribute and the request names no default, the pool reports no partition summary.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha3.PartitionTypeStatus{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"shareableSummary": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ShareableSummary reports aggregate capacity for a pool that contains devices with AllowMultipleAllocations. It is populated only when at least one device in the pool is shareable.",
+							Ref:         ref(v1alpha3.ShareableSummaryStatus{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"driver", "poolName", "generation"},
 			},
 		},
+		Dependencies: []string{
+			v1alpha3.PartitionTypeStatus{}.OpenAPIModelName(), v1alpha3.ShareableSummaryStatus{}.OpenAPIModelName()},
 	}
 }
 
@@ -49844,6 +50109,13 @@ func schema_k8sio_api_resource_v1alpha3_ResourcePoolStatusRequestSpec(ref common
 							Format:      "int32",
 						},
 					},
+					"defaultPartitionTypeAttribute": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DefaultPartitionTypeAttribute optionally names a device attribute (by its fully qualified name, e.g. \"gpu.example.com/profile\") to use as the default grouping attribute for partitionable devices whose slice has not declared one themselves.\n\nA slice's own PartitionTypeAttribute always takes precedence. This default applies only to devices whose slice does not declare one, so that a request can still get an accurate partitionSummary from a driver that has not been updated to declare it. When neither the slice nor this default names an attribute, a partitionable pool reports no partitionSummary.\n\nMust include the domain qualifier.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
 				Required: []string{"driver"},
 			},
@@ -49912,6 +50184,95 @@ func schema_k8sio_api_resource_v1alpha3_ResourcePoolStatusRequestStatus(ref comm
 		},
 		Dependencies: []string{
 			v1alpha3.PoolStatus{}.OpenAPIModelName(), metav1.Condition{}.OpenAPIModelName()},
+	}
+}
+
+func schema_k8sio_api_resource_v1alpha3_ShareableCapacityStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ShareableCapacityStatus reports aggregate amounts for a single shareable capacity key.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the capacity name.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"total": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Total is the sum of this capacity across shareable devices in the pool.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"consumed": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Consumed is the amount drawn by current allocations.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"available": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Available is Total minus Consumed, never negative.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"name", "total", "consumed", "available"},
+			},
+		},
+		Dependencies: []string{
+			resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_k8sio_api_resource_v1alpha3_ShareableSummaryStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ShareableSummaryStatus reports aggregate capacity for a pool that contains devices with AllowMultipleAllocations.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"fullyAvailableDevices": {
+						SchemaProps: spec.SchemaProps{
+							Description: "FullyAvailableDevices is the number of shareable devices with no capacity consumed.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"partiallyAvailableDevices": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PartiallyAvailableDevices is the number of shareable devices with some but not all capacity consumed.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"capacity": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Capacity reports aggregate total, consumed, and available amounts per shareable capacity key across the pool.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha3.ShareableCapacityStatus{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"fullyAvailableDevices", "partiallyAvailableDevices"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha3.ShareableCapacityStatus{}.OpenAPIModelName()},
 	}
 }
 
@@ -52175,6 +52536,13 @@ func schema_k8sio_api_resource_v1beta1_ResourceSliceSpec(ref common.ReferenceCal
 									},
 								},
 							},
+						},
+					},
+					"partitionTypeAttribute": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PartitionTypeAttribute names a string device attribute (by fully qualified name, e.g. \"gpu.example.com/profile\") whose value labels each device with its partition type, such as \"Full\" or \"Half\" for a MIG-style GPU.\n\nWhen set, every partitionable device in the slice must carry the attribute and devices sharing a value must share the same ConsumesCounters cost.",
+							Type:        []string{"string"},
+							Format:      "",
 						},
 					},
 				},
@@ -54651,6 +55019,13 @@ func schema_k8sio_api_resource_v1beta2_ResourceSliceSpec(ref common.ReferenceCal
 							},
 						},
 					},
+					"partitionTypeAttribute": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PartitionTypeAttribute names a string device attribute (by fully qualified name, e.g. \"gpu.example.com/profile\") whose value labels each device with its partition type, such as \"Full\" or \"Half\" for a MIG-style GPU.\n\nWhen set, every partitionable device in the slice must carry the attribute and devices sharing a value must share the same ConsumesCounters cost.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
 				Required: []string{"driver", "pool"},
 			},
@@ -54776,6 +55151,17 @@ func schema_k8sio_api_scheduling_v1_PriorityClassList(ref common.ReferenceCallba
 	}
 }
 
+func schema_k8sio_api_scheduling_v1alpha3_AllCompositeDisruptionMode(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AllCompositeDisruptionMode means that children of a CompositePodGroup can only be disrupted or preempted together.",
+				Type:        []string{"object"},
+			},
+		},
+	}
+}
+
 func schema_k8sio_api_scheduling_v1alpha3_AllDisruptionMode(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -54806,6 +55192,45 @@ func schema_k8sio_api_scheduling_v1alpha3_CompositeBasicSchedulingPolicy(ref com
 				Type:        []string{"object"},
 			},
 		},
+	}
+}
+
+func schema_k8sio_api_scheduling_v1alpha3_CompositeDisruptionMode(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "CompositeDisruptionMode defines how individual entities within a composite pod group can be disrupted. Exactly one mode must be set.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"single": {
+						SchemaProps: spec.SchemaProps{
+							Description: "single specifies that children groups can be disrupted independently from each other.",
+							Ref:         ref(schedulingv1alpha3.SingleCompositeDisruptionMode{}.OpenAPIModelName()),
+						},
+					},
+					"all": {
+						SchemaProps: spec.SchemaProps{
+							Description: "all specifies that all children groups can only be disrupted together.",
+							Ref:         ref(schedulingv1alpha3.AllCompositeDisruptionMode{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+			VendorExtensible: spec.VendorExtensible{
+				Extensions: spec.Extensions{
+					"x-kubernetes-unions": []interface{}{
+						map[string]interface{}{
+							"fields-to-discriminateBy": map[string]interface{}{
+								"all":    "All",
+								"single": "Single",
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			schedulingv1alpha3.AllCompositeDisruptionMode{}.OpenAPIModelName(), schedulingv1alpha3.SingleCompositeDisruptionMode{}.OpenAPIModelName()},
 	}
 }
 
@@ -55031,6 +55456,19 @@ func schema_k8sio_api_scheduling_v1alpha3_CompositePodGroupSpec(ref common.Refer
 							Ref:         ref(schedulingv1alpha3.CompositePodGroupSchedulingPolicy{}.OpenAPIModelName()),
 						},
 					},
+					"schedulingConstraints": {
+						SchemaProps: spec.SchemaProps{
+							Description: "schedulingConstraints defines optional scheduling constraints (e.g. topology) for this CompositePodGroup. Controllers are expected to fill this field by copying it from a CompositePodGroupTemplate. This field is immutable.",
+							Ref:         ref(schedulingv1alpha3.CompositePodGroupSchedulingConstraints{}.OpenAPIModelName()),
+						},
+					},
+					"disruptionMode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "disruptionMode defines the mode in which a given CompositePodGroup can be disrupted. Controllers are expected to fill this field by copying it from a CompositePodGroupTemplate. One of Single, All. Defaults to Single if unset. This field is immutable.",
+							Default:     map[string]interface{}{"single": map[string]interface{}{}},
+							Ref:         ref(schedulingv1alpha3.CompositeDisruptionMode{}.OpenAPIModelName()),
+						},
+					},
 					"priorityClassName": {
 						SchemaProps: spec.SchemaProps{
 							Description: "priorityClassName defines the priority that should be considered when scheduling this CompositePodGroup. Controllers are expected to fill this field by copying it from a CompositePodGroupTemplate. If left unspecified, it is validated and resolved similarly to the PriorityClassName field in Pods (i.e. if no priority class is specified, admission control can set this to the global default priority class if it exists. Otherwise, the composite pod group's priority will be zero). This field is immutable.",
@@ -55045,10 +55483,12 @@ func schema_k8sio_api_scheduling_v1alpha3_CompositePodGroupSpec(ref common.Refer
 							Format:      "int32",
 						},
 					},
-					"schedulingConstraints": {
+					"preemptionPolicy": {
 						SchemaProps: spec.SchemaProps{
-							Description: "schedulingConstraints defines optional scheduling constraints (e.g. topology) for this CompositePodGroup. Controllers are expected to fill this field by copying it from a CompositePodGroupTemplate. This field is immutable.",
-							Ref:         ref(schedulingv1alpha3.CompositePodGroupSchedulingConstraints{}.OpenAPIModelName()),
+							Description: "preemptionPolicy is the Policy for preempting pods/podgroups with lower priority. One of Never, PreemptLowerPriority. Defaults to PreemptLowerPriority if unset. When Priority Admission Controller is enabled, it populates this field from PriorityClassName, and defaults to PreemptLowerPriority if value is unset in PriorityClass. This field is immutable. This field is available only when the PodGroupPreemptionPolicy feature gate is enabled.\n\n\nPossible enum values:\n - `\"Never\"` means that pod never preempts other pods with lower priority.\n - `\"PreemptLowerPriority\"` means that pod can preempt other pods with lower priority.",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Never", "PreemptLowerPriority"},
 						},
 					},
 				},
@@ -55056,7 +55496,7 @@ func schema_k8sio_api_scheduling_v1alpha3_CompositePodGroupSpec(ref common.Refer
 			},
 		},
 		Dependencies: []string{
-			schedulingv1alpha3.CompositePodGroupSchedulingConstraints{}.OpenAPIModelName(), schedulingv1alpha3.CompositePodGroupSchedulingPolicy{}.OpenAPIModelName(), schedulingv1alpha3.WorkloadReference{}.OpenAPIModelName()},
+			schedulingv1alpha3.CompositeDisruptionMode{}.OpenAPIModelName(), schedulingv1alpha3.CompositePodGroupSchedulingConstraints{}.OpenAPIModelName(), schedulingv1alpha3.CompositePodGroupSchedulingPolicy{}.OpenAPIModelName(), schedulingv1alpha3.WorkloadReference{}.OpenAPIModelName()},
 	}
 }
 
@@ -55120,6 +55560,18 @@ func schema_k8sio_api_scheduling_v1alpha3_CompositePodGroupTemplate(ref common.R
 							Ref:         ref(schedulingv1alpha3.CompositePodGroupSchedulingPolicy{}.OpenAPIModelName()),
 						},
 					},
+					"schedulingConstraints": {
+						SchemaProps: spec.SchemaProps{
+							Description: "schedulingConstraints defines optional scheduling constraints (e.g. topology) for this CompositePodGroupTemplate. This field is immutable.",
+							Ref:         ref(schedulingv1alpha3.CompositePodGroupSchedulingConstraints{}.OpenAPIModelName()),
+						},
+					},
+					"disruptionMode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "disruptionMode defines the mode in which a given CompositePodGroup can be disrupted. One of Single, All. This field is immutable.",
+							Ref:         ref(schedulingv1alpha3.CompositeDisruptionMode{}.OpenAPIModelName()),
+						},
+					},
 					"priorityClassName": {
 						SchemaProps: spec.SchemaProps{
 							Description: "priorityClassName indicates the priority that should be considered when scheduling a composite pod group created from this template. If no priority class is specified, admission control can set this to the global default priority class if it exists. Otherwise, composite pod groups created from this template will have the priority set to zero. This field is immutable.",
@@ -55132,6 +55584,14 @@ func schema_k8sio_api_scheduling_v1alpha3_CompositePodGroupTemplate(ref common.R
 							Description: "priority is the value of priority of composite pod groups created from this template. Various system components use this field to find the priority of the composite pod group. When Priority Admission Controller is enabled, it prevents users from setting this field. The admission controller populates this field from PriorityClassName. The higher the value, the higher the priority. This field is immutable.",
 							Type:        []string{"integer"},
 							Format:      "int32",
+						},
+					},
+					"preemptionPolicy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "preemptionPolicy is the Policy for preempting pods/podgroups with lower priority. One of Never, PreemptLowerPriority. This field is immutable. This field is available only when the PodGroupPreemptionPolicy feature gate is enabled.\n\n\nPossible enum values:\n - `\"Never\"` means that pod never preempts other pods with lower priority.\n - `\"PreemptLowerPriority\"` means that pod can preempt other pods with lower priority.",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Never", "PreemptLowerPriority"},
 						},
 					},
 					"podGroupTemplates": {
@@ -55176,18 +55636,12 @@ func schema_k8sio_api_scheduling_v1alpha3_CompositePodGroupTemplate(ref common.R
 							},
 						},
 					},
-					"schedulingConstraints": {
-						SchemaProps: spec.SchemaProps{
-							Description: "schedulingConstraints defines optional scheduling constraints (e.g. topology) for this CompositePodGroupTemplate. This field is immutable.",
-							Ref:         ref(schedulingv1alpha3.CompositePodGroupSchedulingConstraints{}.OpenAPIModelName()),
-						},
-					},
 				},
 				Required: []string{"name", "schedulingPolicy"},
 			},
 		},
 		Dependencies: []string{
-			schedulingv1alpha3.CompositePodGroupSchedulingConstraints{}.OpenAPIModelName(), schedulingv1alpha3.CompositePodGroupSchedulingPolicy{}.OpenAPIModelName(), schedulingv1alpha3.CompositePodGroupTemplate{}.OpenAPIModelName(), schedulingv1alpha3.PodGroupTemplate{}.OpenAPIModelName()},
+			schedulingv1alpha3.CompositeDisruptionMode{}.OpenAPIModelName(), schedulingv1alpha3.CompositePodGroupSchedulingConstraints{}.OpenAPIModelName(), schedulingv1alpha3.CompositePodGroupSchedulingPolicy{}.OpenAPIModelName(), schedulingv1alpha3.CompositePodGroupTemplate{}.OpenAPIModelName(), schedulingv1alpha3.PodGroupTemplate{}.OpenAPIModelName()},
 	}
 }
 
@@ -55733,6 +56187,17 @@ func schema_k8sio_api_scheduling_v1alpha3_PodGroupTemplate(ref common.ReferenceC
 	}
 }
 
+func schema_k8sio_api_scheduling_v1alpha3_SingleCompositeDisruptionMode(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "SingleCompositeDisruptionMode means that individual children of a CompositePodGroup can be disrupted or preempted independently.",
+				Type:        []string{"object"},
+			},
+		},
+	}
+}
+
 func schema_k8sio_api_scheduling_v1alpha3_SingleDisruptionMode(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -56190,6 +56655,17 @@ func schema_k8sio_api_scheduling_v1alpha3_WorkloadSpec(ref common.ReferenceCallb
 	}
 }
 
+func schema_k8sio_api_scheduling_v1beta1_AllCompositeDisruptionMode(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AllCompositeDisruptionMode means that children of a CompositePodGroup can only be disrupted or preempted together.",
+				Type:        []string{"object"},
+			},
+		},
+	}
+}
+
 func schema_k8sio_api_scheduling_v1beta1_AllDisruptionMode(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -56220,6 +56696,45 @@ func schema_k8sio_api_scheduling_v1beta1_CompositeBasicSchedulingPolicy(ref comm
 				Type:        []string{"object"},
 			},
 		},
+	}
+}
+
+func schema_k8sio_api_scheduling_v1beta1_CompositeDisruptionMode(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "CompositeDisruptionMode defines how individual entities within a composite pod group can be disrupted. Exactly one mode must be set.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"single": {
+						SchemaProps: spec.SchemaProps{
+							Description: "single specifies that children groups can be disrupted independently from each other.",
+							Ref:         ref(schedulingv1beta1.SingleCompositeDisruptionMode{}.OpenAPIModelName()),
+						},
+					},
+					"all": {
+						SchemaProps: spec.SchemaProps{
+							Description: "all specifies that all children groups can only be disrupted together.",
+							Ref:         ref(schedulingv1beta1.AllCompositeDisruptionMode{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+			VendorExtensible: spec.VendorExtensible{
+				Extensions: spec.Extensions{
+					"x-kubernetes-unions": []interface{}{
+						map[string]interface{}{
+							"fields-to-discriminateBy": map[string]interface{}{
+								"all":    "All",
+								"single": "Single",
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			schedulingv1beta1.AllCompositeDisruptionMode{}.OpenAPIModelName(), schedulingv1beta1.SingleCompositeDisruptionMode{}.OpenAPIModelName()},
 	}
 }
 
@@ -56339,6 +56854,18 @@ func schema_k8sio_api_scheduling_v1beta1_CompositePodGroupTemplate(ref common.Re
 							Ref:         ref(schedulingv1beta1.CompositePodGroupSchedulingPolicy{}.OpenAPIModelName()),
 						},
 					},
+					"schedulingConstraints": {
+						SchemaProps: spec.SchemaProps{
+							Description: "schedulingConstraints defines optional scheduling constraints (e.g. topology) for this CompositePodGroupTemplate. This field is immutable.",
+							Ref:         ref(schedulingv1beta1.CompositePodGroupSchedulingConstraints{}.OpenAPIModelName()),
+						},
+					},
+					"disruptionMode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "disruptionMode defines the mode in which a given CompositePodGroup can be disrupted. One of Single, All. This field is immutable.",
+							Ref:         ref(schedulingv1beta1.CompositeDisruptionMode{}.OpenAPIModelName()),
+						},
+					},
 					"priorityClassName": {
 						SchemaProps: spec.SchemaProps{
 							Description: "priorityClassName indicates the priority that should be considered when scheduling a composite pod group created from this template. If no priority class is specified, admission control can set this to the global default priority class if it exists. Otherwise, composite pod groups created from this template will have the priority set to zero. This field is immutable.",
@@ -56351,6 +56878,14 @@ func schema_k8sio_api_scheduling_v1beta1_CompositePodGroupTemplate(ref common.Re
 							Description: "priority is the value of priority of composite pod groups created from this template. Various system components use this field to find the priority of the composite pod group. When Priority Admission Controller is enabled, it prevents users from setting this field. The admission controller populates this field from PriorityClassName. The higher the value, the higher the priority. This field is immutable.",
 							Type:        []string{"integer"},
 							Format:      "int32",
+						},
+					},
+					"preemptionPolicy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "preemptionPolicy is the Policy for preempting pods/podgroups with lower priority. One of Never, PreemptLowerPriority. This field is immutable. This field is available only when the PodGroupPreemptionPolicy feature gate is enabled.\n\n\nPossible enum values:\n - `\"Never\"` means that pod never preempts other pods with lower priority.\n - `\"PreemptLowerPriority\"` means that pod can preempt other pods with lower priority.",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Never", "PreemptLowerPriority"},
 						},
 					},
 					"podGroupTemplates": {
@@ -56395,18 +56930,12 @@ func schema_k8sio_api_scheduling_v1beta1_CompositePodGroupTemplate(ref common.Re
 							},
 						},
 					},
-					"schedulingConstraints": {
-						SchemaProps: spec.SchemaProps{
-							Description: "schedulingConstraints defines optional scheduling constraints (e.g. topology) for this CompositePodGroupTemplate. This field is immutable.",
-							Ref:         ref(schedulingv1beta1.CompositePodGroupSchedulingConstraints{}.OpenAPIModelName()),
-						},
-					},
 				},
 				Required: []string{"name", "schedulingPolicy"},
 			},
 		},
 		Dependencies: []string{
-			schedulingv1beta1.CompositePodGroupSchedulingConstraints{}.OpenAPIModelName(), schedulingv1beta1.CompositePodGroupSchedulingPolicy{}.OpenAPIModelName(), schedulingv1beta1.CompositePodGroupTemplate{}.OpenAPIModelName(), schedulingv1beta1.PodGroupTemplate{}.OpenAPIModelName()},
+			schedulingv1beta1.CompositeDisruptionMode{}.OpenAPIModelName(), schedulingv1beta1.CompositePodGroupSchedulingConstraints{}.OpenAPIModelName(), schedulingv1beta1.CompositePodGroupSchedulingPolicy{}.OpenAPIModelName(), schedulingv1beta1.CompositePodGroupTemplate{}.OpenAPIModelName(), schedulingv1beta1.PodGroupTemplate{}.OpenAPIModelName()},
 	}
 }
 
@@ -57068,6 +57597,17 @@ func schema_k8sio_api_scheduling_v1beta1_PriorityClassList(ref common.ReferenceC
 	}
 }
 
+func schema_k8sio_api_scheduling_v1beta1_SingleCompositeDisruptionMode(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "SingleCompositeDisruptionMode means that individual children of a CompositePodGroup can be disrupted or preempted independently.",
+				Type:        []string{"object"},
+			},
+		},
+	}
+}
+
 func schema_k8sio_api_scheduling_v1beta1_SingleDisruptionMode(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -57569,12 +58109,19 @@ func schema_k8sio_api_storage_v1_CSINode(ref common.ReferenceCallback) common.Op
 							Ref:         ref(storagev1.CSINodeSpec{}.OpenAPIModelName()),
 						},
 					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Description: "status contains health and status information for the node's storage.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(storagev1.CSINodeStatus{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"spec"},
 			},
 		},
 		Dependencies: []string{
-			storagev1.CSINodeSpec{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+			storagev1.CSINodeSpec{}.OpenAPIModelName(), storagev1.CSINodeStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
 	}
 }
 
@@ -57721,6 +58268,44 @@ func schema_k8sio_api_storage_v1_CSINodeSpec(ref common.ReferenceCallback) commo
 		},
 		Dependencies: []string{
 			storagev1.CSINodeDriver{}.OpenAPIModelName()},
+	}
+}
+
+func schema_k8sio_api_storage_v1_CSINodeStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "CSINodeStatus contains health and status information for storage on a node.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"storageHealth": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "name",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "storageHealth contains backend health reports for CSI drivers registered on the node.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(storagev1.StorageHealth{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			storagev1.StorageHealth{}.OpenAPIModelName()},
 	}
 }
 
@@ -58004,6 +58589,110 @@ func schema_k8sio_api_storage_v1_StorageClassList(ref common.ReferenceCallback) 
 		},
 		Dependencies: []string{
 			storagev1.StorageClass{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_k8sio_api_storage_v1_StorageHealth(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "StorageHealth contains storage backend health reported by a CSI driver on a node.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "name is the CSI driver name, matching CSINodeDriver.name.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"healthConditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "healthConditions are the adverse storage backend conditions reported by the CSI driver. At most 16 conditions may be reported.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(storagev1.StorageHealthCondition{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+		Dependencies: []string{
+			storagev1.StorageHealthCondition{}.OpenAPIModelName()},
+	}
+}
+
+func schema_k8sio_api_storage_v1_StorageHealthCondition(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "StorageHealthCondition represents an adverse health condition reported by a CSI driver for its storage backend on a node.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Description: "status is the health status category. One of \"StorageUnreachable\", \"StorageDegraded\".\n\nPossible enum values:\n - `\"StorageDegraded\"` indicates the storage backend is functioning with reduced capability.\n - `\"StorageUnreachable\"` indicates the storage backend is unreachable.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"StorageDegraded", "StorageUnreachable"},
+						},
+					},
+					"reason": {
+						SchemaProps: spec.SchemaProps{
+							Description: "reason is a brief CamelCase machine-parseable reason. Maximum permitted length of a reason is 256 characters.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"message": {
+						SchemaProps: spec.SchemaProps{
+							Description: "message is a human-readable description. Maximum permitted length of a message is 1024 characters.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"accessMode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "accessMode is the access mode affected. Nil means all access modes are affected.\n\nPossible enum values:\n - `\"ReadOnlyMany\"` can be mounted in read-only mode to many hosts\n - `\"ReadWriteMany\"` can be mounted in read/write mode to many hosts\n - `\"ReadWriteOnce\"` can be mounted in read/write mode to exactly 1 host\n - `\"ReadWriteOncePod\"` can be mounted in read/write mode to exactly 1 pod cannot be used in combination with other access modes",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"ReadOnlyMany", "ReadWriteMany", "ReadWriteOnce", "ReadWriteOncePod"},
+						},
+					},
+					"volumeMode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "volumeMode is the volume mode affected. Nil means both are affected.\n\nPossible enum values:\n - `\"Block\"` means the volume will not be formatted with a filesystem and will remain a raw block device.\n - `\"Filesystem\"` means the volume will be or is formatted with a filesystem.",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Block", "Filesystem"},
+						},
+					},
+					"lastTransitionTime": {
+						SchemaProps: spec.SchemaProps{
+							Description: "lastTransitionTime is when this condition first appeared at its current state.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"status", "reason"},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
 	}
 }
 
@@ -59141,12 +59830,19 @@ func schema_k8sio_api_storage_v1beta1_CSINode(ref common.ReferenceCallback) comm
 							Ref:         ref(storagev1beta1.CSINodeSpec{}.OpenAPIModelName()),
 						},
 					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Description: "status contains health and status information for the node's storage.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(storagev1beta1.CSINodeStatus{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"spec"},
 			},
 		},
 		Dependencies: []string{
-			storagev1beta1.CSINodeSpec{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+			storagev1beta1.CSINodeSpec{}.OpenAPIModelName(), storagev1beta1.CSINodeStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
 	}
 }
 
@@ -59293,6 +59989,44 @@ func schema_k8sio_api_storage_v1beta1_CSINodeSpec(ref common.ReferenceCallback) 
 		},
 		Dependencies: []string{
 			storagev1beta1.CSINodeDriver{}.OpenAPIModelName()},
+	}
+}
+
+func schema_k8sio_api_storage_v1beta1_CSINodeStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "CSINodeStatus contains health and status information for storage on a node.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"storageHealth": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "name",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "storageHealth contains backend health reports for CSI drivers registered on the node.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(storagev1beta1.StorageHealth{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			storagev1beta1.StorageHealth{}.OpenAPIModelName()},
 	}
 }
 
@@ -59575,6 +60309,110 @@ func schema_k8sio_api_storage_v1beta1_StorageClassList(ref common.ReferenceCallb
 		},
 		Dependencies: []string{
 			storagev1beta1.StorageClass{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_k8sio_api_storage_v1beta1_StorageHealth(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "StorageHealth contains storage backend health reported by a CSI driver on a node.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "name is the CSI driver name, matching CSINodeDriver.name.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"healthConditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "healthConditions are the adverse storage backend conditions reported by the CSI driver. At most 16 conditions may be reported.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(storagev1beta1.StorageHealthCondition{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+		Dependencies: []string{
+			storagev1beta1.StorageHealthCondition{}.OpenAPIModelName()},
+	}
+}
+
+func schema_k8sio_api_storage_v1beta1_StorageHealthCondition(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "StorageHealthCondition represents an adverse health condition reported by a CSI driver for its storage backend on a node.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Description: "status is the health status category. One of \"StorageUnreachable\", \"StorageDegraded\".\n\nPossible enum values:\n - `\"StorageDegraded\"` indicates the storage backend is functioning with reduced capability.\n - `\"StorageUnreachable\"` indicates the storage backend is unreachable.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"StorageDegraded", "StorageUnreachable"},
+						},
+					},
+					"reason": {
+						SchemaProps: spec.SchemaProps{
+							Description: "reason is a brief CamelCase machine-parseable reason. Maximum permitted length of a reason is 256 characters.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"message": {
+						SchemaProps: spec.SchemaProps{
+							Description: "message is a human-readable description. Maximum permitted length of a message is 1024 characters.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"accessMode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "accessMode is the access mode affected. Nil means all access modes are affected.\n\nPossible enum values:\n - `\"ReadOnlyMany\"` can be mounted in read-only mode to many hosts\n - `\"ReadWriteMany\"` can be mounted in read/write mode to many hosts\n - `\"ReadWriteOnce\"` can be mounted in read/write mode to exactly 1 host\n - `\"ReadWriteOncePod\"` can be mounted in read/write mode to exactly 1 pod cannot be used in combination with other access modes",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"ReadOnlyMany", "ReadWriteMany", "ReadWriteOnce", "ReadWriteOncePod"},
+						},
+					},
+					"volumeMode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "volumeMode is the volume mode affected. Nil means both are affected.\n\nPossible enum values:\n - `\"Block\"` means the volume will not be formatted with a filesystem and will remain a raw block device.\n - `\"Filesystem\"` means the volume will be or is formatted with a filesystem.",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Block", "Filesystem"},
+						},
+					},
+					"lastTransitionTime": {
+						SchemaProps: spec.SchemaProps{
+							Description: "lastTransitionTime is when this condition first appeared at its current state.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"status", "reason"},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
 	}
 }
 

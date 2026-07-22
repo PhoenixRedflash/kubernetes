@@ -76,6 +76,7 @@ const isInvalidQuotaResource string = `must be a standard resource for quota`
 const fieldImmutableErrorMsg string = apimachineryvalidation.FieldImmutableErrorMsg
 const isNotIntegerErrorMsg string = `must be an integer`
 const isNotPositiveErrorMsg string = `must be greater than zero`
+const resourceStatusClaimPrefix = "claim:"
 
 var pdPartitionErrorMsg string = validation.InclusiveRangeError(1, 255)
 var fileModeErrorMsg = "must be a number between 0 and 0777 (octal), both inclusive"
@@ -2686,6 +2687,50 @@ var resizeStatusSet = sets.New(core.PersistentVolumeClaimControllerResizeInProgr
 	core.PersistentVolumeClaimNodeResizeInProgress,
 	core.PersistentVolumeClaimNodeResizeInfeasible)
 
+func validatePodVolumeHealth(volumeHealth []core.PodVolumeHealth, spec *core.PodSpec, fldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+	volumeNames := sets.New[string]()
+	if spec != nil {
+		for _, v := range spec.Volumes {
+			volumeNames.Insert(v.Name)
+		}
+	}
+	for i, vh := range volumeHealth {
+		idxPath := fldPath.Index(i)
+		if len(vh.Name) > 0 && !volumeNames.Has(vh.Name) {
+			allErrs = append(allErrs, field.NotFound(idxPath.Child("name"), vh.Name))
+		}
+		allErrs = append(allErrs, validateVolumeHealthConditions(vh.HealthConditions, idxPath.Child("healthConditions"))...)
+	}
+	return allErrs
+}
+
+func validateVolumeHealthStatus(status *core.VolumeHealthStatus, fldPath *field.Path) field.ErrorList {
+	if status == nil {
+		return nil
+	}
+	return validateVolumeHealthConditions(status.HealthConditions, fldPath.Child("healthConditions"))
+}
+
+func validateVolumeHealthConditions(conditions []core.VolumeHealthCondition, fldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+	for i, condition := range conditions {
+		allErrs = append(allErrs, validateVolumeHealthCondition(condition, fldPath.Index(i))...)
+	}
+	return allErrs
+}
+
+func validateVolumeHealthCondition(condition core.VolumeHealthCondition, fldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+	if len(condition.Reason) == 0 {
+		return allErrs
+	}
+	for _, msg := range unversionedvalidation.IsValidConditionReason(condition.Reason) {
+		allErrs = append(allErrs, field.Invalid(fldPath.Child("reason"), condition.Reason, msg))
+	}
+	return allErrs
+}
+
 // ValidatePersistentVolumeClaimStatusUpdate validates an update to status of a PersistentVolumeClaim
 func ValidatePersistentVolumeClaimStatusUpdate(newPvc, oldPvc *core.PersistentVolumeClaim, validationOpts PersistentVolumeClaimSpecValidationOptions) field.ErrorList {
 	allErrs := ValidateObjectMetaUpdate(&newPvc.ObjectMeta, &oldPvc.ObjectMeta, field.NewPath("metadata"))
@@ -2700,6 +2745,7 @@ func ValidatePersistentVolumeClaimStatusUpdate(newPvc, oldPvc *core.PersistentVo
 	for r, qty := range newPvc.Status.Capacity {
 		allErrs = append(allErrs, validateBasicResource(qty, capPath.Key(string(r)))...)
 	}
+	allErrs = append(allErrs, validateVolumeHealthStatus(newPvc.Status.HealthStatus, field.NewPath("status", "healthStatus"))...)
 	if validationOpts.EnableRecoverFromExpansionFailure {
 		resizeStatusPath := field.NewPath("status", "allocatedResourceStatuses")
 		if newPvc.Status.AllocatedResourceStatuses != nil {
@@ -3472,6 +3518,8 @@ func validateExecAction(exec *core.ExecAction, fldPath *field.Path) field.ErrorL
 var supportedHTTPSchemes = sets.New(core.URISchemeHTTP, core.URISchemeHTTPS)
 var supportedHTTPProtocols = sets.New(core.HTTPProtocolHTTP1, core.HTTPProtocolHTTP2)
 
+var supportedGRPCProbeModes = sets.New(core.GRPCProbeModePlaintext, core.GRPCProbeModeTLS)
+
 func validateHTTPGetAction(http *core.HTTPGetAction, fldPath *field.Path) field.ErrorList {
 	allErrors := field.ErrorList{}
 	if len(http.Path) == 0 {
@@ -3517,9 +3565,15 @@ func ValidatePortNumOrName(port intstr.IntOrString, fldPath *field.Path) field.E
 func validateTCPSocketAction(tcp *core.TCPSocketAction, fldPath *field.Path) field.ErrorList {
 	return ValidatePortNumOrName(tcp.Port, fldPath.Child("port"))
 }
+
 func validateGRPCAction(grpc *core.GRPCAction, fldPath *field.Path) field.ErrorList {
-	return ValidatePortNumOrName(intstr.FromInt32(grpc.Port), fldPath.Child("port"))
+	allErrors := ValidatePortNumOrName(intstr.FromInt32(grpc.Port), fldPath.Child("port"))
+	if grpc.Mode != nil && !supportedGRPCProbeModes.Has(*grpc.Mode) {
+		allErrors = append(allErrors, field.NotSupported(fldPath.Child("mode"), *grpc.Mode, sets.List(supportedGRPCProbeModes)))
+	}
+	return allErrors
 }
+
 func validateHandler(handler commonHandler, gracePeriod *int64, fldPath *field.Path) field.ErrorList {
 	numHandlers := 0
 	allErrors := field.ErrorList{}
@@ -6114,6 +6168,10 @@ func ValidatePodStatusUpdate(newPod, oldPod *core.Pod, opts PodValidationOptions
 	allErrs = append(allErrs, validatePodExtendedResourceClaimStatus(newPod.Status.ExtendedResourceClaimStatus, &newPod.Spec, fldPath.Child("extendedResourceClaimStatus"))...)
 	allErrs = append(allErrs, validateNodeAllocatableResourceClaimStatus(newPod.Status, &newPod.Spec, fldPath.Child("nodeAllocatableResourceClaimStatuses"))...)
 
+	if len(newPod.Status.VolumeHealth) > 0 {
+		allErrs = append(allErrs, validatePodVolumeHealth(newPod.Status.VolumeHealth, &newPod.Spec, fldPath.Child("volumeHealth"))...)
+	}
+
 	if newIPErrs := validatePodIPs(newPod, oldPod); len(newIPErrs) > 0 {
 		allErrs = append(allErrs, newIPErrs...)
 	}
@@ -6126,8 +6184,8 @@ func ValidatePodStatusUpdate(newPod, oldPod *core.Pod, opts PodValidationOptions
 	allErrs = append(allErrs, validateContainerStatusUsers(newPod.Status.InitContainerStatuses, fldPath.Child("initContainerStatuses"), newPod.Spec.OS)...)
 	allErrs = append(allErrs, validateContainerStatusUsers(newPod.Status.EphemeralContainerStatuses, fldPath.Child("ephemeralContainerStatuses"), newPod.Spec.OS)...)
 
-	allErrs = append(allErrs, validateContainerStatusAllocatedResourcesStatus(newPod.Status.ContainerStatuses, fldPath.Child("containerStatuses"), newPod.Spec.Containers)...)
-	allErrs = append(allErrs, validateContainerStatusAllocatedResourcesStatus(newPod.Status.InitContainerStatuses, fldPath.Child("initContainerStatuses"), newPod.Spec.InitContainers)...)
+	allErrs = append(allErrs, validateContainerStatusAllocatedResourcesStatus(newPod.Status.ContainerStatuses, fldPath.Child("containerStatuses"), newPod.Spec.Containers, &newPod.Status)...)
+	allErrs = append(allErrs, validateContainerStatusAllocatedResourcesStatus(newPod.Status.InitContainerStatuses, fldPath.Child("initContainerStatuses"), newPod.Spec.InitContainers, &newPod.Status)...)
 	// ephemeral containers are not allowed to have resources allocated
 	allErrs = append(allErrs, validateContainerStatusNoAllocatedResourcesStatus(newPod.Status.EphemeralContainerStatuses, fldPath.Child("ephemeralContainerStatuses"))...)
 
@@ -9664,7 +9722,7 @@ func validateContainerStatusNoAllocatedResourcesStatus(containerStatuses []core.
 // validateContainerStatusAllocatedResourcesStatus iterate the allocated resources health and validate:
 // - resourceName matches one of resources in container's resource requirements
 // - resourceID is not empty and unique
-func validateContainerStatusAllocatedResourcesStatus(containerStatuses []core.ContainerStatus, fldPath *field.Path, containers []core.Container) field.ErrorList {
+func validateContainerStatusAllocatedResourcesStatus(containerStatuses []core.ContainerStatus, fldPath *field.Path, containers []core.Container, podStatus *core.PodStatus) field.ErrorList {
 	allErrors := field.ErrorList{}
 
 	for i, containerStatus := range containerStatuses {
@@ -9693,20 +9751,18 @@ func validateContainerStatusAllocatedResourcesStatus(containerStatuses []core.Co
 				if strings.HasPrefix(string(allocatedResource.Name), "claim:") {
 					// assume it is a claim name
 
-					errorStr = "must match one of the container's resource claims in a format 'claim:<claimName>/<request>' or 'claim:<claimName>' if request is empty"
+					errorStr = "must match one of the container's resource claims as 'claim:<claimName>/<requestName>' when container.resources.claims[*].request is set or 'claim:<claimName>' when it is empty"
 
 					for _, c := range container.Resources.Claims {
-						name := "claim:" + c.Name
-						if c.Request != "" {
-							name += "/" + c.Request
-						}
-
-						if name == string(allocatedResource.Name) {
+						if resourceStatusName(c.Name, c.Request) == allocatedResource.Name {
 							found = true
 							break
 						}
 					}
 
+					if !found {
+						found = matchesExtendedResourceClaimStatus(allocatedResource.Name, container, podStatus.ExtendedResourceClaimStatus)
+					}
 				} else {
 					// assume it is a resource name
 
@@ -9755,6 +9811,54 @@ func validateContainerStatusAllocatedResourcesStatus(containerStatuses []core.Co
 	}
 
 	return allErrors
+}
+
+func matchesExtendedResourceClaimStatus(resourceStatusName core.ResourceName, container core.Container, extendedResourceClaimStatus *core.PodExtendedResourceClaimStatus) bool {
+	if extendedResourceClaimStatus == nil {
+		return false
+	}
+
+	claimName, requestName, found := parseResourceStatusName(string(resourceStatusName))
+	if !found || requestName == "" || claimName != extendedResourceClaimStatus.ResourceClaimName {
+		return false
+	}
+
+	for _, mapping := range extendedResourceClaimStatus.RequestMappings {
+		if mapping.ContainerName != container.Name || mapping.RequestName != requestName {
+			continue
+		}
+		quantity, found := container.Resources.Requests[core.ResourceName(mapping.ResourceName)]
+		if found && !quantity.IsZero() {
+			return true
+		}
+	}
+
+	return false
+}
+
+// resourceStatusName returns the ResourceStatus.Name form accepted for pod resource claims.
+// ResourceClaim.Request is optional, so the encoded form is either
+// "claim:<claimName>" or "claim:<claimName>/<requestName>".
+func resourceStatusName(claimName, requestName string) core.ResourceName {
+	if requestName == "" {
+		return core.ResourceName(resourceStatusClaimPrefix + claimName)
+	}
+	return core.ResourceName(resourceStatusClaimPrefix + claimName + "/" + requestName)
+}
+
+func parseResourceStatusName(resourceStatusName string) (claimName, requestName string, ok bool) {
+	claimRef, ok := strings.CutPrefix(resourceStatusName, resourceStatusClaimPrefix)
+	if !ok {
+		return "", "", false
+	}
+	claimName, requestName, hasRequest := strings.Cut(claimRef, "/")
+	if claimName == "" {
+		return "", "", false
+	}
+	if hasRequest && requestName == "" {
+		return "", "", false
+	}
+	return claimName, requestName, true
 }
 
 func validateImageVolumeSource(imageVolume *core.ImageVolumeSource, fldPath *field.Path, opts PodValidationOptions) field.ErrorList {

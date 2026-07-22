@@ -2713,6 +2713,164 @@ func TestDropHostUsers(t *testing.T) {
 
 }
 
+func TestDropGRPCContainerProbeTLS(t *testing.T) {
+	grpcProbeModeTLS := func() *api.GRPCProbeMode {
+		mode := api.GRPCProbeModeTLS
+		return &mode
+	}
+	grpcTLSProbe := func() *api.Probe {
+		return &api.Probe{
+			ProbeHandler: api.ProbeHandler{
+				GRPC: &api.GRPCAction{Port: 8443, Mode: grpcProbeModeTLS()},
+			},
+		}
+	}
+	grpcNoTLSProbe := func() *api.Probe {
+		return &api.Probe{
+			ProbeHandler: api.ProbeHandler{
+				GRPC: &api.GRPCAction{Port: 8443},
+			},
+		}
+	}
+	podWithGRPCTLS := func() *api.Pod {
+		return &api.Pod{
+			Spec: api.PodSpec{
+				Containers: []api.Container{
+					{
+						Name:           "container1",
+						Image:          "image",
+						LivenessProbe:  grpcTLSProbe(),
+						ReadinessProbe: grpcTLSProbe(),
+						StartupProbe:   grpcTLSProbe(),
+					},
+				},
+				InitContainers: []api.Container{
+					{
+						Name:           "initcontainer1",
+						Image:          "image",
+						LivenessProbe:  grpcTLSProbe(),
+						ReadinessProbe: grpcTLSProbe(),
+						StartupProbe:   grpcTLSProbe(),
+					},
+				},
+				EphemeralContainers: []api.EphemeralContainer{
+					{
+						EphemeralContainerCommon: api.EphemeralContainerCommon{
+							Name:           "ephemeral1",
+							Image:          "image",
+							LivenessProbe:  grpcTLSProbe(),
+							ReadinessProbe: grpcTLSProbe(),
+							StartupProbe:   grpcTLSProbe(),
+						},
+					},
+				},
+			},
+		}
+	}
+	podWithGRPCNoTLS := func() *api.Pod {
+		return &api.Pod{
+			Spec: api.PodSpec{
+				Containers: []api.Container{
+					{
+						Name:           "container1",
+						Image:          "image",
+						LivenessProbe:  grpcNoTLSProbe(),
+						ReadinessProbe: grpcNoTLSProbe(),
+						StartupProbe:   grpcNoTLSProbe(),
+					},
+				},
+				InitContainers: []api.Container{
+					{
+						Name:           "initcontainer1",
+						Image:          "image",
+						LivenessProbe:  grpcNoTLSProbe(),
+						ReadinessProbe: grpcNoTLSProbe(),
+						StartupProbe:   grpcNoTLSProbe(),
+					},
+				},
+				EphemeralContainers: []api.EphemeralContainer{
+					{
+						EphemeralContainerCommon: api.EphemeralContainerCommon{
+							Name:           "ephemeral1",
+							Image:          "image",
+							LivenessProbe:  grpcNoTLSProbe(),
+							ReadinessProbe: grpcNoTLSProbe(),
+							StartupProbe:   grpcNoTLSProbe(),
+						},
+					},
+				},
+			},
+		}
+	}
+
+	podInfo := []struct {
+		description string
+		hasTLS      bool
+		pod         func() *api.Pod
+	}{
+		{
+			description: "with gRPC TLS",
+			hasTLS:      true,
+			pod:         podWithGRPCTLS,
+		},
+		{
+			description: "without gRPC TLS",
+			hasTLS:      false,
+			pod:         podWithGRPCNoTLS,
+		},
+		{
+			description: "nil pod",
+			hasTLS:      false,
+			pod:         func() *api.Pod { return nil },
+		},
+	}
+
+	for _, enabled := range []bool{true, false} {
+		for _, oldPodInfo := range podInfo {
+			for _, newPodInfo := range podInfo {
+				oldPodHasTLS, oldPod := oldPodInfo.hasTLS, oldPodInfo.pod()
+				newPodHasTLS, newPod := newPodInfo.hasTLS, newPodInfo.pod()
+				if newPod == nil {
+					continue
+				}
+
+				t.Run(fmt.Sprintf("feature enabled=%v, old pod %v, new pod %v", enabled, oldPodInfo.description, newPodInfo.description), func(t *testing.T) {
+					featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.GRPCContainerProbeTLS, enabled)
+
+					DropDisabledPodFields(newPod, oldPod)
+
+					// old pod should never be changed
+					if !reflect.DeepEqual(oldPod, oldPodInfo.pod()) {
+						t.Errorf("old pod changed: %v", cmp.Diff(oldPod, oldPodInfo.pod()))
+					}
+
+					switch {
+					case enabled || oldPodHasTLS:
+						// new pod should not be changed if the feature is enabled, or if the old pod had TLS
+						if !reflect.DeepEqual(newPod, newPodInfo.pod()) {
+							t.Errorf("new pod changed: %v", cmp.Diff(newPod, newPodInfo.pod()))
+						}
+					case newPodHasTLS:
+						// new pod should be changed
+						if reflect.DeepEqual(newPod, newPodInfo.pod()) {
+							t.Errorf("new pod was not changed")
+						}
+						// new pod should not have TLS
+						if exp := podWithGRPCNoTLS(); !reflect.DeepEqual(newPod, exp) {
+							t.Errorf("new pod had TLS: %v", cmp.Diff(newPod, exp))
+						}
+					default:
+						// new pod should not need to be changed
+						if !reflect.DeepEqual(newPod, newPodInfo.pod()) {
+							t.Errorf("new pod changed: %v", cmp.Diff(newPod, newPodInfo.pod()))
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestValidateTopologySpreadConstraintLabelSelectorOption(t *testing.T) {
 	testCases := []struct {
 		name       string
@@ -7455,6 +7613,82 @@ func TestGetValidationOptionsAllowSysAdminWhenPrivilegeEscalationFalse(t *testin
 			gotOptions := GetValidationOptionsFromPodSpecAndMeta(&api.PodSpec{}, tc.oldPodSpec, nil, nil)
 			if tc.wantOption != gotOptions.AllowSysAdminWhenPrivilegeEscalationFalse {
 				t.Errorf("Got AllowSysAdminWhenPrivilegeEscalationFalse=%t, want %t", gotOptions.AllowSysAdminWhenPrivilegeEscalationFalse, tc.wantOption)
+			}
+		})
+	}
+}
+
+func TestDropDisabledPodStatusFields_VolumeHealth(t *testing.T) {
+	podStatusWithVolumeHealth := func() *api.PodStatus {
+		return &api.PodStatus{
+			VolumeHealth: []api.PodVolumeHealth{
+				{
+					Name: "vol1",
+					HealthConditions: []api.VolumeHealthCondition{
+						{
+							Status: api.VolumeHealthDegraded,
+							Reason: "DiskSlow",
+						},
+					},
+				},
+			},
+		}
+	}
+	podStatusWithoutVolumeHealth := func() *api.PodStatus {
+		return &api.PodStatus{}
+	}
+
+	tests := []struct {
+		name          string
+		featureGate   bool
+		podStatus     *api.PodStatus
+		oldPodStatus  *api.PodStatus
+		wantPodStatus *api.PodStatus
+	}{
+		{
+			name:          "gate=off, old=nil, new=with; should drop",
+			featureGate:   false,
+			podStatus:     podStatusWithVolumeHealth(),
+			oldPodStatus:  nil,
+			wantPodStatus: podStatusWithoutVolumeHealth(),
+		},
+		{
+			name:          "gate=off, old=without, new=with; should drop",
+			featureGate:   false,
+			podStatus:     podStatusWithVolumeHealth(),
+			oldPodStatus:  podStatusWithoutVolumeHealth(),
+			wantPodStatus: podStatusWithoutVolumeHealth(),
+		},
+		{
+			name:          "gate=off, old=with, new=with; should keep (backward compat)",
+			featureGate:   false,
+			podStatus:     podStatusWithVolumeHealth(),
+			oldPodStatus:  podStatusWithVolumeHealth(),
+			wantPodStatus: podStatusWithVolumeHealth(),
+		},
+		{
+			name:          "gate=on, old=nil, new=with; should keep",
+			featureGate:   true,
+			podStatus:     podStatusWithVolumeHealth(),
+			oldPodStatus:  nil,
+			wantPodStatus: podStatusWithVolumeHealth(),
+		},
+		{
+			name:          "gate=on, old=without, new=with; should keep",
+			featureGate:   true,
+			podStatus:     podStatusWithVolumeHealth(),
+			oldPodStatus:  podStatusWithoutVolumeHealth(),
+			wantPodStatus: podStatusWithVolumeHealth(),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			featuregatetesting.SetFeatureGatesDuringTest(t, utilfeature.DefaultFeatureGate, featuregatetesting.FeatureOverrides{
+				features.CSIVolumeHealth: tt.featureGate,
+			})
+			dropDisabledPodStatusFields(tt.podStatus, tt.oldPodStatus, &api.PodSpec{}, &api.PodSpec{})
+			if !reflect.DeepEqual(tt.podStatus, tt.wantPodStatus) {
+				t.Errorf("dropDisabledPodStatusFields() = %v, want %v", tt.podStatus, tt.wantPodStatus)
 			}
 		})
 	}

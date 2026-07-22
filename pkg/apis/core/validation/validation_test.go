@@ -8526,6 +8526,50 @@ func TestValidateHTTPGetActionProtocol(t *testing.T) {
 	}
 }
 
+func TestValidateGRPCAction(t *testing.T) {
+	fldPath := field.NewPath("probe")
+
+	testCases := []struct {
+		name      string
+		grpc      *core.GRPCAction
+		expectErr field.ErrorList
+	}{
+		{
+			name: "mode TLS allowed",
+			grpc: &core.GRPCAction{Port: 8443, Mode: ptr.To(core.GRPCProbeModeTLS)},
+		},
+		{
+			name: "mode Plaintext allowed",
+			grpc: &core.GRPCAction{Port: 8443, Mode: ptr.To(core.GRPCProbeModePlaintext)},
+		},
+		{
+			name: "nil mode passes",
+			grpc: &core.GRPCAction{Port: 8443},
+		},
+		{
+			name:      "unsupported mode rejected",
+			grpc:      &core.GRPCAction{Port: 8443, Mode: ptr.To(core.GRPCProbeMode("Verify"))},
+			expectErr: field.ErrorList{field.NotSupported(fldPath.Child("grpc").Child("mode"), core.GRPCProbeMode("Verify"), []string{string(core.GRPCProbeModePlaintext), string(core.GRPCProbeModeTLS)})},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := commonHandler{GRPC: tc.grpc}
+			errs := validateHandler(handler, nil, fldPath)
+			if len(tc.expectErr) > 0 && len(errs) == 0 {
+				t.Errorf("Unexpected success")
+			} else if len(tc.expectErr) == 0 && len(errs) != 0 {
+				t.Errorf("Unexpected error(s): %v", errs)
+			} else if len(tc.expectErr) > 0 {
+				if tc.expectErr[0].Error() != errs[0].Error() {
+					t.Errorf("Expected error %v, got %v", tc.expectErr[0], errs[0])
+				}
+			}
+		})
+	}
+}
+
 func TestValidatePullPolicy(t *testing.T) {
 	type T struct {
 		Container      core.Container
@@ -22805,6 +22849,83 @@ func TestValidatePersistentVolumeClaimStatusUpdate(t *testing.T) {
 	}
 }
 
+func TestValidatePodVolumeHealth(t *testing.T) {
+	podSpec := &core.PodSpec{
+		Volumes: []core.Volume{
+			{Name: "vol1"},
+			{Name: "vol2"},
+		},
+	}
+	tests := []struct {
+		name         string
+		volumeHealth []core.PodVolumeHealth
+		isErr        bool
+		expectedErr  string
+	}{
+		{
+			name: "valid volume health",
+			volumeHealth: []core.PodVolumeHealth{
+				{
+					Name: "vol1",
+					HealthConditions: []core.VolumeHealthCondition{
+						{Status: core.VolumeHealthDegraded, Reason: "DiskSlow"},
+					},
+				},
+			},
+		},
+		{
+			name: "volume name not in spec",
+			volumeHealth: []core.PodVolumeHealth{
+				{
+					Name: "nonexistent",
+					HealthConditions: []core.VolumeHealthCondition{
+						{Status: core.VolumeHealthDegraded, Reason: "DiskSlow"},
+					},
+				},
+			},
+			isErr:       true,
+			expectedErr: "volumeHealth[0].name",
+		},
+		{
+			name: "invalid reason format",
+			volumeHealth: []core.PodVolumeHealth{
+				{
+					Name: "vol1",
+					HealthConditions: []core.VolumeHealthCondition{
+						{Status: core.VolumeHealthDegraded, Reason: "invalid;val"},
+					},
+				},
+			},
+			isErr:       true,
+			expectedErr: "volumeHealth[0].healthConditions[0].reason",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := validatePodVolumeHealth(tt.volumeHealth, podSpec, field.NewPath("volumeHealth"))
+			if tt.isErr && len(errs) == 0 {
+				t.Errorf("expected error but got none")
+			}
+			if !tt.isErr && len(errs) > 0 {
+				t.Errorf("unexpected errors: %v", errs)
+			}
+			if tt.isErr && len(errs) > 0 && tt.expectedErr != "" {
+				found := false
+				for _, err := range errs {
+					if strings.Contains(err.Field, tt.expectedErr) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected error containing %q but got: %v", tt.expectedErr, errs)
+				}
+			}
+		})
+	}
+}
+
 func TestValidateResourceQuota(t *testing.T) {
 	spec := core.ResourceQuotaSpec{
 		Hard: core.ResourceList{
@@ -28633,12 +28754,125 @@ func TestValidateContainerStatusNoAllocatedResourcesStatus(t *testing.T) {
 	assert.Equal(t, "must not be specified in container status", errs[1].Detail)
 }
 
+func TestResourceStatusName(t *testing.T) {
+	testCases := []struct {
+		name        string
+		claimName   string
+		requestName string
+		want        core.ResourceName
+	}{
+		{
+			name:      "claim without request",
+			claimName: "claim-name",
+			want:      "claim:claim-name",
+		},
+		{
+			name:        "claim with request",
+			claimName:   "claim-name",
+			requestName: "request-name",
+			want:        "claim:claim-name/request-name",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resourceStatusName(tc.claimName, tc.requestName)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestParseResourceStatusName(t *testing.T) {
+	testCases := []struct {
+		name            string
+		resourceName    string
+		wantClaimName   string
+		wantRequestName string
+		wantOK          bool
+	}{
+		{
+			name:          "claim without request",
+			resourceName:  "claim:claim-name",
+			wantClaimName: "claim-name",
+			wantOK:        true,
+		},
+		{
+			name:            "claim with request",
+			resourceName:    "claim:claim-name/request-name",
+			wantClaimName:   "claim-name",
+			wantRequestName: "request-name",
+			wantOK:          true,
+		},
+		{
+			name:         "resource name",
+			resourceName: "example.com/gpu",
+			wantOK:       false,
+		},
+		{
+			name:         "empty claim name",
+			resourceName: "claim:",
+			wantOK:       false,
+		},
+		{
+			name:         "empty request name",
+			resourceName: "claim:claim-name/",
+			wantOK:       false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotClaimName, gotRequestName, gotOK := parseResourceStatusName(tc.resourceName)
+			assert.Equal(t, tc.wantClaimName, gotClaimName)
+			assert.Equal(t, tc.wantRequestName, gotRequestName)
+			assert.Equal(t, tc.wantOK, gotOK)
+		})
+	}
+}
+
 func TestValidateContainerStatusAllocatedResourcesStatus(t *testing.T) {
 	fldPath := field.NewPath("spec", "containers")
+	extendedResourceContainer := core.Container{
+		Name: "container-1",
+		Resources: core.ResourceRequirements{
+			Requests: core.ResourceList{
+				"example.com/gpu": resource.MustParse("1"),
+			},
+		},
+	}
+	extendedResourceClaimStatus := &core.PodExtendedResourceClaimStatus{
+		ResourceClaimName: "generated-claim",
+		RequestMappings: []core.ContainerExtendedResourceRequest{
+			{
+				ContainerName: "container-1",
+				ResourceName:  "example.com/gpu",
+				RequestName:   "request-0",
+			},
+		},
+	}
+	newExtendedResourceContainerStatuses := func(name core.ResourceName) []core.ContainerStatus {
+		return []core.ContainerStatus{
+			{
+				Name: "container-1",
+				AllocatedResourcesStatus: []core.ResourceStatus{
+					{
+						Name: name,
+						Resources: []core.ResourceHealth{
+							{
+								ResourceID: "driver/pool/device-name",
+								Health:     core.ResourceHealthStatusHealthy,
+							},
+						},
+					},
+				},
+			},
+		}
+	}
 
 	testCases := map[string]struct {
 		containers        []core.Container
 		containerStatuses []core.ContainerStatus
+		podStatus         core.PodStatus
 		wantFieldErrors   field.ErrorList
 	}{
 		"basic correct status": {
@@ -28854,6 +29088,59 @@ func TestValidateContainerStatusAllocatedResourcesStatus(t *testing.T) {
 			wantFieldErrors: field.ErrorList{},
 		},
 
+		"allow DRA-backed extended resource claim status": {
+			containers:        []core.Container{extendedResourceContainer},
+			containerStatuses: newExtendedResourceContainerStatuses("claim:generated-claim/request-0"),
+			podStatus: core.PodStatus{
+				ExtendedResourceClaimStatus: extendedResourceClaimStatus,
+			},
+			wantFieldErrors: field.ErrorList{},
+		},
+
+		"don't allow DRA-backed extended resource claim status with mismatched request": {
+			containers:        []core.Container{extendedResourceContainer},
+			containerStatuses: newExtendedResourceContainerStatuses("claim:generated-claim/other-request"),
+			podStatus: core.PodStatus{
+				ExtendedResourceClaimStatus: extendedResourceClaimStatus,
+			},
+			wantFieldErrors: field.ErrorList{
+				field.Invalid(fldPath.Index(0).Child("allocatedResourcesStatus").Index(0).Child("name"), core.ResourceName("claim:generated-claim/other-request"), "must match one of the container's resource claims as 'claim:<claimName>/<requestName>' when container.resources.claims[*].request is set or 'claim:<claimName>' when it is empty"),
+			},
+		},
+
+		"don't allow DRA-backed extended resource claim status without claim prefix": {
+			containers:        []core.Container{extendedResourceContainer},
+			containerStatuses: newExtendedResourceContainerStatuses("generated-claim/request-0"),
+			podStatus: core.PodStatus{
+				ExtendedResourceClaimStatus: extendedResourceClaimStatus,
+			},
+			wantFieldErrors: field.ErrorList{
+				field.Invalid(fldPath.Index(0).Child("allocatedResourcesStatus").Index(0).Child("name"), core.ResourceName("generated-claim/request-0"), "must match one of the container's resource requests"),
+			},
+		},
+
+		"don't allow DRA-backed extended resource claim status without request name": {
+			containers:        []core.Container{extendedResourceContainer},
+			containerStatuses: newExtendedResourceContainerStatuses("claim:generated-claim/"),
+			podStatus: core.PodStatus{
+				ExtendedResourceClaimStatus: extendedResourceClaimStatus,
+			},
+			wantFieldErrors: field.ErrorList{
+				field.Invalid(fldPath.Index(0).Child("allocatedResourcesStatus").Index(0).Child("name"), core.ResourceName("claim:generated-claim/"), "must match one of the container's resource claims as 'claim:<claimName>/<requestName>' when container.resources.claims[*].request is set or 'claim:<claimName>' when it is empty"),
+			},
+		},
+
+		"don't allow DRA-backed extended resource claim status with mismatched claim name": {
+			containers:        []core.Container{extendedResourceContainer},
+			containerStatuses: newExtendedResourceContainerStatuses("claim:other-claim/request-0"),
+			podStatus: core.PodStatus{
+				ExtendedResourceClaimStatus: extendedResourceClaimStatus,
+			},
+			wantFieldErrors: field.ErrorList{
+				field.Invalid(fldPath.Index(0).Child("allocatedResourcesStatus").Index(0).Child("name"), core.ResourceName("claim:other-claim/request-0"), "must match one of the container's resource claims as 'claim:<claimName>/<requestName>' when container.resources.claims[*].request is set or 'claim:<claimName>' when it is empty"),
+			},
+		},
+
 		"don't allow claims that are not in spec": {
 			containers: []core.Container{
 				{
@@ -28887,7 +29174,7 @@ func TestValidateContainerStatusAllocatedResourcesStatus(t *testing.T) {
 				},
 			},
 			wantFieldErrors: field.ErrorList{
-				field.Invalid(fldPath.Index(0).Child("allocatedResourcesStatus").Index(0).Child("name"), core.ResourceName("claim:claim.name"), "must match one of the container's resource claims in a format 'claim:<claimName>/<request>' or 'claim:<claimName>' if request is empty"),
+				field.Invalid(fldPath.Index(0).Child("allocatedResourcesStatus").Index(0).Child("name"), core.ResourceName("claim:claim.name"), "must match one of the container's resource claims as 'claim:<claimName>/<requestName>' when container.resources.claims[*].request is set or 'claim:<claimName>' when it is empty"),
 			},
 		},
 
@@ -29022,7 +29309,7 @@ func TestValidateContainerStatusAllocatedResourcesStatus(t *testing.T) {
 	}
 	for name, tt := range testCases {
 		t.Run(name, func(t *testing.T) {
-			errs := validateContainerStatusAllocatedResourcesStatus(tt.containerStatuses, fldPath, tt.containers)
+			errs := validateContainerStatusAllocatedResourcesStatus(tt.containerStatuses, fldPath, tt.containers, &tt.podStatus)
 			if diff := cmp.Diff(tt.wantFieldErrors, errs); diff != "" {
 				t.Errorf("unexpected field errors (-want, +got):\n%s", diff)
 			}

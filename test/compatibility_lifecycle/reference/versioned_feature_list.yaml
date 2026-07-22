@@ -581,6 +581,12 @@
     lockToDefault: false
     preRelease: Beta
     version: "1.36"
+- name: DRAPartitionableDevicesType
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "1.37"
 - name: DRAPrioritizedList
   versionedSpecs:
   - default: false
@@ -757,6 +763,12 @@
     lockToDefault: false
     preRelease: Beta
     version: "1.24"
+- name: GRPCContainerProbeTLS
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "1.37"
 - name: H2CContainerProbe
   versionedSpecs:
   - default: false

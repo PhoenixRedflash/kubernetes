@@ -262,6 +262,16 @@ const (
 	//
 	DRAPartitionableDevices featuregate.Feature = "DRAPartitionableDevices"
 
+	// owner: @nmn3m
+	// kep: http://kep.k8s.io/5677
+	//
+	// Enables ResourceSlice.Spec.PartitionTypeAttribute, which opts a
+	// partitionable pool into the typed partitionSummary view of
+	// ResourcePoolStatusRequest. Depends on both DRAPartitionableDevices
+	// (the field is only meaningful for pools with SharedCounters) and
+	// DRAResourcePoolStatus (the feature that consumes it).
+	DRAPartitionableDevicesType featuregate.Feature = "DRAPartitionableDevicesType"
+
 	// owner: @mortent
 	// kep: http://kep.k8s.io/4816
 	//
@@ -386,6 +396,12 @@ const (
 	// Enables external service account JWT signing and key management.
 	// If enabled, it allows passing --service-account-signing-endpoint flag to configure external signer.
 	ExternalServiceAccountTokenSigner featuregate.Feature = "ExternalServiceAccountTokenSigner"
+
+	// owner: @amritansh1502
+	// kep: https://kep.k8s.io/4939
+	//
+	// Enables TLS support for gRPC health check probes.
+	GRPCContainerProbeTLS featuregate.Feature = "GRPCContainerProbeTLS"
 
 	// owner: @erictune @wojtek-t
 	//
@@ -1407,6 +1423,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 		{Version: version.MustParse("1.36"), Default: true, PreRelease: featuregate.Beta},
 	},
 
+	DRAPartitionableDevicesType: {
+		{Version: version.MustParse("1.37"), Default: false, PreRelease: featuregate.Alpha},
+	},
+
 	DRAPrioritizedList: {
 		{Version: version.MustParse("1.33"), Default: false, PreRelease: featuregate.Alpha},
 		{Version: version.MustParse("1.34"), Default: true, PreRelease: featuregate.Beta},
@@ -1491,6 +1511,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 		{Version: version.MustParse("1.32"), Default: false, PreRelease: featuregate.Alpha},
 		{Version: version.MustParse("1.34"), Default: true, PreRelease: featuregate.Beta},
 		{Version: version.MustParse("1.36"), Default: true, PreRelease: featuregate.GA, LockToDefault: true},
+	},
+
+	GRPCContainerProbeTLS: {
+		{Version: version.MustParse("1.37"), Default: false, PreRelease: featuregate.Alpha},
 	},
 
 	GenericWorkload: {
@@ -2445,6 +2469,8 @@ var defaultKubernetesFeatureGateDependencies = map[featuregate.Feature][]feature
 
 	DRAPartitionableDevices: {DynamicResourceAllocation},
 
+	DRAPartitionableDevicesType: {DynamicResourceAllocation, DRAPartitionableDevices, DRAResourcePoolStatus},
+
 	DRAPrioritizedList: {DynamicResourceAllocation},
 
 	DRAResourceClaimDeviceStatus: {}, // Soft dependency on DynamicResourceAllocation due to on/off-by-default conflict.
@@ -2476,6 +2502,8 @@ var defaultKubernetesFeatureGateDependencies = map[featuregate.Feature][]feature
 	ExtendWebSocketsToKubelet: {NodeDeclaredFeatures},
 
 	ExternalServiceAccountTokenSigner: {},
+
+	GRPCContainerProbeTLS: {},
 
 	GenericWorkload: {},
 

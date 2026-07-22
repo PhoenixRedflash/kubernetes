@@ -765,6 +765,95 @@ type PersistentVolumeClaimCondition struct {
 	Message string `json:"message,omitempty" protobuf:"bytes,6,opt,name=message"`
 }
 
+// VolumeHealthStatusType describes the health status category of a volume.
+// +enum
+// +k8s:enum
+type VolumeHealthStatusType string
+
+const (
+	// VolumeHealthInaccessible indicates the volume cannot be accessed.
+	VolumeHealthInaccessible VolumeHealthStatusType = "Inaccessible"
+	// VolumeHealthDataLoss indicates data loss has been detected on the volume.
+	VolumeHealthDataLoss VolumeHealthStatusType = "DataLoss"
+	// VolumeHealthDegraded indicates the volume is functioning but with reduced capability.
+	VolumeHealthDegraded VolumeHealthStatusType = "Degraded"
+)
+
+// VolumeHealthCondition represents an adverse health condition reported for a volume.
+type VolumeHealthCondition struct {
+	// status is the machine-parseable health category.
+	// Possible values:
+	// - "Inaccessible": the volume cannot be accessed.
+	// - "DataLoss": data loss has been detected on the volume.
+	// - "Degraded": the volume is functioning with reduced capability.
+	// +required
+	// +k8s:required
+	Status VolumeHealthStatusType `json:"status" protobuf:"bytes,1,opt,name=status,casttype=VolumeHealthStatusType"`
+	// reason is a brief CamelCase machine-parseable reason.
+	// Together with status it forms the unique identity of a condition entry.
+	// Maximum permitted length of a reason is 256 bytes.
+	// +required
+	// +k8s:required
+	// +k8s:maxBytes=256
+	Reason string `json:"reason" protobuf:"bytes,2,opt,name=reason"`
+	// message is a human-readable description.
+	// Maximum permitted length of a message is 1024 bytes.
+	// +optional
+	// +k8s:optional
+	// +k8s:maxBytes=1024
+	Message string `json:"message,omitempty" protobuf:"bytes,3,opt,name=message"`
+}
+
+// VolumeHealthStatus contains health information for a volume reported
+// by the CSI controller plugin.
+type VolumeHealthStatus struct {
+	// conditions is the set of adverse conditions reported by
+	// the CSI controller plugin. An empty list means no adverse condition.
+	// At most 16 conditions may be reported.
+	// +optional
+	// +listType=map
+	// +listMapKey=status
+	// +patchMergeKey=status
+	// +patchStrategy=merge
+	// +listMapKey=reason
+	// +k8s:optional
+	// +k8s:listType=map
+	// +k8s:listMapKey=status
+	// +k8s:listMapKey=reason
+	// +k8s:maxItems=16
+	HealthConditions []VolumeHealthCondition `json:"healthConditions,omitempty" patchStrategy:"merge" patchMergeKey:"status" protobuf:"bytes,1,rep,name=healthConditions"`
+	// lastTransitionTime is when the current set of conditions first appeared.
+	// +optional
+	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty" protobuf:"bytes,2,opt,name=lastTransitionTime"`
+}
+
+// PodVolumeHealth contains health information for a volume used by a pod,
+// reported by the CSI node plugin via the kubelet.
+type PodVolumeHealth struct {
+	// name matches an entry in pod.spec.volumes.
+	// +required
+	// +k8s:required
+	Name string `json:"name" protobuf:"bytes,1,opt,name=name"`
+	// conditions is the set of adverse conditions reported by
+	// the CSI node plugin for this volume on this node.
+	// At most 16 conditions may be reported.
+	// +optional
+	// +listType=map
+	// +listMapKey=status
+	// +patchMergeKey=status
+	// +patchStrategy=merge
+	// +listMapKey=reason
+	// +k8s:optional
+	// +k8s:listType=map
+	// +k8s:listMapKey=status
+	// +k8s:listMapKey=reason
+	// +k8s:maxItems=16
+	HealthConditions []VolumeHealthCondition `json:"healthConditions,omitempty" patchStrategy:"merge" patchMergeKey:"status" protobuf:"bytes,2,rep,name=healthConditions"`
+	// lastTransitionTime is when the current set of conditions first appeared.
+	// +optional
+	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty" protobuf:"bytes,3,opt,name=lastTransitionTime"`
+}
+
 // PersistentVolumeClaimStatus is the current status of a persistent volume claim.
 type PersistentVolumeClaimStatus struct {
 	// phase represents the current phase of PersistentVolumeClaim.
@@ -858,6 +947,12 @@ type PersistentVolumeClaimStatus struct {
 	// +featureGate=VolumeAttributesClass
 	// +optional
 	ModifyVolumeStatus *ModifyVolumeStatus `json:"modifyVolumeStatus,omitempty" protobuf:"bytes,9,opt,name=modifyVolumeStatus"`
+	// healthStatus contains the latest controller-reported health information
+	// for the volume bound to this claim.
+	// +featureGate=CSIVolumeHealth
+	// +optional
+	// +k8s:optional
+	HealthStatus *VolumeHealthStatus `json:"healthStatus,omitempty" protobuf:"bytes,10,opt,name=healthStatus"`
 }
 
 // +enum
@@ -2762,7 +2857,28 @@ type GRPCAction struct {
 	// +optional
 	// +default=""
 	Service *string `json:"service" protobuf:"bytes,2,opt,name=service"`
+
+	// mode specifies the connection mode for the gRPC health probe.
+	// Set to "TLS" to use TLS without certificate verification.
+	// Set to "Plaintext" to use a plaintext (insecure) connection explicitly.
+	// If not specified, the probe uses a plaintext (insecure) connection.
+	// +featureGate=GRPCContainerProbeTLS
+	// +optional
+	Mode *GRPCProbeMode `json:"mode,omitempty" protobuf:"bytes,3,opt,name=mode,casttype=GRPCProbeMode"`
 }
+
+// GRPCProbeMode describes the connection mode for a gRPC probe.
+// +enum
+type GRPCProbeMode string
+
+const (
+	// GRPCProbeModePlaintext indicates that the probe should use a plaintext
+	// (insecure) gRPC connection.
+	GRPCProbeModePlaintext GRPCProbeMode = "Plaintext"
+	// GRPCProbeModeTLS indicates that the probe should connect using TLS
+	// without certificate verification.
+	GRPCProbeModeTLS GRPCProbeMode = "TLS"
+)
 
 // ExecAction describes a "run in container" action.
 type ExecAction struct {
@@ -3472,8 +3588,13 @@ type ContainerStatus struct {
 // ResourceStatus represents the status of a single resource allocated to a Pod.
 type ResourceStatus struct {
 	// Name of the resource. Must be unique within the pod and in case of non-DRA resource, match one of the resources from the pod spec.
-	// For DRA resources, the value must be "claim:<claim_name>/<request>".
-	// When this status is reported about a container, the "claim_name" and "request" must match one of the claims of this container.
+	// For DRA resources, the value must be "claim:<claim_name>/<request>" when
+	// container.resources.claims[*].request is set or "claim:<claim_name>" when
+	// container.resources.claims[*].request is empty.
+	// For DRA-backed extended resources, "claim:<claim_name>/<request>" is used
+	// when the claim name and request name are recorded in pod.status.extendedResourceClaimStatus.
+	// When this status is reported about a container, the "claim_name" and "request"
+	// must match one of the claims of this container.
 	// +required
 	Name ResourceName `json:"name" protobuf:"bytes,1,opt,name=name"`
 	// List of unique resources health. Each element in the list contains an unique resource ID and its health.
@@ -5539,6 +5660,17 @@ type PodStatus struct {
 	// +optional
 	// +listType=atomic
 	NodeAllocatableResourceClaimStatuses []NodeAllocatableResourceClaimStatus `json:"nodeAllocatableResourceClaimStatuses,omitempty" protobuf:"bytes,21,rep,name=nodeAllocatableResourceClaimStatuses"`
+
+	// volumeHealth contains node-reported health for each volume the pod is using.
+	// Populated by the kubelet on the pod's node.
+	// +featureGate=CSIVolumeHealth
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +k8s:optional
+	// +k8s:listType=map
+	// +k8s:listMapKey=name
+	VolumeHealth []PodVolumeHealth `json:"volumeHealth,omitempty" protobuf:"bytes,22,rep,name=volumeHealth"`
 }
 
 // +genclient

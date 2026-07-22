@@ -2568,6 +2568,17 @@
   componentEndpoints:
   - component: kubelet
     endpoint: /metrics/resource
+- name: csi_node_storage_health_status
+  help: CSI node storage backend health conditions currently reported (1 = present).
+  type: Gauge
+  stabilityLevel: ALPHA
+  labels:
+  - driver_name
+  - reason
+  - status
+  componentEndpoints:
+  - component: kubelet
+    endpoint: /metrics
 - name: operations_seconds
   subsystem: csi
   help: Container Storage Interface operation duration with gRPC error code status
@@ -4849,17 +4860,6 @@
   componentEndpoints:
   - component: kubelet
     endpoint: /metrics
-- name: kubelet_volume_stats_health_status_abnormal
-  help: Abnormal volume health status. The count is either 1 or 0. 1 indicates the
-    volume is unhealthy, 0 indicates volume is healthy
-  type: Custom
-  stabilityLevel: ALPHA
-  labels:
-  - namespace
-  - persistentvolumeclaim
-  componentEndpoints:
-  - component: kubelet
-    endpoint: /metrics
 - name: kubelet_volume_stats_inodes
   help: Maximum number of inodes in the volume
   type: Custom
@@ -6270,8 +6270,9 @@
 - name: route_sync_total
   subsystem: route_controller
   help: A metric counting the number of route reconciles with the cloud provider,
-    labeled by the trigger (periodic or node_change) and the outcome (changed if at
-    least one route was created or deleted, otherwise noop).
+    labeled by the trigger (periodic or node_change) and the outcome (error if the
+    reconcile failed, changed if at least one route was created or deleted, otherwise
+    noop).
   type: Counter
   stabilityLevel: ALPHA
   labels:

@@ -705,6 +705,68 @@ type PersistentVolumeClaimCondition struct {
 	Message string
 }
 
+// VolumeHealthStatusType describes the health status category of a volume.
+type VolumeHealthStatusType string
+
+const (
+	// VolumeHealthInaccessible indicates the volume cannot be accessed.
+	VolumeHealthInaccessible VolumeHealthStatusType = "Inaccessible"
+	// VolumeHealthDataLoss indicates data loss has been detected on the volume.
+	VolumeHealthDataLoss VolumeHealthStatusType = "DataLoss"
+	// VolumeHealthDegraded indicates the volume is functioning but with reduced capability.
+	VolumeHealthDegraded VolumeHealthStatusType = "Degraded"
+)
+
+// VolumeHealthCondition represents an adverse health condition reported for a volume.
+type VolumeHealthCondition struct {
+	// status is the machine-parseable health category.
+	// Possible values:
+	// - "Inaccessible": the volume cannot be accessed.
+	// - "DataLoss": data loss has been detected on the volume.
+	// - "Degraded": the volume is functioning with reduced capability.
+	Status VolumeHealthStatusType
+	// reason is a brief CamelCase machine-parseable reason.
+	// Together with status it forms the unique identity of a condition entry.
+	Reason string
+	// message is a human-readable description.
+	// +optional
+	Message string
+}
+
+// VolumeHealthStatus contains health information for a volume reported
+// by the CSI controller plugin.
+type VolumeHealthStatus struct {
+	// conditions is the set of adverse conditions reported by
+	// the CSI controller plugin. An empty list means no adverse condition.
+	// At most 16 conditions may be reported.
+	// +optional
+	// +listType=map
+	// +listMapKey=status
+	// +listMapKey=reason
+	HealthConditions []VolumeHealthCondition
+	// lastTransitionTime is when the current set of conditions first appeared.
+	// +optional
+	LastTransitionTime metav1.Time
+}
+
+// PodVolumeHealth contains health information for a volume used by a pod,
+// reported by the CSI node plugin via the kubelet.
+type PodVolumeHealth struct {
+	// name matches an entry in pod.spec.volumes.
+	Name string
+	// conditions is the set of adverse conditions reported by
+	// the CSI node plugin for this volume on this node.
+	// At most 16 conditions may be reported.
+	// +optional
+	// +listType=map
+	// +listMapKey=status
+	// +listMapKey=reason
+	HealthConditions []VolumeHealthCondition
+	// lastTransitionTime is when the current set of conditions first appeared.
+	// +optional
+	LastTransitionTime metav1.Time
+}
+
 // PersistentVolumeClaimStatus represents the status of PV claim
 type PersistentVolumeClaimStatus struct {
 	// Phase represents the current phase of PersistentVolumeClaim
@@ -786,6 +848,11 @@ type PersistentVolumeClaimStatus struct {
 	// +featureGate=VolumeAttributesClass
 	// +optional
 	ModifyVolumeStatus *ModifyVolumeStatus
+	// healthStatus contains the latest controller-reported health information
+	// for the volume bound to this claim.
+	// +featureGate=CSIVolumeHealth
+	// +optional
+	HealthStatus *VolumeHealthStatus
 }
 
 // PersistentVolumeAccessMode defines various access modes for PV.
@@ -2869,7 +2936,28 @@ type GRPCAction struct {
 	// If this is not specified, the default behavior is to probe the server's overall health status.
 	// +optional
 	Service *string
+
+	// mode specifies the connection mode for the gRPC health probe.
+	// Set to "TLS" to use TLS without certificate verification.
+	// Set to "Plaintext" to use a plaintext (insecure) connection explicitly.
+	// If not specified, the probe uses a plaintext (insecure) connection.
+	// +featureGate=GRPCContainerProbeTLS
+	// +optional
+	Mode *GRPCProbeMode
 }
+
+// GRPCProbeMode describes the connection mode for a gRPC probe.
+// +enum
+type GRPCProbeMode string
+
+const (
+	// GRPCProbeModePlaintext indicates that the probe should use a plaintext
+	// (insecure) gRPC connection.
+	GRPCProbeModePlaintext GRPCProbeMode = "Plaintext"
+	// GRPCProbeModeTLS indicates that the probe should connect using TLS
+	// without certificate verification.
+	GRPCProbeModeTLS GRPCProbeMode = "TLS"
+)
 
 // Signal defines the stop signal of containers
 // +enum
@@ -3114,8 +3202,13 @@ type ContainerStatus struct {
 
 type ResourceStatus struct {
 	// Name of the resource. Must be unique within the pod and in case of non-DRA resource, match one of the resources from the pod spec.
-	// For DRA resources, the value must be "claim:<claim_name>/<request>".
-	// When this status is reported about a container, the "claim_name" and "request" must match one of the claims of this container.
+	// For DRA resources, the value must be "claim:<claim_name>/<request>" when
+	// container.resources.claims[*].request is set or "claim:<claim_name>" when
+	// container.resources.claims[*].request is empty.
+	// For DRA-backed extended resources, "claim:<claim_name>/<request>" is used
+	// when the claim name and request name are recorded in pod.status.extendedResourceClaimStatus.
+	// When this status is reported about a container, the "claim_name" and "request"
+	// must match one of the claims of this container.
 	// +required
 	Name ResourceName
 	// List of unique resources health. Each element in the list contains an unique resource ID and its health.
@@ -4770,6 +4863,14 @@ type PodStatus struct {
 	// +optional
 	// +listType=atomic
 	NodeAllocatableResourceClaimStatuses []NodeAllocatableResourceClaimStatus
+
+	// volumeHealth contains node-reported health for each volume the pod is using.
+	// Populated by the kubelet on the pod's node.
+	// +featureGate=CSIVolumeHealth
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	VolumeHealth []PodVolumeHealth
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
