@@ -342,6 +342,11 @@ type Dependencies struct {
 	HealthChecker             watchdog.HealthChecker
 	// remove it after cadvisor.UsingLegacyCadvisorStats dropped.
 	useLegacyCadvisorStats bool
+	// PodSandboxStatsUnimplemented is set during init when the CRI does not
+	// support PodSandboxStats. It can be removed once
+	// PodAndContainerStatsFromCRI is GA and cadvisor stats are no longer
+	// used as a fallback.
+	PodSandboxStatsUnimplemented bool
 }
 
 // newCrashLoopBackOff configures the backoff maximum to be used
@@ -877,6 +882,7 @@ func NewMainKubelet(ctx context.Context,
 			kubeDeps.RemoteImageService,
 			hostStatsProvider,
 			utilfeature.DefaultFeatureGate.Enabled(features.PodAndContainerStatsFromCRI),
+			kubeDeps.PodSandboxStatsUnimplemented,
 			cadvisorStatsProvider,
 		)
 	}
@@ -1039,7 +1045,7 @@ func NewMainKubelet(ctx context.Context,
 			kubeDeps.KubeClient,
 			klet.podManager,
 			kubeDeps.Recorder,
-			kubeInformers.Certificates().V1beta1().PodCertificateRequests(),
+			kubeInformers.Certificates().V1().PodCertificateRequests(),
 			nodeInformer,
 			nodeName,
 			clock.RealClock{},
@@ -2975,6 +2981,15 @@ func (kl *Kubelet) HandlePodUpdates(ctx context.Context, pods []*v1.Pod) {
 		oldPod, _ := kl.podManager.GetPodByUID(pod.UID)
 		kl.podManager.UpdatePod(pod)
 
+		if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
+			// Skip pods that haven't been allocated yet to avoid counting them against
+			// node capacity before they've been admitted.
+			if !kl.allocationManager.HasPodAllocatedResources(pod.UID) {
+				logger.V(4).Info("Skipping pod update for non-allocated pod", "pod", klog.KObj(pod), "podUID", pod.UID)
+				continue
+			}
+		}
+
 		pod, mirrorPod, wasMirror := kl.podManager.GetPodAndMirrorPod(pod)
 		if wasMirror {
 			if pod == nil {
@@ -3187,6 +3202,8 @@ func (kl *Kubelet) HandlePodReconcile(ctx context.Context, pods []*v1.Pod) {
 		if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
 			if hasPendingResizes && !retryPendingResizes && oldPod != nil {
 				// If the pod has reached a terminal phase, we retry all pending resizes.
+				// A terminated pod releases capacity even if its allocation has already
+				// been purged, so check this before the non-allocated skip below.
 				if podutil.IsPodTerminal(pod) && !podutil.IsPodTerminal(oldPod) {
 					retryPendingResizes = true
 					triggerReason = allocation.TriggerReasonPodTerminated
@@ -3213,6 +3230,13 @@ func (kl *Kubelet) HandlePodReconcile(ctx context.Context, pods []*v1.Pod) {
 					retryPendingResizes = true
 					triggerReason = allocation.TriggerReasonPodResized
 				}
+			}
+
+			// Skip further reconciliation for pods that haven't been allocated yet.
+			// We still updated podManager above to keep status in sync with the API server.
+			if !kl.allocationManager.HasPodAllocatedResources(pod.UID) {
+				logger.V(4).Info("Skipping pod reconcile operations for non-allocated pod", "pod", klog.KObj(pod), "podUID", pod.UID)
+				continue
 			}
 		}
 
