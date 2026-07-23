@@ -144,6 +144,10 @@ type kubeGenericRuntimeManager struct {
 	// CPUCFSQuotaPeriod sets the CPU CFS quota period value, cpu.cfs_period_us, defaults to 100ms
 	cpuCFSQuotaPeriod metav1.Duration
 
+	// Collection of Linux kernel parameters (sysctls) that will be applied to
+	// the pods running on this node.
+	defaultPodSysctls map[string]string
+
 	// wrapped image puller.
 	imagePuller images.ImageManager
 
@@ -188,7 +192,8 @@ type kubeGenericRuntimeManager struct {
 	getNodeAllocatable func() v1.ResourceList
 
 	// Memory throttling factor for MemoryQoS
-	memoryThrottlingFactor float64
+	// If nil, memory.high is not set (throttling is disabled).
+	memoryThrottlingFactor *float64
 	// Memory reservation policy for MemoryQoS memory.min behavior
 	memoryReservationPolicy kubeletconfiginternal.MemoryReservationPolicy
 
@@ -237,6 +242,7 @@ func NewKubeGenericRuntimeManager(
 	singleProcessOOMKill *bool,
 	cpuCFSQuota bool,
 	cpuCFSQuotaPeriod metav1.Duration,
+	defaultPodSysctls map[string]string,
 	runtimeService internalapi.RuntimeService,
 	imageService internalapi.ImageManagerService,
 	containerManager cm.ContainerManager,
@@ -245,7 +251,7 @@ func NewKubeGenericRuntimeManager(
 	seccompDefault bool,
 	memorySwapBehavior string,
 	getNodeAllocatable func() v1.ResourceList,
-	memoryThrottlingFactor float64,
+	memoryThrottlingFactor *float64,
 	memoryReservationPolicy kubeletconfiginternal.MemoryReservationPolicy,
 	podPullingTimeRecorder images.ImagePodPullingTimeRecorder,
 	tracerProvider trace.TracerProvider,
@@ -263,6 +269,7 @@ func NewKubeGenericRuntimeManager(
 		singleProcessOOMKill:         singleProcessOOMKill,
 		cpuCFSQuota:                  cpuCFSQuota,
 		cpuCFSQuotaPeriod:            cpuCFSQuotaPeriod,
+		defaultPodSysctls:            defaultPodSysctls,
 		seccompProfileRoot:           filepath.Join(rootDirectory, "seccomp"),
 		livenessManager:              livenessManager,
 		readinessManager:             readinessManager,

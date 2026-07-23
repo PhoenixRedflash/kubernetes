@@ -541,6 +541,7 @@ func createGenericRuntimeManager(ctx context.Context, kubelet *Kubelet, kubeCfg 
 		nil,
 		kubeCfg.CPUCFSQuota,
 		kubeCfg.CPUCFSQuotaPeriod,
+		kubeCfg.DefaultPodSysctls,
 		runtimeSvc,
 		imageSvc,
 		kubelet.containerManager,
@@ -549,7 +550,7 @@ func createGenericRuntimeManager(ctx context.Context, kubelet *Kubelet, kubeCfg 
 		false,
 		kubeCfg.MemorySwap.SwapBehavior,
 		kubelet.containerManager.GetNodeAllocatableAbsolute,
-		*kubeCfg.MemoryThrottlingFactor,
+		kubeCfg.MemoryThrottlingFactor,
 		kubeCfg.MemoryReservationPolicy,
 		kubelet.podStartupLatencyTracker,
 		tracerProvider,
@@ -5214,6 +5215,7 @@ func TestHandlePodReconcile_RetryPendingResizes(t *testing.T) {
 		t.Skip("InPlacePodVerticalScaling is not currently supported for Windows")
 	}
 	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.InPlacePodVerticalScaling, true)
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.DRANodeAllocatableResources, true)
 	logger, tCtx := ktesting.NewTestContext(t)
 
 	testKubelet := newTestKubeletExcludeAdmitHandlers(t, false /* controllerAttachDetachEnabled */, true /*enableResizing*/)
@@ -5342,6 +5344,37 @@ func TestHandlePodReconcile_RetryPendingResizes(t *testing.T) {
 			newPod:                   terminalPodNoAllocation,
 			setAllocation:            false,
 			shouldRetryPendingResize: true,
+		},
+		{
+			name: "requests decreasing due to DRA claim mapping reduction",
+			oldPod: func() *v1.Pod {
+				p := makePodWithResources("updated-pod", v1.ResourceList{v1.ResourceCPU: lowCPU}, v1.ResourceList{v1.ResourceCPU: lowCPU})
+				p.Status.NodeAllocatableResourceClaimStatuses = []v1.NodeAllocatableResourceClaimStatus{
+					{
+						ResourceClaimName: "claim-1",
+						Containers:        []string{"c1"},
+						Mapping: []v1.NodeAllocatableMappedResources{
+							{Name: v1.ResourceCPU, Quantity: new(resource.MustParse("500m"))},
+						},
+					},
+				}
+				return p
+			}(),
+			newPod: func() *v1.Pod {
+				p := makePodWithResources("updated-pod", v1.ResourceList{v1.ResourceCPU: lowCPU}, v1.ResourceList{v1.ResourceCPU: lowCPU})
+				p.Status.NodeAllocatableResourceClaimStatuses = []v1.NodeAllocatableResourceClaimStatus{
+					{
+						ResourceClaimName: "claim-1",
+						Containers:        []string{"c1"},
+						Mapping: []v1.NodeAllocatableMappedResources{
+							{Name: v1.ResourceCPU, Quantity: new(resource.MustParse("100m"))},
+						},
+					},
+				}
+				return p
+			}(),
+			shouldRetryPendingResize: true,
+			setAllocation:            true,
 		},
 	}
 

@@ -723,9 +723,9 @@ func NewMainKubelet(ctx context.Context,
 
 	klet.statusManager = status.NewManager(klet.kubeClient, klet.podManager, klet, kubeDeps.PodStartupLatencyTracker)
 
+	broadcaster := pods.NewBroadcaster(ctx)
+	klet.podsServer = pods.NewPodsServer(broadcaster, klet.podManager, klet.statusManager, klet.sourcesReady)
 	if utilfeature.DefaultFeatureGate.Enabled(features.PodsAPI) {
-		broadcaster := pods.NewBroadcaster(ctx)
-		klet.podsServer = pods.NewPodsServer(broadcaster, klet.podManager, klet.statusManager)
 		klet.statusManager.AddPodUpdateNotifier(klet.podsServer)
 	}
 	klet.allocationManager = allocation.NewManager(
@@ -825,6 +825,7 @@ func NewMainKubelet(ctx context.Context,
 		singleProcessOOMKill,
 		kubeCfg.CPUCFSQuota,
 		kubeCfg.CPUCFSQuotaPeriod,
+		kubeCfg.DefaultPodSysctls,
 		kubeDeps.RemoteRuntimeService,
 		kubeDeps.RemoteImageService,
 		kubeDeps.ContainerManager,
@@ -833,7 +834,7 @@ func NewMainKubelet(ctx context.Context,
 		seccompDefault,
 		kubeCfg.MemorySwap.SwapBehavior,
 		kubeDeps.ContainerManager.GetNodeAllocatableAbsolute,
-		*kubeCfg.MemoryThrottlingFactor,
+		kubeCfg.MemoryThrottlingFactor,
 		kubeCfg.MemoryReservationPolicy,
 		klet.podStartupLatencyTracker,
 		kubeDeps.TracerProvider,
@@ -2928,6 +2929,7 @@ func (kl *Kubelet) HandlePodAdditions(ctx context.Context, pods []*v1.Pod) {
 				recordAdmissionRejection(reason)
 				continue
 			}
+			recordPodLevelResourcesAdmission(pod)
 
 			if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
 				// Backfill the queue of pending resizes, but only after all the pods have
@@ -3200,6 +3202,7 @@ func (kl *Kubelet) HandlePodReconcile(ctx context.Context, pods []*v1.Pod) {
 					UseStatusResources:                             true,
 					SkipPodLevelResources:                          !utilfeature.DefaultFeatureGate.Enabled(features.PodLevelResources),
 					InPlacePodLevelResourcesVerticalScalingEnabled: utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodLevelResourcesVerticalScaling),
+					UseDRANodeAllocatableResourceClaimStatus:       utilfeature.DefaultFeatureGate.Enabled(features.DRANodeAllocatableResources),
 				}
 
 				// Ignore desired resources when aggregating the resources.

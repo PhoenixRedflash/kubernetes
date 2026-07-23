@@ -318,6 +318,12 @@ const (
 	// Enables support for reserving and replicating templated ResourceClaims for an entire PodGroup.
 	DRAWorkloadResourceClaims featuregate.Feature = "DRAWorkloadResourceClaims"
 
+	// owner: @VeraQin
+	// kep: https://kep.k8s.io/5996
+	//
+	// Enables support for DefaultPodSysctls in Kubelet Configuration.
+	DefaultPodSysctls featuregate.Feature = "DefaultPodSysctls"
+
 	// owner: @atiratree
 	// kep: http://kep.k8s.io/3973
 	//
@@ -360,6 +366,12 @@ const (
 	// that is independent of a Pod. Resource allocation is done by the scheduler
 	// based on "structured parameters".
 	DynamicResourceAllocation featuregate.Feature = "DynamicResourceAllocation"
+
+	// owner: @nispriha
+	// kep: https://kep.k8s.io/5502
+	//
+	// Enables setting custom Unix permission bits on emptyDir volume directories.
+	EmptyDirVolumeMode featuregate.Feature = "EmptyDirVolumeMode"
 
 	// owner: @HirazawaUi
 	// kep: http://kep.k8s.io/3721
@@ -551,6 +563,11 @@ const (
 	// Enables a userspace TCP proxy in the nftables kube-proxy backend that
 	// serves localhost NodePort services on IPv4 and IPv6.
 	KubeProxyNFTablesLocalhostNodePorts featuregate.Feature = "KubeProxyNFTablesLocalhostNodePorts"
+
+	// owner: @tallclair
+	//
+	// Enables the kubelet allocated pods endpoint.
+	KubeletAllocatedPodsEndpoint featuregate.Feature = "KubeletAllocatedPodsEndpoint"
 
 	// owner: @marquiz
 	// kep: http://kep.k8s.io/4033
@@ -1472,6 +1489,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 		{Version: version.MustParse("1.36"), Default: false, PreRelease: featuregate.Alpha},
 	},
 
+	DefaultPodSysctls: {
+		{Version: version.MustParse("1.37"), Default: false, PreRelease: featuregate.Alpha},
+	},
+
 	DeploymentReplicaSetTerminatingReplicas: {
 		{Version: version.MustParse("1.33"), Default: false, PreRelease: featuregate.Alpha},
 		{Version: version.MustParse("1.35"), Default: true, PreRelease: featuregate.Beta},
@@ -1503,6 +1524,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 		{Version: version.MustParse("1.34"), Default: true, PreRelease: featuregate.GA},
 		{Version: version.MustParse("1.35"), Default: true, PreRelease: featuregate.GA, LockToDefault: true},
 		// TODO (https://github.com/kubernetes/kubernetes/issues/134459): remove completely in 1.38
+	},
+
+	EmptyDirVolumeMode: {
+		{Version: version.MustParse("1.37"), Default: false, PreRelease: featuregate.Alpha},
 	},
 
 	EnvFiles: {
@@ -1583,6 +1608,7 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 	HostnameOverride: {
 		{Version: version.MustParse("1.34"), Default: false, PreRelease: featuregate.Alpha},
 		{Version: version.MustParse("1.35"), Default: true, PreRelease: featuregate.Beta},
+		{Version: version.MustParse("1.37"), Default: true, PreRelease: featuregate.GA, LockToDefault: true},
 	},
 
 	HugepageAwareEviction: {
@@ -1650,6 +1676,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 	},
 
 	KubeProxyNFTablesLocalhostNodePorts: {
+		{Version: version.MustParse("1.37"), Default: false, PreRelease: featuregate.Alpha},
+	},
+
+	KubeletAllocatedPodsEndpoint: {
 		{Version: version.MustParse("1.37"), Default: false, PreRelease: featuregate.Alpha},
 	},
 
@@ -1751,6 +1781,7 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 
 	MemoryQoS: {
 		{Version: version.MustParse("1.22"), Default: false, PreRelease: featuregate.Alpha},
+		{Version: version.MustParse("1.37"), Default: true, PreRelease: featuregate.Beta},
 	},
 
 	MultiCIDRServiceAllocator: {
@@ -1910,6 +1941,7 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 
 	PodsAPI: {
 		{Version: version.MustParse("1.36"), Default: false, PreRelease: featuregate.Alpha},
+		{Version: version.MustParse("1.37"), Default: true, PreRelease: featuregate.Beta},
 	},
 
 	PortForwardWebsockets: {
@@ -2234,6 +2266,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 		{Version: version.MustParse("1.26"), Default: true, PreRelease: featuregate.Beta},
 	},
 
+	genericfeatures.APIServerWebhookAuthenticationToken: {
+		{Version: version.MustParse("1.37"), Default: false, PreRelease: featuregate.Alpha},
+	},
+
 	genericfeatures.APIServingWithRoutine: {
 		{Version: version.MustParse("1.30"), Default: false, PreRelease: featuregate.Alpha},
 	},
@@ -2508,6 +2544,8 @@ var defaultKubernetesFeatureGateDependencies = map[featuregate.Feature][]feature
 
 	DRAWorkloadResourceClaims: {DynamicResourceAllocation, GenericWorkload},
 
+	DefaultPodSysctls: {},
+
 	DeploymentReplicaSetTerminatingReplicas: {},
 
 	DisableAllocatorDualWrite: {MultiCIDRServiceAllocator},
@@ -2517,6 +2555,8 @@ var defaultKubernetesFeatureGateDependencies = map[featuregate.Feature][]feature
 	DisableNodeKubeProxyVersion: {},
 
 	DynamicResourceAllocation: {},
+
+	EmptyDirVolumeMode: {},
 
 	EnvFiles: {},
 
@@ -2579,6 +2619,8 @@ var defaultKubernetesFeatureGateDependencies = map[featuregate.Feature][]feature
 	KubeProxyIPVS: {},
 
 	KubeProxyNFTablesLocalhostNodePorts: {},
+
+	KubeletAllocatedPodsEndpoint: {InPlacePodVerticalScaling},
 
 	KubeletCgroupDriverFromCRI: {},
 
@@ -2807,6 +2849,8 @@ var defaultKubernetesFeatureGateDependencies = map[featuregate.Feature][]feature
 	genericfeatures.APIResponseCompression: {},
 
 	genericfeatures.APIServerIdentity: {},
+
+	genericfeatures.APIServerWebhookAuthenticationToken: {},
 
 	genericfeatures.APIServingWithRoutine: {},
 

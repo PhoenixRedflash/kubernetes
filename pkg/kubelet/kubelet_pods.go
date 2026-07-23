@@ -596,7 +596,7 @@ func (kl *Kubelet) GetOrCreateUserNamespaceMappings(logger klog.Logger, pod *v1.
 func (kl *Kubelet) GeneratePodHostNameAndDomain(logger klog.Logger, pod *v1.Pod) (string, string, error) {
 	clusterDomain := kl.dnsConfigurer.ClusterDomain
 
-	if utilfeature.DefaultFeatureGate.Enabled(features.HostnameOverride) && pod.Spec.HostnameOverride != nil {
+	if pod.Spec.HostnameOverride != nil {
 		hostname := *pod.Spec.HostnameOverride
 		if msgs := utilvalidation.IsDNS1123Subdomain(hostname); len(msgs) != 0 {
 			return "", "", fmt.Errorf("pod HostnameOverride %q is not a valid DNS subdomain: %s", hostname, strings.Join(msgs, ";"))
@@ -2175,7 +2175,8 @@ func (kl *Kubelet) convertStatusToAPIStatus(ctx context.Context, pod *v1.Pod, po
 	if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodLevelResourcesVerticalScaling) {
 		apiPodStatus.Resources = kl.convertToAPIPodLevelResourcesStatus(logger, pod, oldPodStatus)
 		opts := resourcehelper.PodResourcesOptions{
-			SkipPodLevelResources: !utilfeature.DefaultFeatureGate.Enabled(features.PodLevelResources),
+			SkipPodLevelResources:                    !utilfeature.DefaultFeatureGate.Enabled(features.PodLevelResources),
+			UseDRANodeAllocatableResourceClaimStatus: utilfeature.DefaultFeatureGate.Enabled(features.DRANodeAllocatableResources),
 		}
 		apiPodStatus.AllocatedResources = resourcehelper.PodRequests(pod, opts)
 	}
@@ -2189,7 +2190,8 @@ func getEffectiveAllocatedResources(allocatedPod *v1.Pod) *v1.ResourceRequiremen
 		allocatedResources = &v1.ResourceRequirements{}
 	}
 	opts := resourcehelper.PodResourcesOptions{
-		SkipPodLevelResources: !utilfeature.DefaultFeatureGate.Enabled(features.PodLevelResources),
+		SkipPodLevelResources:                    !utilfeature.DefaultFeatureGate.Enabled(features.PodLevelResources),
+		UseDRANodeAllocatableResourceClaimStatus: utilfeature.DefaultFeatureGate.Enabled(features.DRANodeAllocatableResources),
 	}
 	allocatedResources.Requests = resourcehelper.PodRequests(allocatedPod, opts)
 	allocatedResources.Limits = resourcehelper.PodLimits(allocatedPod, opts)
@@ -2273,7 +2275,8 @@ func (kl *Kubelet) convertToAPIPodLevelResourcesStatus(logger klog.Logger, alloc
 
 	if _, found := resources.Requests[v1.ResourceMemory]; !found {
 		opts := resourcehelper.PodResourcesOptions{
-			SkipPodLevelResources: !utilfeature.DefaultFeatureGate.Enabled(features.PodLevelResources),
+			SkipPodLevelResources:                    !utilfeature.DefaultFeatureGate.Enabled(features.PodLevelResources),
+			UseDRANodeAllocatableResourceClaimStatus: utilfeature.DefaultFeatureGate.Enabled(features.DRANodeAllocatableResources),
 		}
 		aggregatedResources := resourcehelper.PodRequests(allocatedPod, opts)
 		if val, ok := aggregatedResources[v1.ResourceMemory]; ok {
@@ -2696,7 +2699,14 @@ func (kl *Kubelet) convertToAPIContainerStatuses(ctx context.Context, pod *v1.Po
 		if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
 			allocatedContainer := kubecontainer.GetContainerSpec(pod, cName)
 			if allocatedContainer != nil {
+				// status.Resources reflects cgroup-actuated resources. If the container is running,
+				// it is populated from CRI status.
 				status.Resources = convertContainerStatusResources(allocatedContainer, status, cStatus, oldStatuses)
+				// status.AllocatedResources represents the desired cgroup resource state for resize,
+				// and is strictly based on the uninflated standard cgroup resources requested in the spec.
+				// DRA based allocations are not included in AllocatedResources at the container level.
+				// This is because the claims can be shared across containers in the pod and can be
+				// shared unevenly (enforced by the DRA driver).
 				status.AllocatedResources = allocatedContainer.Resources.Requests
 			}
 		}
@@ -2969,4 +2979,31 @@ func resolveRecursiveReadOnly(m v1.VolumeMount, runtimeSupportsRRO bool) (bool, 
 	default:
 		return false, fmt.Errorf("unknown recursive read-only mode %q", rroMode)
 	}
+}
+
+func recordPodLevelResourcesAdmission(pod *v1.Pod) {
+	hasResources := func(containers []v1.Container) bool {
+		for _, c := range containers {
+			if len(c.Resources.Requests) > 0 || len(c.Resources.Limits) > 0 {
+				return true
+			}
+		}
+		return false
+	}
+
+	hasPodLevel := resourcehelper.IsPodLevelResourcesSet(pod)
+	hasContainerLevel := hasResources(pod.Spec.Containers) || hasResources(pod.Spec.InitContainers)
+
+	var configMode string
+	switch {
+	case hasPodLevel && hasContainerLevel:
+		configMode = "pod_and_container_level"
+	case hasPodLevel:
+		configMode = "pod_level"
+	case hasContainerLevel:
+		configMode = "container_level"
+	}
+
+	qosLabel := strings.ToLower(string(v1qos.GetPodQOS(pod)))
+	metrics.PodLevelResourcesAdmissionTotal.WithLabelValues(configMode, qosLabel).Inc()
 }

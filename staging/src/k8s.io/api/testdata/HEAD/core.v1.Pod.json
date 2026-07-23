@@ -53,7 +53,8 @@
         },
         "emptyDir": {
           "medium": "mediumValue",
-          "sizeLimit": "0"
+          "sizeLimit": "0",
+          "mode": 3
         },
         "gcePersistentDisk": {
           "pdName": "pdNameValue",
@@ -2204,9 +2205,19 @@
         "containers": [
           "containersValue"
         ],
-        "resources": {
-          "resourcesKey": "0"
-        }
+        "mapping": [
+          {
+            "name": "nameValue",
+            "quantity": "0"
+          }
+        ],
+        "overhead": [
+          {
+            "name": "nameValue",
+            "perPod": "0",
+            "perContainer": "0"
+          }
+        ]
       }
     ],
     "volumeHealth": [
