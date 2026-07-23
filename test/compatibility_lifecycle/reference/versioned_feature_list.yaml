@@ -67,6 +67,10 @@
     lockToDefault: false
     preRelease: Alpha
     version: "1.32"
+  - default: true
+    lockToDefault: false
+    preRelease: Beta
+    version: "1.37"
 - name: APIResponseCompression
   versionedSpecs:
   - default: false
@@ -683,6 +687,12 @@
     lockToDefault: false
     preRelease: Alpha
     version: "1.26"
+- name: EvictionRequestAPI
+  versionedSpecs:
+  - default: false
+    lockToDefault: false
+    preRelease: Alpha
+    version: "1.37"
 - name: ExcludeAdmissionWebhookVirtualResources
   versionedSpecs:
   - default: true
@@ -1295,6 +1305,12 @@
     lockToDefault: false
     preRelease: Beta
     version: "1.37"
+- name: NFTablesNetlink
+  versionedSpecs:
+  - default: true
+    lockToDefault: false
+    preRelease: Beta
+    version: "1.37"
 - name: NFTablesProxyMode
   versionedSpecs:
   - default: false
@@ -1529,6 +1545,10 @@
     lockToDefault: false
     preRelease: Beta
     version: "1.29"
+  - default: true
+    lockToDefault: true
+    preRelease: GA
+    version: "1.37"
 - name: PodsAPI
   versionedSpecs:
   - default: false
