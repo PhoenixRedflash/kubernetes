@@ -557,16 +557,15 @@ func (p *PriorityQueue) isEntityWorthRequeuing(logger klog.Logger, entity framew
 	// For pod groups, if any pod is worth requeuing, the whole group is worth it.
 	// But we should prioritize higher strategies.
 	bestStrategy := queueSkip
-	entity.ForEachPodInfo(func(pInfo *framework.QueuedPodInfo) bool {
+	for pInfo := range entity.ForEachPodInfo() {
 		strategy := p.isPodWorthRequeuing(logger, pInfo, event, oldObj, newObj, hintKeys)
 		if strategy > bestStrategy {
 			bestStrategy = strategy
 		}
 		if bestStrategy == queueImmediately {
-			return false
+			return bestStrategy
 		}
-		return true
-	})
+	}
 	return bestStrategy
 }
 
@@ -697,27 +696,33 @@ func queueingHintToLabel(hint fwk.QueueingHint, err error) string {
 // Note: we need to associate the failed plugin to `entity`, so that the entity can be moved back
 // to activeQ by related cluster event.
 func (p *PriorityQueue) runPreEnqueuePlugins(ctx context.Context, entity framework.QueuedEntityInfo) {
-	var anyGatedPodInfo *framework.QueuedPodInfo
-	// Run PreEnqueue plugins for each pod, even if it could stop after the first being gated,
-	// as we need to populate any per-pod metrics.
-	entity.ForEachPodInfo(func(pInfo *framework.QueuedPodInfo) bool {
+	// Run PreEnqueue plugins for each pod until the first gets gated.
+	// Breaking after the first gated pod is sufficient,
+	// because in case of pod groups, this specific pod has to be ungated before ungating the group.
+	// Gating conditions for other pods, even if caused by different plugins,
+	// will be handled in later runs.
+	//
+	// Note: As a consequence, the `unschedulable_pods` metric will only reflect the gating
+	// reason of the first gated pod in the group rather than all gated members simultaneously.
+	// However, the group is still accurately tracked in `pending_pods{queue="gated"}` /
+	// `pending_entities`, and gating reasons for subsequent pods will be recorded in later
+	// passes once preceding pods are ungated.
+	for pInfo := range entity.ForEachPodInfo() {
 		p.runPreEnqueuePluginsForPod(ctx, pInfo)
 		if pInfo.Gated() {
 			// If any pod is gated, the whole entity is gated.
 			// Otherwise, such gated pod would have to be put in a separate entity object
 			// and tracked individually, complicating the flow.
-			anyGatedPodInfo = pInfo
+			//
+			// Copying the gating plugin info only from a single pod is sufficient,
+			// because if the entity is a pod group, all pods should be ungated before the entire pod group can be ungated,
+			// including this pod.
+			entity.SetGatingPlugin(pInfo.QueueingParams.GatingPlugin, pInfo.QueueingParams.GatingPluginEvents)
+			return
 		}
-		return true
-	})
-	if anyGatedPodInfo != nil {
-		// Copying the gating plugin info only from a single pod is sufficient,
-		// because if the entity is a pod group, all pods should be ungated before the entire pod group can be ungated,
-		// including this pod.
-		entity.SetGatingPlugin(anyGatedPodInfo.QueueingParams.GatingPlugin, anyGatedPodInfo.QueueingParams.GatingPluginEvents)
-	} else {
-		entity.SetGatingPlugin("", nil)
 	}
+	// If no pod is gated, clear the gating plugin info from the entity.
+	entity.SetGatingPlugin("", nil)
 }
 
 func (p *PriorityQueue) runPreEnqueuePluginsForPod(ctx context.Context, pInfo *framework.QueuedPodInfo) {
@@ -950,11 +955,15 @@ func (p *PriorityQueue) addToPodGroupIfExists(logger klog.Logger, pInfo *framewo
 	}
 	rootInfo := entity.(*framework.QueuedPodGroupInfo)
 	rootInfo.AddPod(pInfo)
+	// Capture the root type and references before requeueing. Once the root is added to
+	// activeQ, it can be popped and processed before this goroutine logs the update.
+	rootType, rootRef := rootInfo.Type(), klog.KObj(rootInfo)
+	podRef := klog.KObj(pInfo)
 	queue := p.requeueEntityWithQueueingStrategy(logger, rootInfo, strategy, framework.EventUnscheduledPodAdd.Label())
 	if queue == activeQ || (p.isPopFromBackoffQEnabled && queue == backoffQ) {
 		p.activeQ.broadcast()
 	}
-	logger.V(5).Info("Pod added to existing root group info", "rootType", rootInfo.Type(), "root", klog.KObj(rootInfo), "pod", klog.KObj(pInfo), "queue", queue)
+	logger.V(5).Info("Pod added to existing root group info", "rootType", rootType, "root", rootRef, "pod", podRef, "queue", queue)
 	return true
 }
 
@@ -1426,14 +1435,14 @@ func (p *PriorityQueue) Update(ctx context.Context, oldPod, newPod *v1.Pod) {
 		// Plugins have to implement a QueueingHint for Pod/Update event
 		// if the rejection from them could be resolved by updating unscheduled Pods itself.
 		for _, evt := range events {
-			// Here, the entityRef is captured for logging, to prevent a data race that can occur in the logger below,
-			// where a pod re-queued to activeQ in requeueEntityWithQueueingStrategy is popped and processed quickly enough,
-			// so the write in its failure handler overwrites the pod object in PodInfo, which is accessed for logging.
-			entityRef := klog.KObj(entity)
+			// Capture the entity type and reference before requeueing. Once the entity is added to activeQ,
+			// it can be popped and processed before this goroutine logs the update. The scheduling cycle can
+			// then mutate fields accessed by Type and KObj.
+			entityType, entityRef := entity.Type(), klog.KObj(entity)
 			hint := p.isEntityWorthRequeuing(logger, entity, evt, oldPod, newPod, nil)
 			queue := p.requeueEntityWithQueueingStrategy(logger, entity, hint, evt.Label())
 			if queue != unschedulableQ {
-				logger.V(5).Info("Entity moved to an internal scheduling queue because the Pod is updated", "type", entity.Type(), "entity", entityRef, "pod", klog.KObj(newPod), "event", evt.Label(), "queue", queue)
+				logger.V(5).Info("Entity moved to an internal scheduling queue because the Pod is updated", "type", entityType, "entity", entityRef, "pod", klog.KObj(newPod), "event", evt.Label(), "queue", queue)
 			}
 			if queue == activeQ || (p.isPopFromBackoffQEnabled && queue == backoffQ) {
 				p.activeQ.broadcast()
@@ -1457,12 +1466,11 @@ func (p *PriorityQueue) Update(ctx context.Context, oldPod, newPod *v1.Pod) {
 // decreaseUnschedulableReasonMetric decreases the metrics for the rejector plugins
 // which are both UnschedulablePlugins and PendingPlugins.
 func decreaseUnschedulableReasonMetric(entity framework.QueuedEntityInfo) {
-	entity.ForEachPodInfo(func(pInfo *framework.QueuedPodInfo) bool {
+	for pInfo := range entity.ForEachPodInfo() {
 		for plugin := range pInfo.UnschedulablePlugins.Union(pInfo.PendingPlugins) {
 			metrics.UnschedulableReason(plugin, pInfo.Pod.Spec.SchedulerName).Dec()
 		}
-		return true
-	})
+	}
 }
 
 // Delete deletes the entity from activeQ, backoffQ or unschedulableEntities.
@@ -1848,10 +1856,9 @@ func (p *PriorityQueue) UnschedulablePods() []*v1.Pod {
 	defer p.lock.RUnlock()
 	var result []*v1.Pod
 	for _, entity := range p.unschedulableEntities.entityInfoMap {
-		entity.ForEachPodInfo(func(pInfo *framework.QueuedPodInfo) bool {
+		for pInfo := range entity.ForEachPodInfo() {
 			result = append(result, pInfo.Pod)
-			return true
-		})
+		}
 	}
 	return result
 }
@@ -1930,15 +1937,12 @@ func (p *PriorityQueue) getPod(podLookup *v1.Pod, unlockedActiveQ unlockedActive
 		}
 		return p.pendingPodGroupPods.get(podLookup)
 	}
-	var foundPodInfo *framework.QueuedPodInfo
-	entity.ForEachPodInfo(func(pInfo *framework.QueuedPodInfo) bool {
+	for pInfo := range entity.ForEachPodInfo() {
 		if pInfo.Pod.Name == podLookup.Name && pInfo.Pod.Namespace == podLookup.Namespace {
-			foundPodInfo = pInfo
-			return false
+			return pInfo
 		}
-		return true
-	})
-	return foundPodInfo
+	}
+	return nil
 }
 
 var pendingPodsSummary = "activeQ:%v; backoffQ:%v; unschedulableEntities:%v"
@@ -1957,11 +1961,10 @@ func (p *PriorityQueue) PendingPods() ([]*v1.Pod, string) {
 	result = append(result, backoffQPods...)
 	unschedulablePodsLen := 0
 	for _, entity := range p.unschedulableEntities.entityInfoMap {
-		entity.ForEachPodInfo(func(pInfo *framework.QueuedPodInfo) bool {
+		for pInfo := range entity.ForEachPodInfo() {
 			result = append(result, pInfo.Pod)
 			unschedulablePodsLen++
-			return true
-		})
+		}
 	}
 	if !p.isGenericWorkloadEnabled {
 		return result, fmt.Sprintf(pendingPodsSummary, activeQLen, backoffQLen, unschedulablePodsLen)
