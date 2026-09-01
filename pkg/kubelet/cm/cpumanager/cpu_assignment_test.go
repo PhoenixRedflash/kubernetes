@@ -430,6 +430,45 @@ func TestCPUAccumulatorFreeCPUs(t *testing.T) {
 	}
 }
 
+func TestSortAvailableUncoreCaches(t *testing.T) {
+	logger, _ := ktesting.NewTestContext(t)
+	testCases := []struct {
+		description   string
+		topo          *topology.CPUTopology
+		availableCPUs cpuset.CPUSet
+		expect        []int
+	}{
+		{
+			description:   "topology with 1 (default) uncore cache, 0 cpus reserved",
+			topo:          topoDualSocketMultiNumaPerSocketHT,
+			availableCPUs: mustParseCPUSet(t, "0-79"),
+			expect:        []int{0},
+		},
+		{
+			description:   "topology with 2 uncore caches, multi numa per uncore, 2 cpus reserved",
+			topo:          topoDualSocketSubNumaPerSocketHTMonolithicUncore,
+			availableCPUs: mustParseCPUSet(t, "1-119,121-239"), // two cpu(s) from uncore0 reserved
+			expect:        []int{0, 1},
+		},
+		{
+			description:   "topology with 24 uncore caches, single numa per uncore, 3 cpus reserved",
+			topo:          topoDualSocketSingleNumaPerSocketSMTUncore,
+			availableCPUs: mustParseCPUSet(t, "0-90,92-151,153-282,284-383"), // two cpu(s) from uncore11 and one from uncore19 reserved
+			expect:        []int{11, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 19, 12, 13, 14, 15, 16, 17, 18, 20, 21, 22, 23},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			acc := newCPUAccumulator(logger, tc.topo, tc.availableCPUs, 0, CPUSortingStrategyPacked)
+			result := acc.sortAvailableUncoreCaches()
+			if !reflect.DeepEqual(result, tc.expect) {
+				t.Errorf("expected %v to equal %v", result, tc.expect)
+			}
+		})
+	}
+}
+
 func TestCPUAccumulatorTake(t *testing.T) {
 	logger, _ := ktesting.NewTestContext(t)
 	testCases := []struct {
@@ -1073,6 +1112,37 @@ func TestTakeByTopologyNUMADistributed(t *testing.T) {
 			2,
 			"",
 			mustParseCPUSet(t, "0-7,10-16,20-27,30-37,40-47,50-56,60-67,70-77"),
+		},
+		{
+			"ensure allocation with cpuGroupSize 2 terminates when per-NUMA availability is not a multiple of the group size",
+			topoDualSocketMultiNumaPerSocketHT,
+			mustParseCPUSet(t, "0-4,10-14,20-24,30-34"),
+			14,
+			2,
+			"",
+			mustParseCPUSet(t, "0-3,10-13,20-23,30-31"),
+		},
+		{
+			// Feasible: whole-group capacity exactly covers the request, so
+			// the group accounting must not reject it.
+			"ensure allocation with cpuGroupSize 2 succeeds when whole-group capacity exactly satisfies the request",
+			topoDualSocketMultiNumaPerSocketHT,
+			mustParseCPUSet(t, "0-4,10-14,20-24,30-34"),
+			16,
+			2,
+			"",
+			mustParseCPUSet(t, "0-3,10-13,20-23,30-33"),
+		},
+		{
+			// Same fragmentation on 8 NUMA nodes with 31 CPUs free each, so
+			// the remainder search walks deeper subsets.
+			"ensure allocation with cpuGroupSize 2 terminates on 8 NUMA nodes with fragmented availability",
+			topoDualSocketMultiNumaPerSocketHTLarge,
+			mustParseCPUSet(t, "1-15,17-31,33-47,49-63,65-79,81-95,97-111,113-127,128-255"),
+			230,
+			2,
+			"",
+			mustParseCPUSet(t, "1-15,17-31,33-47,49-62,65-78,81-94,97-110,113-126,129-143,145-159,161-175,177-190,193-206,209-222,225-238,241-254"),
 		},
 		{
 			"ensure bestRemainder chosen with NUMA nodes that have enough CPUs to satisfy the request",
