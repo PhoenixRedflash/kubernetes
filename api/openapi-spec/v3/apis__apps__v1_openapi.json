@@ -2396,6 +2396,9 @@
             "description": "Will be used to create a stand-alone PVC to provision the volume. The pod in which this EphemeralVolumeSource is embedded will be the owner of the PVC, i.e. the PVC will be deleted together with the pod.  The name of the PVC will be `<pod name>-<volume name>` where `<volume name>` is the name from the `PodSpec.Volumes` array entry. Pod validation will reject the pod if the concatenated name is not valid for a PVC (for example, too long).\n\nAn existing PVC with that name that is not owned by the pod will *not* be used for the pod to avoid using an unrelated volume by mistake. Starting the pod is then blocked until the unrelated PVC is removed. If such a pre-created PVC is meant to be used by the pod, the PVC has to updated with an owner reference to the pod once the pod exists. Normally this should not be necessary, but it may be useful when manually reconstructing a broken cluster.\n\nThis field is read-only and no changes will be made by Kubernetes to the PVC after it has been created.\n\nRequired, must not be nil."
           }
         },
+        "required": [
+          "volumeClaimTemplate"
+        ],
         "type": "object"
       },
       "io.k8s.api.core.v1.EvictionResponder": {
@@ -2812,8 +2815,7 @@
         },
         "required": [
           "targetPortal",
-          "iqn",
-          "lun"
+          "iqn"
         ],
         "type": "object"
       },
@@ -2950,9 +2952,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "status"
-        ],
         "type": "object"
       },
       "io.k8s.api.core.v1.NFSVolumeSource": {
@@ -4456,7 +4455,7 @@
         "required": [
           "gateway",
           "system",
-          "secretRef"
+          "volumeName"
         ],
         "type": "object"
       },
@@ -4727,6 +4726,9 @@
             "type": "string"
           }
         },
+        "required": [
+          "volumeName"
+        ],
         "type": "object"
       },
       "io.k8s.api.core.v1.Sysctl": {
@@ -5428,7 +5430,7 @@
         "type": "object"
       },
       "io.k8s.apimachinery.pkg.api.resource.Quantity": {
-        "description": "Quantity is a fixed-point representation of a number. It provides convenient marshaling/unmarshaling in JSON and YAML, in addition to String() and AsInt64() accessors.\n\nThe serialization format is:\n\n\t<quantity>        ::= <signedNumber><suffix>\n\t    (Note that <suffix> may be empty, from the \"\" case in <decimalSI>.)\n\t<digit>           ::= 0 | 1 | ... | 9\n\t<digits>          ::= <digit> | <digit><digits>\n\t<number>          ::= <digits> | <digits>.<digits> | <digits>. | .<digits>\n\t<sign>            ::= \"+\" | \"-\"\n\t<signedNumber>    ::= <number> | <sign><number>\n\t<suffix>          ::= <binarySI> | <decimalExponent> | <decimalSI>\n\t<binarySI>        ::= Ki | Mi | Gi | Ti | Pi | Ei\n\t    (International System of units; See: http://physics.nist.gov/cuu/Units/binary.html)\n\t<decimalSI>       ::= n | u | m | \"\" | k | M | G | T | P | E\n\t    (Note that 1024 = 1Ki but 1000 = 1k; I didn't choose the capitalization.)\n\t<decimalExponent> ::= \"e\" <signedNumber> | \"E\" <signedNumber>\n\nA decimal quantity is not capped at 2^63-1 in magnitude, and no quantity is limited to three decimal places: \"18446744073709551616\" keeps its value, and \"1.2345\" keeps its precision (String reports it as \"1234500u\"). Parsing does cap a binarySI quantity, silently, at 2^63-1: \"8Ei\" parses as 2^63-1. Parsing also preserves a value only down to nano, rounding a finer non-zero value away from zero, so \"0.9n\" becomes \"1n\". The int64 accessors round and may overflow on top of that: see Value, MilliValue and ScaledValue.\n\nWhen a Quantity is parsed from a string, it will remember the type of suffix it had, and will use the same type again when it is serialized.\n\nBefore serializing, Quantity will be put in \"canonical form\". This means that Exponent/suffix will be adjusted up or down (with a corresponding increase or decrease in Mantissa) such that:\n\n  - No precision is lost\n  - No fractional digits will be emitted\n  - The exponent (or suffix) is as large as possible.\n\nThe sign will be omitted unless the number is negative.\n\nExamples:\n\n  - 1.5 will be serialized as \"1500m\"\n  - 1.5Gi will be serialized as \"1536Mi\"\n\nNote that the quantity will NEVER be internally represented by a floating point number. That is the whole point of this exercise.\n\nNon-canonical values will still parse as long as they are well formed, but will be re-emitted in their canonical form. (So always use canonical form, or don't diff.)\n\nThis format is intended to make it difficult to use these numbers without writing some sort of special handling code in the hopes that that will cause implementors to also use a fixed point implementation.",
+        "description": "Quantity is a fixed-point representation of a number. It provides convenient marshaling/unmarshaling in JSON and YAML, in addition to String() and AsInt64() accessors.\n\nThe serialization format is:\n\n\t<quantity>        ::= <signedNumber><suffix>\n\t    (Note that <suffix> may be empty, from the \"\" case in <decimalSI>.)\n\t<digit>           ::= 0 | 1 | ... | 9\n\t<digits>          ::= <digit> | <digit><digits>\n\t<number>          ::= <digits> | <digits>.<digits> | <digits>. | .<digits>\n\t<sign>            ::= \"+\" | \"-\"\n\t<signedNumber>    ::= <number> | <sign><number>\n\t<signedDigits>    ::= <digits> | <sign><digits>\n\t<suffix>          ::= <binarySI> | <decimalExponent> | <decimalSI>\n\t<binarySI>        ::= Ki | Mi | Gi | Ti | Pi | Ei\n\t    (International System of units; See: http://physics.nist.gov/cuu/Units/binary.html)\n\t<decimalSI>       ::= n | u | m | \"\" | k | M | G | T | P | E\n\t    (Note that 1024 = 1Ki but 1000 = 1k; I didn't choose the capitalization.)\n\t<decimalExponent> ::= \"e\" <signedDigits> | \"E\" <signedDigits>\n\nA decimal quantity is not capped at 2^63-1 in magnitude, and no quantity is limited to three decimal places: \"18446744073709551616\" keeps its value, and \"1.2345\" keeps its precision (String reports it as \"1234500u\"). Parsing does cap a binarySI quantity, silently, at 2^63-1: \"8Ei\" parses as 2^63-1. Parsing also preserves a value only down to nano, rounding a finer non-zero value away from zero, so \"0.9n\" becomes \"1n\". The int64 accessors round and may overflow on top of that: see Value, MilliValue and ScaledValue.\n\nWhen a Quantity is parsed from a string, it will remember the type of suffix it had, and will use the same type again when it is serialized.\n\nBefore serializing, Quantity will be put in \"canonical form\". This means that Exponent/suffix will be adjusted up or down (with a corresponding increase or decrease in Mantissa) such that:\n\n  - No precision is lost\n  - No fractional digits will be emitted\n  - The exponent (or suffix) is as large as possible.\n\nThe sign will be omitted unless the number is negative.\n\nExamples:\n\n  - 1.5 will be serialized as \"1500m\"\n  - 1.5Gi will be serialized as \"1536Mi\"\n\nNote that the quantity will NEVER be internally represented by a floating point number. That is the whole point of this exercise.\n\nNon-canonical values will still parse as long as they are well formed, but will be re-emitted in their canonical form. (So always use canonical form, or don't diff.)\n\nThis format is intended to make it difficult to use these numbers without writing some sort of special handling code in the hopes that that will cause implementors to also use a fixed point implementation.",
         "oneOf": [
           {
             "type": "string"
