@@ -291,10 +291,13 @@ func ParseQuantity(str string) (Quantity, error) {
 	precision := int32(0)
 	scale := int32(0)
 	mantissa := int64(1)
+	forceRecanonicalize := false
 	switch format {
 	case DecimalExponent, DecimalSI:
 		scale = exponent
 		precision = maxInt64Factors - int32(len(num)+len(denom))
+		// preserves compatibility with recanonicalizing integers >18 digits long, even if they are in int64 range
+		forceRecanonicalize = precision <= 0
 	case BinarySI:
 		scale = 0
 		switch {
@@ -315,27 +318,40 @@ func ParseQuantity(str string) (Quantity, error) {
 		if scale >= int32(Nano) {
 			shifted := num + denom
 
-			var value int64
-			value, err := strconv.ParseInt(shifted, 10, 64)
-			if err != nil {
-				return Quantity{}, ErrNumeric
-			}
-			if result, ok := int64Multiply(value, int64(mantissa)); ok {
-				if !positive {
-					result = -result
+			uvalue, err := strconv.ParseUint(shifted, 10, 64)
+			if err == nil {
+				var value int64
+				signApplied := false
+				inRange := false
+				if uvalue <= math.MaxInt64 {
+					// fits in positive int64 range
+					value = int64(uvalue)
+					inRange = true
+				} else if !positive && uvalue == uint64(math.MaxInt64)+1 {
+					// special case: absolute value of math.MinInt64
+					value = math.MinInt64 // already negative, skip negation later
+					signApplied = true
+					inRange = true
 				}
-				// if the number is in canonical form, reuse the string
-				switch format {
-				case BinarySI:
-					if exponent%10 == 0 && (value&0x07 != 0) {
-						return Quantity{i: int64Amount{value: result, scale: Scale(scale)}, Format: format, s: str}, nil
-					}
-				default:
-					if scale%3 == 0 && !strings.HasSuffix(shifted, "000") && shifted[0] != '0' {
-						return Quantity{i: int64Amount{value: result, scale: Scale(scale)}, Format: format, s: str}, nil
+				if inRange {
+					if result, ok := int64Multiply(value, int64(mantissa)); ok {
+						if !positive && !signApplied {
+							result = -result
+						}
+						// if the number is in canonical form, reuse the string
+						switch format {
+						case BinarySI:
+							if !forceRecanonicalize && exponent%10 == 0 && (value&0x07 != 0) {
+								return Quantity{i: int64Amount{value: result, scale: Scale(scale)}, Format: format, s: str}, nil
+							}
+						default:
+							if !forceRecanonicalize && scale%3 == 0 && !strings.HasSuffix(shifted, "000") && shifted[0] != '0' {
+								return Quantity{i: int64Amount{value: result, scale: Scale(scale)}, Format: format, s: str}, nil
+							}
+						}
+						return Quantity{i: int64Amount{value: result, scale: Scale(scale)}, Format: format}, nil
 					}
 				}
-				return Quantity{i: int64Amount{value: result, scale: Scale(scale)}, Format: format}, nil
 			}
 		}
 	}
@@ -838,35 +854,47 @@ func NewScaledQuantity(value int64, scale Scale) *Quantity {
 	}
 }
 
-// Value returns the unscaled value of q rounded up to the nearest integer away
-// from 0. This silently overflows an int64 for a quantity larger than MaxInt64;
-// an overflowed result is undefined and must not be used. To avoid overflow,
-// compare q against a bound with Quantity.Cmp before converting.
+// Value returns the value of q rounded to an integer, away from zero. It
+// saturates to math.MinInt64 or math.MaxInt64 when the value does not fit;
+// call AsScaledInt64 to detect that.
 func (q *Quantity) Value() int64 {
-	return q.ScaledValue(0)
+	value, _ := q.AsScaledInt64(0)
+	return value
 }
 
-// MilliValue returns the value of ceil(q * 1000). This silently overflows an
-// int64 for a large enough q; an overflowed result is undefined and must not be
-// used. To avoid overflow for a non-negative q, compare q against
-// MaxMilliQuantity() with Quantity.Cmp before converting.
+// MilliValue returns the value of q*1000 rounded to an integer, away from zero.
+// It saturates like Value; call AsMilliInt64 to detect overflow.
 func (q *Quantity) MilliValue() int64 {
-	return q.ScaledValue(Milli)
+	value, _ := q.AsMilliInt64()
+	return value
 }
 
-// ScaledValue returns the value of ceil(q / 10^scale).
-// For example, NewQuantity(1, DecimalSI).ScaledValue(Milli) returns 1000.
-// This silently overflows an int64 for a large enough q; an overflowed result is
-// undefined and must not be used. To avoid overflow for a non-negative q at the
-// milli scale, compare q against MaxMilliQuantity() with Quantity.Cmp before
-// converting.
+// ScaledValue returns the value of q/10^scale rounded to an integer, away from
+// zero. It saturates like Value; call AsScaledInt64 to detect overflow.
 func (q *Quantity) ScaledValue(scale Scale) int64 {
+	value, _ := q.AsScaledInt64(scale)
+	return value
+}
+
+// AsScaledInt64 returns the value of q/10^scale as an int64, rounded away from
+// zero. ok is false when the value overflows int64, and then value saturates to
+// math.MinInt64 or math.MaxInt64. The int64 and inf.Dec backends agree for
+// values both can represent; a source scale near the int32 minimum is not
+// representable in inf.Dec, so calling q.ToDec() first can differ there.
+func (q *Quantity) AsScaledInt64(scale Scale) (value int64, ok bool) {
 	if q.d.Dec == nil {
-		i, _ := q.i.AsScaledInt64(scale)
-		return i
+		return q.i.AsScaledInt64(scale)
 	}
 	dec := q.d.Dec
-	return scaledValue(dec.UnscaledBig(), int(dec.Scale()), int(scale.infScale()))
+	// Negate after widening: inf.Scale(-math.MinInt32) overflows back to itself.
+	return scaledValue(dec.UnscaledBig(), int64(dec.Scale()), -int64(scale))
+}
+
+// AsMilliInt64 returns the value of q*1000 as an int64, rounded away from zero.
+// ok is false when the value overflows int64, and then value saturates as
+// AsScaledInt64 describes.
+func (q *Quantity) AsMilliInt64() (value int64, ok bool) {
+	return q.AsScaledInt64(Milli)
 }
 
 // Set sets q's value to be value.
