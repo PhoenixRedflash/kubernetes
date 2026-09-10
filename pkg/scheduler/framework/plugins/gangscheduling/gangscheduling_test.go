@@ -1070,7 +1070,7 @@ func TestPlacementFeasible(t *testing.T) {
 					pl.snapshotLister = mockLister
 
 					cycleState := schedulerframework.NewCycleState()
-					cycleState.SetPodGroupSchedulingCycle(cycleState)
+					cycleState.SetPodGroupCycleState(cycleState)
 
 					scheduled := tc.initialScheduledCount
 					for i, code := range tc.podStatuses {
@@ -1079,7 +1079,7 @@ func TestPlacementFeasible(t *testing.T) {
 							mockState.scheduledPodsCount++
 						}
 
-						args := schedulerframework.PlacementProgress{
+						args := fwk.PlacementProgress{
 							Remaining: tc.childrenCount - (i + 1),
 							Scheduled: scheduled,
 						}
