@@ -62153,21 +62153,21 @@ func schema_k8sio_api_storagemigration_v1_StorageVersionMigration(ref common.Ref
 					},
 					"metadata": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Standard object metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
+							Description: "metadata is the standard object metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
 							Default:     map[string]interface{}{},
 							Ref:         ref(metav1.ObjectMeta{}.OpenAPIModelName()),
 						},
 					},
 					"spec": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Specification of the migration.",
+							Description: "spec is the specification of the migration.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(storagemigrationv1.StorageVersionMigrationSpec{}.OpenAPIModelName()),
 						},
 					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Status of the migration.",
+							Description: "status is the status of the migration.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(storagemigrationv1.StorageVersionMigrationStatus{}.OpenAPIModelName()),
 						},
@@ -62240,7 +62240,7 @@ func schema_k8sio_api_storagemigration_v1_StorageVersionMigrationSpec(ref common
 				Properties: map[string]spec.Schema{
 					"resource": {
 						SchemaProps: spec.SchemaProps{
-							Description: "The resource that is being migrated. The migrator sends requests to the endpoint serving the resource. Immutable.",
+							Description: "resource is the resource that is being migrated. The migrator sends requests to the endpoint serving the resource. Immutable.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(metav1.GroupResource{}.OpenAPIModelName()),
 						},
@@ -62273,7 +62273,7 @@ func schema_k8sio_api_storagemigration_v1_StorageVersionMigrationStatus(ref comm
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "The latest available observations of the migration's current state.",
+							Description: "conditions is the latest available observations of the migration's current state.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -62286,7 +62286,7 @@ func schema_k8sio_api_storagemigration_v1_StorageVersionMigrationStatus(ref comm
 					},
 					"resourceVersion": {
 						SchemaProps: spec.SchemaProps{
-							Description: "ResourceVersion to compare with the GC cache for performing the migration. This is the current resource version of given group, version and resource when kube-controller-manager first observes this StorageVersionMigration resource.",
+							Description: "resourceVersion is the resource version to compare with the GC cache for performing the migration. This is the current resource version of given group, version and resource when kube-controller-manager first observes this StorageVersionMigration resource.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -62322,21 +62322,21 @@ func schema_k8sio_api_storagemigration_v1beta1_StorageVersionMigration(ref commo
 					},
 					"metadata": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Standard object metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
+							Description: "metadata is the standard object metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
 							Default:     map[string]interface{}{},
 							Ref:         ref(metav1.ObjectMeta{}.OpenAPIModelName()),
 						},
 					},
 					"spec": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Specification of the migration.",
+							Description: "spec is the specification of the migration.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(storagemigrationv1beta1.StorageVersionMigrationSpec{}.OpenAPIModelName()),
 						},
 					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Status of the migration.",
+							Description: "status is the status of the migration.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(storagemigrationv1beta1.StorageVersionMigrationStatus{}.OpenAPIModelName()),
 						},
@@ -62409,7 +62409,7 @@ func schema_k8sio_api_storagemigration_v1beta1_StorageVersionMigrationSpec(ref c
 				Properties: map[string]spec.Schema{
 					"resource": {
 						SchemaProps: spec.SchemaProps{
-							Description: "The resource that is being migrated. The migrator sends requests to the endpoint serving the resource. Immutable.",
+							Description: "resource is the resource that is being migrated. The migrator sends requests to the endpoint serving the resource. Immutable.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(metav1.GroupResource{}.OpenAPIModelName()),
 						},
@@ -62442,7 +62442,7 @@ func schema_k8sio_api_storagemigration_v1beta1_StorageVersionMigrationStatus(ref
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "The latest available observations of the migration's current state.",
+							Description: "conditions is the latest available observations of the migration's current state.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -62455,7 +62455,7 @@ func schema_k8sio_api_storagemigration_v1beta1_StorageVersionMigrationStatus(ref
 					},
 					"resourceVersion": {
 						SchemaProps: spec.SchemaProps{
-							Description: "ResourceVersion to compare with the GC cache for performing the migration. This is the current resource version of given group, version and resource when kube-controller-manager first observes this StorageVersionMigration resource.",
+							Description: "resourceVersion is the resource version to compare with the GC cache for performing the migration. This is the current resource version of given group, version and resource when kube-controller-manager first observes this StorageVersionMigration resource.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -76095,6 +76095,20 @@ func schema_k8sio_kubelet_config_v1beta1_KubeletConfiguration(ref common.Referen
 						SchemaProps: spec.SchemaProps{
 							Description: "serverTLSBootstrap enables server certificate bootstrap. Instead of self signing a serving certificate, the Kubelet will request a certificate from the 'certificates.k8s.io' API. This requires an approver to approve the certificate signing requests (CSR). The RotateKubeletServerCertificate feature must be enabled when setting this field. Default: false",
 							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"clientCertificateKeyAlgorithm": {
+						SchemaProps: spec.SchemaProps{
+							Description: "clientCertificateKeyAlgorithm specifies the key algorithm to use when generating client certificate signing requests during certificate rotation. This field only takes effect when rotateCertificates is true. It controls keys generated for initial and renewal CSRs; it does not alter supplied static credentials. Note: ML-DSA algorithms require TLS 1.3 and peers that support the selected signature algorithm. Go rejects ML-DSA certificates under TLS 1.2. Valid values are: \"ECDSA-P256\", \"ECDSA-P384\", \"RSA-2048\", \"RSA-3072\", \"RSA-4096\", \"ML-DSA-44\", \"ML-DSA-65\", \"ML-DSA-87\". When omitted, defaults to \"ECDSA-P256\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"serverCertificateKeyAlgorithm": {
+						SchemaProps: spec.SchemaProps{
+							Description: "serverCertificateKeyAlgorithm specifies the key algorithm to use when generating server certificate signing requests during certificate rotation. This field only takes effect when serverTLSBootstrap is true. It is not used for self-signed serving certificates. Changing this value does not immediately replace an existing certificate; the new algorithm takes effect at the next certificate renewal. Note: ML-DSA algorithms require TLS 1.3 and peers that support the selected signature algorithm. Go rejects ML-DSA certificates under TLS 1.2. Valid values are: \"ECDSA-P256\", \"ECDSA-P384\", \"RSA-2048\", \"RSA-3072\", \"RSA-4096\", \"ML-DSA-44\", \"ML-DSA-65\", \"ML-DSA-87\". When omitted, defaults to \"ECDSA-P256\".",
+							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
