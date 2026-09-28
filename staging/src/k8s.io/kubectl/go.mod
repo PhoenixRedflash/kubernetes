@@ -8,7 +8,7 @@ godebug default=go1.27
 
 require (
 	github.com/MakeNowJust/heredoc v1.0.0
-	github.com/chai2010/gettext-go v1.0.2
+	github.com/chai2010/gettext-go v1.0.3
 	github.com/distribution/reference v0.6.0
 	github.com/exponent-io/jsonpath v0.0.0-20210407135951-1de76d718b3f
 	github.com/fatih/camelcase v1.0.0
@@ -21,7 +21,7 @@ require (
 	github.com/mitchellh/go-wordwrap v1.0.1
 	github.com/moby/term v0.5.2
 	github.com/onsi/ginkgo/v2 v2.33.0
-	github.com/onsi/gomega v1.43.1
+	github.com/onsi/gomega v1.44.0
 	github.com/russross/blackfriday/v2 v2.1.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
@@ -82,7 +82,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
-	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
+	github.com/peterbourgon/diskv/v3 v3.0.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xlab/treeprint v1.2.0 // indirect
